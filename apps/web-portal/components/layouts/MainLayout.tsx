@@ -1,18 +1,34 @@
 "use client";
 
 import React from "react";
-import { Building, Home, Settings } from "lucide-react";
+import { 
+  Building, Home, Settings, Wrench, Zap, Clipboard, 
+  Calendar, Upload, BarChart3, Lock 
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: Home },
-  { href: "/locations", label: "Locations", icon: Building },
-  { href: "/floor-plans", label: "Floor Plans", icon: Building },
-  { href: "/bim-viewer", label: "3D BIM Viewer", icon: Settings },
-  { href: "/equipment", label: "Equipment Registry", icon: Settings },
-  { href: "/desk-reservations", label: "Desk Reservations", icon: Settings },
+  { section: "Workspace", items: [
+    { href: "/locations", label: "Locations", icon: Building },
+    { href: "/floor-plans", label: "Floor Plans", icon: Building },
+    { href: "/bim-viewer", label: "3D BIM Viewer", icon: Settings },
+    { href: "/equipment", label: "Equipment Registry", icon: Settings },
+    { href: "/desk-reservations", label: "Desk Reservations", icon: Settings },
+  ]},
+  { section: "Operations", items: [
+    { href: "/work-requests", label: "Work Requests", icon: Wrench },
+    { href: "/smart-pm", label: "SmartPM", icon: Zap },
+    { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
+    { href: "/scheduler", label: "Scheduler", icon: Calendar },
+  ]},
+  { section: "Administration", items: [
+    { href: "/import-export", label: "Import/Export", icon: Upload },
+    { href: "/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/admin/rbac", label: "RBAC Settings", icon: Lock },
+  ]},
 ];
 
 export function Sidebar() {
@@ -25,23 +41,50 @@ export function Sidebar() {
         <p className="text-gray-400 text-sm mt-1">Enterprise Edition</p>
       </div>
 
-      <nav className="px-3 py-4 space-y-1">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname === href || pathname.startsWith(href + "/");
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                isActive
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-300 hover:bg-gray-800"
-              }`}
-            >
-              <Icon size={20} />
-              <span className="text-sm font-medium">{label}</span>
-            </Link>
-          );
+      <nav className="px-3 py-4 space-y-6">
+        {/* Dashboard */}
+        <Link
+          href="/"
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+            pathname === "/"
+              ? "bg-blue-600 text-white"
+              : "text-gray-300 hover:bg-gray-800"
+          }`}
+        >
+          <Home size={20} />
+          <span className="text-sm font-medium">Dashboard</span>
+        </Link>
+
+        {/* Sections */}
+        {NAV_ITEMS.map((item) => {
+          if ("section" in item && item.section) {
+            return (
+              <div key={item.section} className="space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase px-4">
+                  {item.section}
+                </p>
+                <div className="space-y-1">
+                  {item.items.map(({ href, label, icon: Icon }) => {
+                    const isActive = pathname === href || pathname.startsWith(href + "/");
+                    return (
+                      <Link
+                        key={href}
+                        href={href}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${
+                          isActive
+                            ? "bg-blue-600 text-white"
+                            : "text-gray-300 hover:bg-gray-800"
+                        }`}
+                      >
+                        <Icon size={18} />
+                        <span className="font-medium">{label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
         })}
       </nav>
 
