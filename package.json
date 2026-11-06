@@ -1,0 +1,9 @@
+﻿{
+  "name": "cafm-enterprise-platform",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/functions-core"
+  ]
+}

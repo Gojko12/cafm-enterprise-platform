@@ -1,0 +1,139 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "floors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bl_id", "order": "ASCENDING" },
+        { "fieldPath": "FloorNumber", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rooms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bl_id", "order": "ASCENDING" },
+        { "fieldPath": "LevelName", "order": "ASCENDING" },
+        { "fieldPath": "RoomCode", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "equipment",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bl_id", "order": "ASCENDING" },
+        { "fieldPath": "LevelName", "order": "ASCENDING" },
+        { "fieldPath": "RoomCode", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "equipment",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "PrimaryTradeId", "order": "ASCENDING" },
+        { "fieldPath": "Status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bl_id", "order": "ASCENDING" },
+        { "fieldPath": "LevelName", "order": "ASCENDING" },
+        { "fieldPath": "RoomCode", "order": "ASCENDING" },
+        { "fieldPath": "Percentage", "order": "ASCENDING" },
+        { "fieldPath": "DueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "WR_Type", "order": "ASCENDING" },
+        { "fieldPath": "WorkRequestStatus", "order": "ASCENDING" },
+        { "fieldPath": "DueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "PM_CycleKey", "order": "ASCENDING" },
+        { "fieldPath": "WR_Type", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "EquipmentCodes", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "Percentage", "order": "ASCENDING" },
+        { "fieldPath": "DueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "AssignedUserIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "WorkRequestStatus", "order": "ASCENDING" },
+        { "fieldPath": "DueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pmSchedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "EquipmentCodes", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "IsActive", "order": "ASCENDING" },
+        { "fieldPath": "NextDueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pmSchedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bl_id", "order": "ASCENDING" },
+        { "fieldPath": "LevelName", "order": "ASCENDING" },
+        { "fieldPath": "RoomCode", "order": "ASCENDING" },
+        { "fieldPath": "IsActive", "order": "ASCENDING" },
+        { "fieldPath": "NextDueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "CraftpersonId", "order": "ASCENDING" },
+        { "fieldPath": "StartedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "technicalAudits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "QA_InspectedBy", "order": "ASCENDING" },
+        { "fieldPath": "InspectedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deskReservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "DeskId", "order": "ASCENDING" },
+        { "fieldPath": "Status", "order": "ASCENDING" },
+        { "fieldPath": "StartAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deskReservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ReservedBy", "order": "ASCENDING" },
+        { "fieldPath": "StartAt", "order": "ASCENDING" },
+        { "fieldPath": "EndAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

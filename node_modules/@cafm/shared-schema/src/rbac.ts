@@ -1,0 +1,135 @@
+import { z } from "zod";
+
+export const UserRole = z.enum([
+  "SiteAdministrator",
+  "ESA_LongJobManager",
+  "PM_Planner",
+  "QA_Inspector",
+  "MobileTechnician",
+  "StandardEmployee",
+]);
+
+export type UserRole = z.infer<typeof UserRole>;
+
+export const Permission = z.enum([
+  "system.configure",
+  "users.manageRoles",
+  "data.importExport",
+  "locations.read",
+  "locations.write",
+  "equipment.read",
+  "equipment.write",
+  "trades.write",
+  "workRequests.readAll",
+  "workRequests.readAssigned",
+  "workRequests.create",
+  "workRequests.update",
+  "workRequests.updateAssigned",
+  "workRequests.assign",
+  "workRequests.manageFreezes",
+  "workRequests.approve",
+  "pmSchedules.read",
+  "pmSchedules.write",
+  "pmSchedules.generate",
+  "checklists.execute",
+  "checklists.manage",
+  "workSessions.manageOwn",
+  "technicalAudits.read",
+  "technicalAudits.write",
+  "deskReservations.manageOwn",
+  "deskReservations.manageAll",
+  "analytics.read",
+]);
+
+export type Permission = z.infer<typeof Permission>;
+
+export const ROLE_PERMISSIONS = {
+  SiteAdministrator: [
+    "system.configure",
+    "users.manageRoles",
+    "data.importExport",
+    "locations.read",
+    "locations.write",
+    "equipment.read",
+    "equipment.write",
+    "trades.write",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "workRequests.manageFreezes",
+    "workRequests.approve",
+    "pmSchedules.read",
+    "pmSchedules.write",
+    "pmSchedules.generate",
+    "checklists.execute",
+    "checklists.manage",
+    "workSessions.manageOwn",
+    "technicalAudits.read",
+    "technicalAudits.write",
+    "deskReservations.manageOwn",
+    "deskReservations.manageAll",
+    "analytics.read",
+  ],
+  ESA_LongJobManager: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "workRequests.manageFreezes",
+    "workRequests.approve",
+    "pmSchedules.read",
+    "pmSchedules.write",
+    "pmSchedules.generate",
+    "checklists.execute",
+    "technicalAudits.read",
+    "analytics.read",
+  ],
+  PM_Planner: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "pmSchedules.read",
+    "pmSchedules.write",
+    "pmSchedules.generate",
+    "checklists.execute",
+    "analytics.read",
+  ],
+  QA_Inspector: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "technicalAudits.read",
+    "technicalAudits.write",
+  ],
+  MobileTechnician: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAssigned",
+    "workRequests.create",
+    "workRequests.updateAssigned",
+    "checklists.execute",
+    "workSessions.manageOwn",
+    "technicalAudits.write",
+    "deskReservations.manageOwn",
+  ],
+  StandardEmployee: [
+    "locations.read",
+    "deskReservations.manageOwn",
+    "workRequests.create",
+  ],
+} as const satisfies Record<UserRole, readonly Permission[]>;
+
+export const RolePermissionMatrixSchema = z.record(
+  UserRole,
+  z.array(Permission),
+);
+
+export function hasPermission(role: UserRole, permission: Permission): boolean {
+  return ROLE_PERMISSIONS[role].some((assignedPermission) => assignedPermission === permission);
+}

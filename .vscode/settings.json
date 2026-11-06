@@ -1,0 +1,9 @@
+﻿{
+  "terminal.integrated.env.windows": {
+    "GCLOUD_PROJECT": "cafm-enterprise-dev",
+    "FIREBASE_PROJECT": "cafm-enterprise-dev"
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/services/cad-bim-parser/.venv/Scripts/python.exe",
+  "chat.useAgentsMdFile": true,
+  "chat.includeApplyingInstructions": true
+}

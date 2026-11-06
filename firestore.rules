@@ -1,0 +1,219 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasRole(role) {
+      return signedIn() && request.auth.token.role == role;
+    }
+
+    function hasAnyRole(roles) {
+      return signedIn() && request.auth.token.role in roles;
+    }
+
+    function isAdmin() {
+      return hasRole('SiteAdministrator');
+    }
+
+    function isMaintenanceManager() {
+      return hasAnyRole(['SiteAdministrator', 'ESA_LongJobManager', 'PM_Planner']);
+    }
+
+    function canReadAllWorkRequests() {
+      return hasAnyRole([
+        'SiteAdministrator',
+        'ESA_LongJobManager',
+        'PM_Planner',
+        'QA_Inspector'
+      ]);
+    }
+
+    function ownsResource() {
+      return signedIn() &&
+        (resource.data.ReservedBy == request.auth.uid ||
+         resource.data.UserId == request.auth.uid);
+    }
+
+    function createsOwnResource() {
+      return signedIn() &&
+        (request.resource.data.ReservedBy == request.auth.uid ||
+         request.resource.data.UserId == request.auth.uid);
+    }
+
+    match /buildings/{buildingId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /floors/{floorId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /equipment/{equipmentCode} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /trades/{tradeId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /workRequests/{workRequestId} {
+      allow read: if canReadAllWorkRequests() ||
+        (signedIn() && resource.data.CreatedBy == request.auth.uid) ||
+        (hasRole('MobileTechnician') &&
+         request.auth.uid in resource.data.AssignedUserIds);
+      allow create: if
+        (isMaintenanceManager() &&
+         request.resource.data.WR_Type in ['PM', 'LJ', 'FJ']) ||
+        (hasRole('MobileTechnician') &&
+         request.resource.data.WR_Type == 'FJ' &&
+         request.resource.data.CreatedBy == request.auth.uid) ||
+        (hasRole('StandardEmployee') &&
+         request.resource.data.WR_Type == 'FJ' &&
+         request.resource.data.CreatedBy == request.auth.uid);
+      allow update: if isAdmin() ||
+        (hasAnyRole(['ESA_LongJobManager', 'PM_Planner']) &&
+         request.resource.data.WR_ID == resource.data.WR_ID) ||
+        (hasRole('MobileTechnician') &&
+         request.auth.uid in resource.data.AssignedUserIds &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'TotalTimeMinutes',
+           'WorkRequestStatus',
+           'WorkRequestSubstatus',
+           'Percentage',
+           'UpdatedAt'
+         ]) &&
+         request.resource.data.Percentage == 78 &&
+         request.resource.data.WorkRequestStatus == 'Technically Completed' &&
+         request.resource.data.WorkRequestSubstatus == 'Technically Completed' &&
+         request.resource.data.Percentage > resource.data.Percentage);
+      allow delete: if isAdmin();
+    }
+
+    match /pmSchedules/{scheduleId} {
+      allow read: if hasAnyRole([
+        'SiteAdministrator',
+        'ESA_LongJobManager',
+        'PM_Planner',
+        'QA_Inspector',
+        'MobileTechnician'
+      ]);
+      allow write: if isMaintenanceManager();
+    }
+
+    match /pmChecklistStandards/{checklistCode} {
+      allow read: if signedIn();
+      allow write: if isMaintenanceManager();
+    }
+
+    match /pmWorkRequestSteps/{stepId} {
+      allow read: if signedIn();
+      allow create, update: if hasAnyRole([
+        'SiteAdministrator',
+        'ESA_LongJobManager',
+        'PM_Planner',
+        'MobileTechnician'
+      ]);
+      allow delete: if isAdmin();
+    }
+
+    match /pmStepOptions/{optionId} {
+      allow read: if signedIn();
+      allow write: if isMaintenanceManager();
+    }
+
+    match /pmStepPhotos/{photoId} {
+      allow read: if signedIn();
+      allow create: if hasAnyRole([
+        'SiteAdministrator',
+        'ESA_LongJobManager',
+        'PM_Planner',
+        'MobileTechnician',
+        'QA_Inspector'
+      ]);
+      allow update, delete: if isAdmin();
+    }
+
+    match /pmStepAuditLogs/{auditLogId} {
+      allow read: if isMaintenanceManager() || hasRole('QA_Inspector');
+      allow create: if hasAnyRole([
+        'SiteAdministrator',
+        'ESA_LongJobManager',
+        'PM_Planner',
+        'MobileTechnician'
+      ]);
+      allow update, delete: if false;
+    }
+
+    match /workSessions/{sessionId} {
+      allow read: if isMaintenanceManager() || ownsResource();
+      allow create: if hasRole('MobileTechnician') && createsOwnResource();
+      allow update: if isAdmin() ||
+        (hasRole('MobileTechnician') && ownsResource() &&
+         request.resource.data.UserId == resource.data.UserId &&
+         request.resource.data.WorkSessionId == resource.data.WorkSessionId &&
+         request.resource.data.CraftpersonId == resource.data.CraftpersonId &&
+         request.resource.data.WR_ID == resource.data.WR_ID);
+      allow delete: if isAdmin();
+    }
+
+    match /technicalAudits/{auditId} {
+      allow read: if isAdmin() || hasRole('QA_Inspector');
+      allow create: if hasAnyRole(['SiteAdministrator', 'QA_Inspector', 'MobileTechnician']);
+      allow update: if isAdmin() ||
+        (hasRole('QA_Inspector') &&
+         request.resource.data.TechnicalAuditId == resource.data.TechnicalAuditId);
+      allow delete: if isAdmin();
+    }
+
+    match /craftpeople/{craftpersonId} {
+      allow read: if isAdmin() || isMaintenanceManager() ||
+        (signedIn() && resource.data.UserId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /employeeProfiles/{employeeProfileId} {
+      allow read: if isAdmin() || isMaintenanceManager() ||
+        (signedIn() && resource.data.UserId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /deskReservations/{reservationId} {
+      allow read: if isAdmin() || ownsResource() ||
+        hasAnyRole(['ESA_LongJobManager', 'PM_Planner']);
+      allow create: if hasAnyRole(['SiteAdministrator', 'MobileTechnician', 'StandardEmployee']) &&
+        createsOwnResource();
+      allow update: if isAdmin() ||
+        (signedIn() && resource.data.ReservedBy == request.auth.uid &&
+         request.resource.data.ReservedBy == resource.data.ReservedBy &&
+         request.resource.data.DeskId == resource.data.DeskId);
+      allow delete: if isAdmin() ||
+        (signedIn() && resource.data.ReservedBy == request.auth.uid);
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create: if isAdmin() ||
+        (signedIn() && request.auth.uid == userId &&
+         !request.resource.data.keys().hasAny(['role', 'roles']));
+      allow update: if isAdmin() ||
+        (signedIn() && request.auth.uid == userId &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles']));
+      allow delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
