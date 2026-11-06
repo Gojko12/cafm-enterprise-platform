@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+
+.page-transition {
+  @apply transition-opacity duration-200;
+}
+
+/* SVG/Canvas floor plan styling */
+.floor-plan-viewport {
+  @apply border border-gray-300 bg-white rounded-lg overflow-hidden;
+}
+
+.room-polygon {
+  @apply cursor-pointer transition-all duration-150;
+}
+
+.room-polygon:hover {
+  @apply opacity-80;
+}
+
+/* 3D viewport container */
+.bim-viewer-container {
+  @apply w-full h-full bg-gray-900 relative;
+}
+
+/* Equipment table styling */
+.equipment-table-header {
+  @apply bg-gray-100 border-b border-gray-300;
+}
+
+/* Role switcher badge */
+.role-badge {
+  @apply inline-block px-3 py-1 rounded-full text-xs font-semibold;
+}
+
+.role-badge-admin {
+  @apply bg-red-100 text-red-800;
+}
+
+.role-badge-manager {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.role-badge-technician {
+  @apply bg-emerald-100 text-emerald-800;
+}
+
+/* Desk status colors */
+.desk-free {
+  @apply bg-emerald-400;
+}
+
+.desk-occupied {
+  @apply bg-red-400;
+}
+
+.desk-permanent {
+  @apply bg-gray-400;
+}
+
+/* Work request status badges */
+.wr-status-issued {
+  @apply bg-yellow-100 text-yellow-800;
+}
+
+.wr-status-in-progress {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.wr-status-completed {
+  @apply bg-emerald-100 text-emerald-800;
+}
+
+.wr-status-overdue {
+  @apply bg-red-100 text-red-800;
+}

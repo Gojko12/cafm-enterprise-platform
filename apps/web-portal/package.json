@@ -1,0 +1,40 @@
+{
+  "name": "@cafm/web-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cafm/shared-schema": "workspace:*",
+    "@react-three/drei": "^9.98.3",
+    "@react-three/fiber": "^8.16.4",
+    "@tanstack/react-table": "^8.17.3",
+    "firebase": "^10.10.0",
+    "jspdf": "^2.5.1",
+    "lucide-react": "^0.368.0",
+    "next": "^14.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.160.0",
+    "web-ifc": "^0.0.56",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/jspdf": "^2.0.0",
+    "@types/node": "^20.10.6",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.160.0",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.8.0"
+  }
+}
+
