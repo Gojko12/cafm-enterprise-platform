@@ -1,0 +1,8 @@
+ezdxf>=1.1.0
+shapely>=2.0.0
+firebase-functions>=0.5.0
+google-cloud-storage>=2.10.0
+google-cloud-firestore>=2.14.0
+pydantic>=2.0.0
+pytest>=7.4.0
+pytest-cov>=4.1.0
