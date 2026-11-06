@@ -1,0 +1,14 @@
+﻿**/node_modules/
+**/.next/
+**/dist/
+**/build/
+**/.turbo/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+.firebase/
+*-debug.log
+install.log
+.secrets/
+.env
+.env.*
