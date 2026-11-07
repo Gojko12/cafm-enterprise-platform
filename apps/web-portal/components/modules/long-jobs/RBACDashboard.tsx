@@ -19,6 +19,9 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { useCafmStore, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS } from "@/lib/cafm-store";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 
 const LJ_ROLES: LJRole[] = [
   "ESA_TO",
@@ -73,26 +76,34 @@ const LJ_STATUSES = [
   { percentage: 94, name: "94% - All Acceptances" },
 ];
 
-interface RBACDashboardProps {
-  initialUsers?: UserAccess[];
-}
-
-export function RBACDashboard({ initialUsers = [] }: RBACDashboardProps) {
+export function RBACDashboard() {
+  const { data, setData } = useCafmStore();
+  const { activeSiteId } = useSiteContext();
   const [activeTab, setActiveTab] = useState<
     "users" | "roleMatrix" | "moduleRbac"
   >("users");
-  const [users, setUsers] = useState<UserAccess[]>(initialUsers);
+  const users = data.users;
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<UserAccess | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
 
   const handleAddUser = (user: UserAccess) => {
-    setUsers([...users, user]);
+    if (users.some((item) => item.UserId === user.UserId)) {
+      alert("A user with this ID already exists.");
+      return;
+    }
+    const ljRole = LJ_ROLES.find((role) => role === user.SystemRole);
+    setData((current) => ({ ...current, users: [...current.users, { ...user,
+      AssignedSiteIds: [activeSiteId], LJRoles: ljRole ? [ljRole] : [], Trades: [...CLASSICAL_TRADES], CanAccessAll: false }] }));
     setShowAddUser(false);
   };
 
   const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter((u) => u.UserId !== userId));
+    if ([...data.tradeRoleMappings, ...data.siteRoleMappings].some((mapping) => Object.values(mapping.assignments).includes(userId))) {
+      alert("Remove this user from the trade-role mappings before deleting them.");
+      return;
+    }
+    setData((current) => ({ ...current, users: current.users.filter((user) => user.UserId !== userId) }));
   };
 
   return (
@@ -135,6 +146,59 @@ export function RBACDashboard({ initialUsers = [] }: RBACDashboardProps) {
       </div>
 
       {/* Tab Content */}
+      <section className="bg-white border rounded-lg p-4 space-y-4">
+        <h2 className="text-lg font-semibold">Trade-Role Assignments — {activeSiteId}</h2>
+        <p className="text-sm text-gray-600">Select the default personnel for each trade and role. Changes are saved automatically.</p>
+        <div className="border rounded p-3">
+          <h3 className="font-semibold mb-2">Site-wide roles</h3>
+          <div className="grid md:grid-cols-2 gap-3">
+            {SITE_ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm">
+              {ROLE_LABELS[role]} ({role})
+              <select className="block w-full border rounded p-2"
+                value={data.siteRoleMappings.find((item) => item.SiteId === activeSiteId)?.assignments[role] ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setData((current) => {
+                    const existing = current.siteRoleMappings.find((item) => item.SiteId === activeSiteId);
+                    return { ...current, siteRoleMappings: [...current.siteRoleMappings.filter((item) => item.SiteId !== activeSiteId),
+                      { SiteId: activeSiteId, assignments: { ...existing?.assignments, [role]: value } }] };
+                  });
+                }}>
+                <option value="">Unassigned</option>
+                {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
+                  (user.LJRoles.includes(role) || user.SystemRole === role)).map((user) =>
+                  <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+              </select>
+            </label>)}
+          </div>
+        </div>
+        {CLASSICAL_TRADES.map((trade) => {
+          const mapping = data.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
+          return <div key={trade} className="border rounded p-3">
+            <h3 className="font-semibold mb-2">{trade}</h3>
+            <div className="grid md:grid-cols-2 gap-3">
+              {TRADE_ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm">
+                {ROLE_LABELS[role]} ({role})
+                <select className="block w-full border rounded p-2" value={mapping?.assignments[role] ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setData((current) => {
+                      const existing = current.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
+                      return { ...current, tradeRoleMappings: [...current.tradeRoleMappings.filter((item) => !(item.SiteId === activeSiteId && item.Trade === trade)),
+                        { SiteId: activeSiteId, Trade: trade, assignments: { ...existing?.assignments, [role]: value } }] };
+                    });
+                  }}>
+                  <option value="">Unassigned</option>
+                  {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
+                    (user.LJRoles.includes(role) || user.SystemRole === role) &&
+                    (user.Trades.length === 0 || user.Trades.includes(trade))).map((user) =>
+                    <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+                </select>
+              </label>)}
+            </div>
+          </div>;
+        })}
+      </section>
       {activeTab === "users" && (
         <UserAccessMonitor
           users={users}

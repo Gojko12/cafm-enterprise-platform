@@ -1,13 +1,33 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId, UserAccess } from "@cafm/shared-schema";
 import {
   ESOC_BUILDINGS, ESOC_EQUIPMENT, ESOC_FLOORS, ESOC_ROOMS,
   ESTEC_BUILDINGS, ESTEC_EQUIPMENT, ESTEC_FLOORS, ESTEC_ROOMS,
   ESRIN_BUILDINGS, ESRIN_EQUIPMENT, ESRIN_FLOORS, ESRIN_ROOMS,
   SAMPLE_WORK_REQUESTS,
 } from "@/lib/seed-data";
+
+export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
+export type AssignmentRole = typeof ASSIGNMENT_ROLES[number];
+export const TRADE_ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM"] as const;
+export const SITE_ASSIGNMENT_ROLES = ["ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
+export const ROLE_LABELS: Record<AssignmentRole, string> = {
+  ESA_TM: "ESA Trade Manager", ESA_CCM: "ESA Cost Centre Manager", TRADE_TM: "Trade Manager",
+  TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
+  ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
+};
+export interface TradeRoleMapping {
+  SiteId: SiteId;
+  Trade: string;
+  assignments: Partial<Record<AssignmentRole, string>>;
+}
+export interface SiteRoleMapping {
+  SiteId: SiteId;
+  assignments: Partial<Record<AssignmentRole, string>>;
+}
 
 interface DemoData {
   buildings: Building[];
@@ -17,11 +37,19 @@ interface DemoData {
   blueprints: PM_ChecklistStandard[];
   schedules: PM_Schedule[];
   workRequests: BaseWorkRequest[];
+  users: UserAccess[];
+  tradeRoleMappings: TradeRoleMapping[];
+  siteRoleMappings: SiteRoleMapping[];
 }
 
 const STORAGE_KEY = "cafm-demo-data-v1";
 
 function seedData(): DemoData {
+  const sites: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
+  const users: UserAccess[] = sites.flatMap((site) => ASSIGNMENT_ROLES.map((role) => ({
+    UserId: `${site}-${role}`, DisplayName: `${ROLE_LABELS[role]} (${site})`,
+    SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
+  })));
   return {
     buildings: [...ESOC_BUILDINGS, ...ESTEC_BUILDINGS, ...ESRIN_BUILDINGS],
     floors: [...ESOC_FLOORS, ...ESTEC_FLOORS, ...ESRIN_FLOORS],
@@ -30,6 +58,14 @@ function seedData(): DemoData {
     blueprints: [],
     schedules: [],
     workRequests: [...SAMPLE_WORK_REQUESTS],
+    users,
+    tradeRoleMappings: sites.flatMap((site) => CLASSICAL_TRADES.map((trade) => ({
+      SiteId: site, Trade: trade,
+      assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
+    }))),
+    siteRoleMappings: sites.map((site) => ({
+      SiteId: site, assignments: Object.fromEntries(SITE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
+    })),
   };
 }
 
@@ -50,11 +86,27 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
+        const defaults = seedData();
         if (!parsed || typeof parsed !== "object" ||
-            !Object.keys(seedData()).every((key) => Array.isArray((parsed as Record<string, unknown>)[key]))) {
+            !["buildings", "floors", "rooms", "equipment", "blueprints", "schedules", "workRequests"].every((key) => Array.isArray((parsed as Record<string, unknown>)[key])) ||
+            (("users" in parsed) && !Array.isArray((parsed as Record<string, unknown>).users)) ||
+            (("tradeRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).tradeRoleMappings)) ||
+            (("siteRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleMappings))) {
           throw new Error("Stored demo data has an invalid format.");
         }
-        setData(parsed as DemoData);
+        const savedData = parsed as Partial<DemoData>;
+        const siteRoleMappings = savedData.siteRoleMappings ?? defaults.siteRoleMappings.map((site) => {
+          const legacy = savedData.tradeRoleMappings?.find((mapping) => mapping.SiteId === site.SiteId);
+          return legacy ? { ...site, assignments: { ...site.assignments,
+            ...Object.fromEntries(SITE_ASSIGNMENT_ROLES.filter((role) => legacy.assignments[role] !== undefined)
+              .map((role) => [role, legacy.assignments[role]])) } } : site;
+        });
+        const tradeRoleMappings = savedData.tradeRoleMappings?.map((mapping) => ({
+          ...mapping, assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES
+            .filter((role) => mapping.assignments[role] !== undefined)
+            .map((role) => [role, mapping.assignments[role]])),
+        })) ?? defaults.tradeRoleMappings;
+        setData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings });
       }
     } catch (error) {
       console.error("Could not load demo data", error);

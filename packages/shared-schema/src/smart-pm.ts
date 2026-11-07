@@ -161,11 +161,14 @@ export const PM_WorkRequestStepSchema = z
     Instructions: z.string().optional(),
     SortOrder: z.number().int().nonnegative(),
     InputType: PMStepInputType,
+    favourableBoolean: z.boolean().optional(),
     Unit: z.string().optional(),
     MinThreshold: z.number().optional(),
     MaxThreshold: z.number().optional(),
     Options: z.array(PM_StepOptionSchema).default([]),
     PhotoIds: z.array(z.string().min(1)).default([]),
+    RequiresPhotoOnFailure: z.boolean().default(true),
+    RequiresCommentOnFailure: z.boolean().default(true),
     ValueBoolean: z.boolean().optional(),
     ValueNumeric: z.number().optional(),
     SelectedOptionIds: z.array(z.string().min(1)).optional(),
@@ -177,7 +180,8 @@ export const PM_WorkRequestStepSchema = z
     CompletedAt: z.string().optional(),
   })
   .superRefine((step, context) => {
-    if (step.InputType === "Boolean" && step.ValueBoolean === false && !step.IsFailed) {
+    if (step.InputType === "Boolean" && step.ValueBoolean !== undefined &&
+        step.ValueBoolean !== (step.favourableBoolean ?? true) && !step.IsFailed) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["IsFailed"],
@@ -196,14 +200,14 @@ export const PM_WorkRequestStepSchema = z
         });
       }
     }
-    if (step.IsFailed && !step.TechnicianComment?.trim()) {
+    if (step.IsFailed && step.RequiresCommentOnFailure && !step.TechnicianComment?.trim()) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["TechnicianComment"],
         message: "Failed steps require a technician comment.",
       });
     }
-    if (step.IsFailed && step.PhotoIds.length === 0) {
+    if (step.IsFailed && step.RequiresPhotoOnFailure && step.PhotoIds.length === 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["PhotoIds"],

@@ -1,21 +1,23 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, ArrowUp } from "lucide-react";
 import { BaseWorkRequest, CLASSICAL_TRADES, LJRole, WR_Type, LJ_TRANSITION_MATRIX } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useCafmStore, ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS } from "@/lib/cafm-store";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { WRActivityTimeline } from "@/components/modules/WRActivityTimeline";
 import { useApp } from "@/lib/hooks/useApp";
-import { WR_Statuses } from "@cafm/shared-schema";
+import { WR_Statuses, validateWorkRequestStatusTransition } from "@cafm/shared-schema";
 import { AcceptanceGatesPanel } from "./AcceptanceGatesPanel";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
+import { completeChecklistInstances } from "@/lib/checklist-completion";
 
 interface LJDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (workRequest: Partial<BaseWorkRequest>) => void;
+  onNavigate: (workRequestId: string) => void;
   workRequest?: BaseWorkRequest | null;
   mode: "create" | "view" | "escalate";
 }
@@ -33,73 +35,11 @@ const LJ_ROLES: LJRole[] = [
   "TRADE_LONG_JOB",
 ];
 
-// Role-based action mapping
-const roleActions: Record<LJRole, string[]> = {
-  ESA_TO: [
-    "Approve & Order",
-    "Approve SAT",
-    "Final Approval",
-    "Approve Costs",
-    "Print Yellow Page",
-  ],
-  ESA_TM: [
-    "Accept RFQ",
-    "Approve SAT",
-    "Final Approval",
-    "Print Yellow Page",
-  ],
-  ESA_LJM: [
-    "Accept RFQ",
-    "Convert to RFW",
-    "Print Yellow Page",
-  ],
-  ESA_CCM: [
-    "Confirm Invoice Information",
-    "Print Yellow Page",
-  ],
-  ESA_DO: [
-    "Approve Drawing/Engineering",
-    "Request Review",
-    "Approve Acceptance Gate",
-    "Print Yellow Page",
-  ],
-  ESA_IM: [
-    "Approve CIFM Inventory",
-    "Request Review",
-    "Approve Acceptance Gate",
-    "Print Yellow Page",
-  ],
-  TRADE_CM: [
-    "Sign Yellow Page",
-    "Confirm Payment",
-    "Print Yellow Page",
-  ],
-  TRADE_TM: [
-    "Commit",
-    "Approve Pre-SAT",
-    "Send Invitation",
-    "Complete Work",
-    "Print Yellow Page",
-  ],
-  ESA_LONG_JOB: [
-    "Approve & Order",
-    "Accept RFQ",
-    "Approve SAT",
-    "Print Yellow Page",
-  ],
-  TRADE_LONG_JOB: [
-    "Commit",
-    "Approve Pre-SAT",
-    "Send Invitation",
-    "Complete Work",
-    "Print Yellow Page",
-  ],
-};
-
 export function LongJobDrawer({
   isOpen,
   onClose,
   onSubmit,
+  onNavigate,
   workRequest,
   mode,
 }: LJDrawerProps) {
@@ -125,6 +65,21 @@ export function LongJobDrawer({
   });
 
   const [escalationCost, setEscalationCost] = useState<number>(750);
+  const [freezeName, setFreezeName] = useState(workRequest?.ActiveFreezeName ?? "");
+  const [freezeReason, setFreezeReason] = useState(workRequest?.PlannedFreezeText ?? "");
+  useEffect(() => {
+    if (!workRequest || mode !== "view" || activeLJRole) return;
+    const track = workRequest.ProcessTrack ?? (workRequest.Percentage >= 30 ? "RFW" : "RFQ");
+    const next = LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === workRequest.Percentage && entry.track === track)
+      ?.allowedActions.find((action) => action.actionName !== "Save");
+    if (workRequest.Percentage === 78 && workRequest.RequiresSAT && !workRequest.PreSATApproved) setActingRole("TRADE_TM");
+    else if (workRequest.Percentage === 79 || workRequest.Percentage === 80) setActingRole("ESA_TO");
+    else if (workRequest.Percentage >= 78 && workRequest.Percentage < 94) {
+      const drawing = workRequest.RequiresDrawingUpdate && !(workRequest.AcceptanceGates ?? []).some((gate) => gate.GateType === "DrawingEngineering" && gate.Status === "Approved");
+      const inventory = workRequest.RequiresInventoryUpdate && !(workRequest.AcceptanceGates ?? []).some((gate) => gate.GateType === "CIFMInventory" && gate.Status === "Approved");
+      setActingRole(drawing ? "ESA_DO" : inventory ? "ESA_IM" : "ESA_TO");
+    } else if (next) setActingRole(next.allowedRoles[0]);
+  }, [workRequest?.Percentage, activeLJRole, mode]);
   const siteBuildings = data.buildings.filter((item) => item.SiteId === activeSiteId);
   const siteFloors = data.floors.filter((item) => item.SiteId === activeSiteId);
   const siteRooms = data.rooms.filter((item) => item.SiteId === activeSiteId);
@@ -195,6 +150,10 @@ export function LongJobDrawer({
   };
 
   const handleEscalate = () => {
+    if (!Number.isFinite(escalationCost) || escalationCost < 750) {
+      alert("The revised estimated cost must be at least 750 EUR.");
+      return;
+    }
     const ljForm = {
       ...formData,
       WR_Type: "LJ" as WR_Type,
@@ -208,10 +167,7 @@ export function LongJobDrawer({
     onClose();
   };
 
-  const availableActions =
-    activeLJRole && roleActions[activeLJRole] ? roleActions[activeLJRole] : [];
-
-  const updateWorkRequest = (percentage: number, updates: Partial<BaseWorkRequest>, description: string) => {
+  const updateWorkRequest = (percentage: number, updates: Partial<BaseWorkRequest>, description: string, role = actingRole) => {
     if (!workRequest) return;
     const actorName = currentUser?.DisplayName ?? "Current user";
     setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
@@ -219,15 +175,31 @@ export function LongJobDrawer({
       const now = new Date().toISOString();
       return { ...wr, ...updates, Percentage: percentage, UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
         id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
-        actorName, actorRole: actingRole, createdAt: now,
+        actorName, actorRole: role, createdAt: now,
         text: `${description}${percentage !== wr.Percentage ? ` (${wr.Percentage}% to ${percentage}%)` : ""} by ${actorName}`,
       }] };
     }) }));
   };
   const track = workRequest?.ProcessTrack ?? (workRequest && workRequest.Percentage >= 30 ? "RFW" : "RFQ");
-  const transitionEntry = workRequest && LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === workRequest.Percentage && entry.track === track);
+  const transitionEntry = workRequest && (LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === workRequest.Percentage && entry.track === track) ??
+    ((workRequest.Percentage === 27 || workRequest.Percentage === 29)
+      ? LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === workRequest.Percentage && entry.track === "RFQ") : undefined));
   const schedule = workRequest?.ScheduleId ? data.schedules.find((item) => item.ScheduleId === workRequest.ScheduleId && item.SiteId === workRequest.SiteId) : undefined;
   const blueprint = schedule ? data.blueprints.find((item) => item.ChecklistCode === schedule.ChecklistCode && item.SiteId === workRequest?.SiteId) : undefined;
+  const checklistSteps = workRequest?.ChecklistSteps ?? blueprint?.Steps;
+  const configuredTransition = (wr: BaseWorkRequest, percentage: number) => {
+    const current = WR_Statuses.find((item) => item.ESAWorkType === wr.ESAWorkType &&
+      item.Percentage === wr.Percentage && item.WorkRequestStatus === wr.WorkRequestStatus &&
+      item.WorkRequestSubstatus === wr.WorkRequestSubstatus);
+    const next = WR_Statuses.find((item) => item.ESAWorkType === wr.ESAWorkType && item.Percentage === percentage);
+    if (!current || !next || !(percentage < wr.Percentage
+      ? validateWorkRequestStatusTransition(next, current)
+      : validateWorkRequestStatusTransition(current, next))) {
+      alert(`The ${wr.Percentage}% to ${percentage}% transition is not configured for ${wr.ESAWorkType}.`);
+      return undefined;
+    }
+    return next;
+  };
 
   if (!isOpen) return null;
 
@@ -289,12 +261,34 @@ export function LongJobDrawer({
 
                 <label className="block text-sm font-medium text-gray-700">
                   Trade *
-                  <select required value={formData.TradeId || ""} onChange={(e) => setFormData({ ...formData, TradeId: e.target.value, TradeName: e.target.value })}
+                  <select required value={formData.TradeId || ""} onChange={(e) => {
+                    const trade = e.target.value;
+                    const mapping = data.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
+                    const siteMapping = data.siteRoleMappings.find((item) => item.SiteId === activeSiteId);
+                    setFormData({ ...formData, TradeId: trade, TradeName: trade,
+                      AssignedRoles: { ...mapping?.assignments, ...siteMapping?.assignments } });
+                  }}
                     className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg">
                     <option value="">Select trade</option>
                     {CLASSICAL_TRADES.map((trade) => <option key={trade} value={trade}>{trade}</option>)}
                   </select>
                 </label>
+                {formData.TradeId && <div className="col-span-2 border rounded p-3 space-y-3">
+                  <h3 className="font-semibold">Trade and Site Role Assignments</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm">{ROLE_LABELS[role]} ({role})
+                      <select value={formData.AssignedRoles?.[role] ?? ""} className="block w-full border rounded p-2"
+                        onChange={(event) => setFormData({ ...formData, AssignedRoles: { ...formData.AssignedRoles, [role]: event.target.value } })}>
+                        <option value="">Unassigned</option>
+                        {data.users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
+                          (user.LJRoles.includes(role) || user.SystemRole === role) &&
+                          (SITE_ASSIGNMENT_ROLES.some((siteRole) => siteRole === role) ||
+                            user.Trades.length === 0 || user.Trades.includes(formData.TradeId ?? ""))).map((user) =>
+                            <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+                      </select>
+                    </label>)}
+                  </div>
+                </div>}
                 <div className="col-span-2 space-y-3">
                   <LocationEquipmentPickerGroup
                     buildings={siteBuildings}
@@ -574,10 +568,35 @@ export function LongJobDrawer({
                     ["Equipment", workRequest.EquipmentCodes.join(", ")],
                     ["Actual cost", workRequest.ActualCostEur === undefined ? undefined : `${workRequest.ActualCostEur} EUR`],
                     ["Created", workRequest.CreatedDate], ["Start", workRequest.StartDate], ["Due", workRequest.DueDate],
-                    ["Margin", workRequest.MarginDate], ["Originating FJ", workRequest.OriginatingFJ_WR_ID],
-                    ["Parent PM", workRequest.ParentPM_WR_ID],
+                    ["Margin", workRequest.MarginDate],
                   ].map(([label, value]) => <div key={label}><span className="font-semibold">{label}: </span>{value || "Not set"}</div>)}
                 </div>
+                <div className="text-sm space-y-1">
+                  {[["Originating FJ", workRequest.OriginatingFJ_WR_ID], ["Parent PM", workRequest.ParentPM_WR_ID]].map(([label, id]) =>
+                    <p key={label}><strong>{label}: </strong>{id
+                      ? <button type="button" className="text-blue-700 underline" onClick={() => onNavigate(id)}>{id}</button>
+                      : "Not set"}</p>)}
+                </div>
+                <section className="border rounded p-3 space-y-2">
+                  <h3 className="font-semibold">Assigned Personnel</h3>
+                  {ASSIGNMENT_ROLES.map((role) => {
+                    const id = workRequest.AssignedRoles?.[role];
+                    return <p key={role} className="text-sm">{ROLE_LABELS[role]} ({role}): {id ? data.users.find((user) => user.UserId === id)?.DisplayName ?? id : "Unassigned"}</p>;
+                  })}
+                </section>
+                <section className="border rounded p-3 space-y-2">
+                  <h3 className="font-semibold">Freeze / Hold: {workRequest.IsFrozen ? "Active" : "Not frozen"}</h3>
+                  <label className="block text-sm">Freeze name<input className="block w-full border rounded p-2" value={freezeName} onChange={(event) => setFreezeName(event.target.value)} /></label>
+                  <label className="block text-sm">Planned freeze / reason<textarea className="block w-full border rounded p-2" value={freezeReason} onChange={(event) => setFreezeReason(event.target.value)} /></label>
+                  <button type="button" className="bg-gray-100 rounded px-3 py-2" onClick={() => {
+                    if (!workRequest.IsFrozen && !freezeName.trim()) { alert("Enter a freeze name."); return; }
+                    updateWorkRequest(workRequest.Percentage, { IsFrozen: !workRequest.IsFrozen,
+                      ActiveFreezeName: workRequest.IsFrozen ? undefined : freezeName.trim(), PlannedFreezeText: freezeReason,
+                      FreezeReason: freezeReason,
+                      ...(workRequest.IsFrozen ? { FreezeEndedAt: new Date().toISOString() } : { FreezeStartedAt: new Date().toISOString(), FreezeEndedAt: undefined }) },
+                      workRequest.IsFrozen ? "Freeze ended" : "Freeze started");
+                  }}>{workRequest.IsFrozen ? "End Freeze" : "Start Freeze"}</button>
+                </section>
                 <div className="bg-gray-200 rounded h-2"><div className="bg-blue-600 rounded h-2" style={{ width: `${workRequest.Percentage}%` }} /></div>
                 <div className="border rounded p-4 space-y-3">
                   <h3 className="font-semibold">Stage Transition Actions</h3>
@@ -589,19 +608,26 @@ export function LongJobDrawer({
                   <div className="flex flex-wrap gap-2">
                     {transitionEntry?.allowedActions.filter((action) => action.actionName !== "Save" && !(workRequest.Percentage >= 78 && workRequest.Percentage < 94)).map((action) => {
                       const target = action.actionName === "Technically Completed" && !workRequest.RequiresSAT && !workRequest.RequiresDrawingUpdate && !workRequest.RequiresInventoryUpdate ? 94 : action.targetPercentage;
-                      return <button type="button" key={action.actionName} disabled={!action.allowedRoles.includes(actingRole)}
+                      return <button type="button" key={action.actionName}
                         className="bg-blue-600 text-white px-3 py-2 rounded text-sm disabled:opacity-40"
                         onClick={() => {
-                          const nextTrack = target === 23 || target === 27 || target === 29 ? "RFQ" : target >= 30 ? "RFW" : track;
-                          const next = LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === target && entry.track === nextTrack);
+                          const nextTrack = target === 23 ? "RFQ" : target === 27 || target === 29 ? track : target >= 30 ? "RFW" : track;
+                          const next = LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === target && entry.track === nextTrack) ??
+                            ((target === 27 || target === 29) ? LJ_TRANSITION_MATRIX.find((entry) => entry.percentage === target && entry.track === "RFQ") : undefined);
                           if (!next) { alert(`No lifecycle configuration exists for ${target}%.`); return; }
+                          const role = action.allowedRoles.includes(actingRole) ? actingRole : action.allowedRoles[0];
+                          setActingRole(role);
                           updateWorkRequest(target, { ProcessTrack: nextTrack, WorkRequestSubstatus: next.label,
-                            WorkRequestStatus: target >= 100 ? "Closed" : target >= 78 ? "Technically Completed" : target >= 32 ? "Issued" : "Requested" },
-                            `LJ ${action.actionName}`);
+                            WorkRequestStatus: target === 27 ? "Cancelled" : target === 29 ? "Rejected" : target >= 100 ? "Closed" : target >= 78 ? "Technically Completed" : target >= 32 ? "Issued" : "Requested" },
+                            `LJ ${action.actionName}`, role);
                         }}>{action.actionName} → {target}% [{action.allowedRoles.join(" / ")}]</button>;
                     })}
                     {!transitionEntry && <p>No lifecycle configuration for this stage and track.</p>}
-                    {transitionEntry && transitionEntry.allowedActions.length === 0 && <p>No further stage transitions.</p>}
+                    {workRequest.Percentage >= 78 && workRequest.Percentage < 94 && <p className="text-sm">Use the acceptance gate actions below to advance this stage.</p>}
+                    {workRequest.Percentage === 100 && !workRequest.ArchivedAt && <button type="button" className="bg-gray-700 text-white rounded px-3 py-2"
+                      onClick={() => updateWorkRequest(100, { ArchivedAt: new Date().toISOString(), WorkRequestStatus: "Closed" }, "Long Job archived")}>Archive completed Long Job</button>}
+                    {workRequest.ArchivedAt && <p>Archived at {new Date(workRequest.ArchivedAt).toLocaleString()}.</p>}
+                    {transitionEntry && transitionEntry.allowedActions.length === 0 && workRequest.Percentage !== 100 && <p>No further stage transitions.</p>}
                   </div>
                 </div>
                 <AcceptanceGatesPanel workRequest={workRequest} role={actingRole} onStatusChange={(percentage, updates, description) =>
@@ -613,16 +639,20 @@ export function LongJobDrawer({
                   <h3 className="font-semibold">Team Leader Checklist &amp; WR Overview</h3>
                   {[100, 50].map((percentage) => <button key={percentage} type="button" className="mr-2 bg-blue-600 text-white px-3 py-2 rounded"
                     onClick={() => {
-                      const status = WR_Statuses.find((item) => item.ESAWorkType === workRequest.ESAWorkType && item.Percentage === percentage);
-                      if (!status) {
-                        alert(`No ${percentage}% status is configured for ${workRequest.ESAWorkType}.`);
-                        return;
-                      }
+                      const status = configuredTransition(workRequest, percentage);
+                      if (!status) return;
                       const actorName = currentUser?.DisplayName ?? "Current user";
                       setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
                         if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 78) return wr;
                         const now = new Date().toISOString();
-                        return { ...wr, ...status, UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
+                        const reopened = percentage === 50 ? (wr.ChecklistInstances ?? []).filter((step) => step.IsCompleted) : [];
+                        return { ...wr, ...status, UpdatedAt: now,
+                          ChecklistInstances: percentage === 50 ? wr.ChecklistInstances?.map((step) => ({ ...step, IsCompleted: false })) : wr.ChecklistInstances,
+                          StepAuditLogs: [...(wr.StepAuditLogs ?? []), ...reopened.map((step) => ({
+                            AuditLogId: crypto.randomUUID(), StepInstanceId: step.StepInstanceId, WR_ID: wr.WR_ID,
+                            ActorId: currentUser?.UserId ?? "current-user", Action: "reopened" as const, OccurredAt: now,
+                          }))],
+                          Activity: [...(wr.Activity ?? []), {
                           id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
                           actorName, actorRole: currentRole, createdAt: now,
                           text: `WR pushed from 78% to ${percentage}% by ${actorName}`,
@@ -631,11 +661,26 @@ export function LongJobDrawer({
                     }}>{percentage === 100 ? "Push WR to 100% (Completed)" : "Reopen to 50%"}</button>)}
                 </div>
               )}
-              {workRequest.WR_Type === "PM" && <>
+              {workRequest.WR_Type === "FJ" && workRequest.Percentage === 50 && !checklistSteps?.length && (
+                <button type="button" className="px-3 py-2 bg-green-700 text-white rounded" onClick={() => {
+                  const status = configuredTransition(workRequest, 78);
+                  if (!status) return;
+                  const actorName = currentUser?.DisplayName ?? "Current user";
+                  setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
+                    if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 50) return wr;
+                    const now = new Date().toISOString();
+                    return { ...wr, ...status, UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
+                      id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
+                      actorName, actorRole: currentRole, createdAt: now, text: `WR was set to 78% by ${actorName}`,
+                    }] };
+                  }) }));
+                }}>Mark Technically Completed (78%)</button>
+              )}
+              {workRequest.WR_Type !== "LJ" && (workRequest.WR_Type === "PM" || !!checklistSteps) && <>
                 <section className="border-t pt-4 space-y-3">
                   <h3 className="font-semibold">Checklist Answers</h3>
-                  {!blueprint && <p className="text-sm text-gray-600">No checklist blueprint is linked to this work request.</p>}
-                  {blueprint?.Steps.map((step) => {
+                  {!checklistSteps && <p className="text-sm text-gray-600">No checklist blueprint is linked to this work request.</p>}
+                  {checklistSteps?.map((step) => {
                     const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
                     return <div key={step.StepId} className="border rounded p-3 text-sm space-y-1">
                       <p className="font-medium">{step.Title}</p>
@@ -646,14 +691,18 @@ export function LongJobDrawer({
                       {answer?.photoPaths?.map((photo) => <img key={photo} src={photo} alt="Failure evidence" className="max-h-32" />)}
                     </div>;
                   })}
-                  {blueprint && workRequest.Percentage === 50 && <button type="button" className="px-3 py-2 bg-blue-600 text-white rounded" onClick={() => setExecutingChecklist(true)}>Execute Checklist</button>}
+                  {checklistSteps && workRequest.Percentage === 50 && <button type="button" className="px-3 py-2 bg-blue-600 text-white rounded" onClick={() => setExecutingChecklist(true)}>Execute Checklist</button>}
                 </section>
-                {blueprint && executingChecklist && <ChecklistExecutor isOpen workRequestId={workRequest.WR_ID} steps={blueprint.Steps} initialResults={workRequest.ChecklistResults}
+                {checklistSteps && executingChecklist && <ChecklistExecutor isOpen workRequestId={workRequest.WR_ID} steps={checklistSteps} initialResults={workRequest.ChecklistResults}
                   onClose={() => setExecutingChecklist(false)}
                   onClear={(stepId) => setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
                     if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 50) return wr;
                     const actorName = currentUser?.DisplayName ?? "Current user";
                     return { ...wr, ChecklistResults: (wr.ChecklistResults ?? []).filter((item) => item.stepId !== stepId),
+                      StepAuditLogs: [...(wr.StepAuditLogs ?? []), { AuditLogId: crypto.randomUUID(),
+                        StepInstanceId: `${wr.WR_ID}:${stepId}`, WR_ID: wr.WR_ID, ActorId: currentUser?.UserId ?? "current-user",
+                        Action: "reopened" as const, PreviousValue: wr.ChecklistResults?.find((item) => item.stepId === stepId),
+                        OccurredAt: new Date().toISOString() }],
                       Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const,
                         actorId: currentUser?.UserId ?? "current-user", actorName, actorRole: currentRole,
                         createdAt: new Date().toISOString(), text: `Step ${stepId} answer cleared by ${actorName}` }] };
@@ -661,31 +710,59 @@ export function LongJobDrawer({
                   onProgress={(result) => setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
                     if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 50) return wr;
                     const previous = wr.ChecklistResults?.find((item) => item.stepId === result.stepId);
-                    const changed = !previous || JSON.stringify(previous.value) !== JSON.stringify(result.value) || previous.passed !== result.passed;
+                    const changed = !previous || JSON.stringify(previous.value) !== JSON.stringify(result.value) ||
+                      previous.passed !== result.passed || previous.comment !== result.comment ||
+                      JSON.stringify(previous.photoPaths) !== JSON.stringify(result.photoPaths);
                     const actorName = currentUser?.DisplayName ?? "Current user";
+                    const photoChanged = JSON.stringify(previous?.photoPaths) !== JSON.stringify(result.photoPaths);
+                    const stepTitle = checklistSteps.find((item) => item.StepId === result.stepId)?.Title ?? result.stepId;
+                    const auditValue = (value: typeof result | undefined) => value && ({
+                      ...value, photoPaths: value.photoPaths?.map(() => "Photo attached"),
+                    });
                     return { ...wr, ChecklistResults: [...(wr.ChecklistResults ?? []).filter((item) => item.stepId !== result.stepId), result],
+                      StepAuditLogs: changed ? [...(wr.StepAuditLogs ?? []), { AuditLogId: crypto.randomUUID(),
+                        StepInstanceId: `${wr.WR_ID}:${result.stepId}`, WR_ID: wr.WR_ID, ActorId: currentUser?.UserId ?? "current-user",
+                        Action: "modified" as const, PreviousValue: auditValue(previous),
+                        NewValue: auditValue(result), OccurredAt: new Date().toISOString() }] : wr.StepAuditLogs,
                       Activity: changed ? [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const,
                         actorId: currentUser?.UserId ?? "current-user", actorName, actorRole: currentRole, createdAt: new Date().toISOString(),
-                        text: blueprint.Steps.find((item) => item.StepId === result.stepId)?.InputType === "FreeText"
-                          ? `Step ${result.stepId} answered by ${actorName}`
-                          : `Step ${result.stepId} marked ${result.passed ? "favourable" : "unfavourable"} by ${actorName}` }] : wr.Activity };
+                        text: checklistSteps.find((item) => item.StepId === result.stepId)?.InputType === "FreeText"
+                          ? `Step ${stepTitle} answered by ${actorName}`
+                          : `Step ${stepTitle} updated (${result.passed ? "favourable" : "unfavourable"}) by ${actorName}` },
+                        ...(photoChanged ? [{ id: crypto.randomUUID(), kind: "log" as const,
+                          actorId: currentUser?.UserId ?? "current-user", actorName, actorRole: currentRole, createdAt: new Date().toISOString(),
+                          text: `Failure image for ${stepTitle} ${result.photoPaths?.length ? "added or replaced" : "removed"} by ${actorName}` }] : [])] : wr.Activity };
                   }) }))}
                   onComplete={(results) => {
-                    const status = WR_Statuses.find((item) => item.ESAWorkType === workRequest.ESAWorkType && item.Percentage === 78);
-                    if (!status) { alert(`No 78% status is configured for ${workRequest.ESAWorkType}.`); return; }
+                    const status = configuredTransition(workRequest, 78);
+                    if (!status) return false;
                     const actorName = currentUser?.DisplayName ?? "Current user";
+                    const now = new Date().toISOString();
+                    const assessedResults = results.filter((result) =>
+                      checklistSteps.some((step) => step.StepId === result.stepId && step.InputType !== "FreeText"));
+                    let completedInstances;
+                    try {
+                      completedInstances = completeChecklistInstances(workRequest.ChecklistInstances ?? [], results, currentUser?.UserId ?? "current-user", now);
+                    } catch (error) {
+                      alert(error instanceof Error ? error.message : "Could not complete the checklist.");
+                      return false;
+                    }
                     setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
                       if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 50) return wr;
-                      const now = new Date().toISOString();
-                      return { ...wr, ...status, ChecklistResults: results, UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
+                      return { ...wr, ...status, ChecklistResults: results,
+                        ChecklistInstances: wr.ChecklistInstances ? completedInstances : undefined,
+                        StepAuditLogs: [...(wr.StepAuditLogs ?? []), ...completedInstances.filter((step) => step.IsCompleted).map((step) => ({
+                          AuditLogId: crypto.randomUUID(), StepInstanceId: step.StepInstanceId, WR_ID: wr.WR_ID,
+                          ActorId: currentUser?.UserId ?? "current-user", Action: "completed" as const, OccurredAt: now,
+                        }))], UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
                         id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
                         actorName, actorRole: currentRole, createdAt: now,
-                        text: `${actorName} finished checklist (${results.length}/${blueprint.Steps.length} steps, ${results.filter((result) => result.passed).length} favourable, ${results.filter((result) => !result.passed).length} unfavourable); WR set to 78%`,
+                        text: `${actorName} finished checklist (${results.length}/${checklistSteps.length} steps, ${assessedResults.filter((result) => result.passed).length} favourable, ${assessedResults.filter((result) => !result.passed).length} unfavourable); WR set to 78%`,
                       }] };
                     }) }));
                   }} />}
               </>}
-              <WRActivityTimeline workRequest={workRequest} />
+              <WRActivityTimeline workRequest={workRequest} actingRole={workRequest.WR_Type === "LJ" ? actingRole : undefined} />
 
             </div>
           )}

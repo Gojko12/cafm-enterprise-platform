@@ -12,11 +12,21 @@ browser's `cafm-demo-data-v1` localStorage entry. Reset Demo Data replaces that
 entry after confirmation. This is browser-local demo data, not shared or
 access-controlled persistence.
 
-The Section 12 migration is incomplete: other pages still use their own sample
-data, and the role matrix, PM schedule CRUD and generation, checklist
-favourable-answer execution, and equipment hierarchy editor are not yet wired
-to this store. The existing SmartPM generator screen does not generate work
-requests.
+Trade-role assignments and demo users, PM schedules, generated work requests,
+checklist snapshots, activity entries, comments and attachments also use this
+store. Trade defaults and site-wide role defaults are configured in RBAC Settings.
+Existing local stores are migrated with demo defaults for the new role tables.
+Attachments are stored as data URLs and are subject to browser storage quotas;
+system logs and role simulation are not a security or tamper-proof audit system.
+Some other portal pages still use independent sample data.
+
+The SmartPM generator issues one work request per equipment and schedule cycle,
+or one location-targeted request when no equipment is selected. It snapshots
+the blueprint and advances the next due date; duplicate cycles are skipped.
+Horizon generation excludes meter-based schedules because no meter-reading
+source is connected; direct generation of those schedules reports an error.
+Older work requests without a saved checklist snapshot continue to use their
+linked schedule's current blueprint; new requests retain their original steps.
 
 ### ✓ Application Shell & Navigation
 - Role-aware sidebar navigation (6 role types: SiteAdministrator, ESA_LongJobManager, PM_Planner, QA_Inspector, MobileTechnician, StandardEmployee)

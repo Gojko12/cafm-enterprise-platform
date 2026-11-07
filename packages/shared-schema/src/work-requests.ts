@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LocationHierarchySchema, SiteIdSchema } from "./locations.js";
+import { PM_ScheduleStepSchema, PM_StepAuditLogSchema, PM_WorkRequestStepSchema } from "./smart-pm.js";
 
 export const WR_Type = z.enum(["PM", "LJ", "FJ"]);
 export type WR_Type = z.infer<typeof WR_Type>;
@@ -124,6 +125,20 @@ export const BaseWorkRequestSchema = z.object({
   OriginatingFJ_WR_ID: z.string().min(1).optional(),
   EscalatedToLJ_WR_ID: z.string().min(1).optional(),
   ProcessTrack: z.enum(["RFQ", "RFW"]).optional(),
+  ArchivedAt: z.string().optional(),
+  AssignedRoles: z.object({
+    ESA_TM: z.string().optional(),
+    ESA_CCM: z.string().optional(),
+    TRADE_TM: z.string().optional(),
+    TRADE_CM: z.string().optional(),
+    ESA_TO: z.string().optional(),
+    ESA_LJM: z.string().optional(),
+    ESA_DO: z.string().optional(),
+    ESA_IM: z.string().optional(),
+  }).optional(),
+  ChecklistSteps: z.array(PM_ScheduleStepSchema).optional(),
+  ChecklistInstances: z.array(PM_WorkRequestStepSchema).optional(),
+  StepAuditLogs: z.array(PM_StepAuditLogSchema).optional(),
   PreSATApproved: z.boolean().optional(),
   Activity: z.array(z.object({
     id: z.string(),
@@ -513,7 +528,7 @@ export const LJ_TRANSITION_MATRIX: readonly LJTransitionMatrixEntry[] = Object.f
     allowedActions: [
       { actionName: "Save", targetPercentage: 50, allowedRoles: ["ESA_TO", "ESA_TM", "ESA_LJM", "TRADE_TM", "ESA_LONG_JOB", "TRADE_LONG_JOB"] },
       { actionName: "On Hold", targetPercentage: 55, allowedRoles: ["TRADE_TM", "TRADE_LONG_JOB"] },
-      { actionName: "Technically Completed", targetPercentage: 78, allowedRoles: ["TRADE_TM", "TRADE_LONG_JOB"] },
+      { actionName: "Technically Completed", targetPercentage: 78, allowedRoles: ["TRADE_TM", "TRADE_LONG_JOB", "ESA_IM"] },
       { actionName: "Log CIFM Inventory Update", targetPercentage: 50, allowedRoles: ["ESA_IM"] },
     ],
   },

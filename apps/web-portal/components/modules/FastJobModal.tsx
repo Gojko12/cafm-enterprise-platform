@@ -19,6 +19,8 @@ export interface FastJobData {
   roomCode: string;
   description: string;
   photoUrl?: string;
+  photoName?: string;
+  photoType?: string;
   timeSpentMinutes: number;
   createdAt: string;
 }
@@ -62,14 +64,28 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
     if (file) {
       setPhotoFile(file);
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreview(reader.result as string);
+      setPhotoPreview(undefined);
+      reader.onerror = () => {
+        setPhotoFile(null);
+        alert("Could not read the selected photo.");
+      };
+      reader.onload = () => {
+        if (typeof reader.result !== "string") {
+          setPhotoFile(null);
+          alert("Could not read the selected photo.");
+          return;
+        }
+        setPhotoPreview(reader.result);
       };
       reader.readAsDataURL(file);
     }
   };
 
   const handleSubmit = () => {
+    if (photoFile && !photoPreview) {
+      alert("Wait for the selected photo to finish loading.");
+      return;
+    }
     if (step === "select-location") {
       if (selectedEquipmentCodes.length === 1 && selectedBuildingId && selectedLevelName && selectedRoomCode) {
         setStep("create-job");
@@ -83,6 +99,8 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
           roomCode: selectedRoomCode,
           description,
           photoUrl: photoPreview,
+          photoName: photoFile?.name,
+          photoType: photoFile?.type,
           timeSpentMinutes: timeSpent,
           createdAt: new Date().toISOString(),
         });

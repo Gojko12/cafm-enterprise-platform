@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { BaseWorkRequest, PM_ScheduleStep } from "@cafm/shared-schema";
 
 type StepResult = NonNullable<BaseWorkRequest["ChecklistResults"]>[number];
@@ -13,12 +13,13 @@ interface ChecklistExecutorProps {
   onClose: () => void;
   onProgress?: (result: StepResult) => void;
   onClear?: (stepId: string) => void;
-  onComplete?: (results: StepResult[]) => void;
+  onComplete?: (results: StepResult[]) => boolean | void;
 }
 
 export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults = [], onClose, onProgress, onClear, onComplete }: ChecklistExecutorProps) {
   const [index, setIndex] = useState(0);
   const [results, setResults] = useState(initialResults);
+  const resultsRef = useRef(initialResults);
   const [seconds, setSeconds] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   useEffect(() => {
@@ -34,8 +35,14 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
   const result = results.find((item) => item.stepId === step.StepId);
 
   const save = (next: StepResult) => {
-    setResults((previous) => [...previous.filter((item) => item.stepId !== next.stepId), next]);
+    resultsRef.current = [...resultsRef.current.filter((item) => item.stepId !== next.stepId), next];
+    setResults(resultsRef.current);
     onProgress?.(next);
+  };
+  const clear = () => {
+    resultsRef.current = resultsRef.current.filter((item) => item.stepId !== step.StepId);
+    setResults(resultsRef.current);
+    onClear?.(step.StepId);
   };
   const answer = (value: StepResult["value"], passed: boolean) => save({
     stepId: step.StepId, value, passed, completedAt: new Date().toISOString(),
@@ -55,7 +62,7 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
       alert(`Complete the required answers and failure evidence for: ${invalid.map((item) => item.Title).join(", ")}`);
       return;
     }
-    onComplete?.(results);
+    if (onComplete?.(results) === false) return;
     onClose();
   };
 
@@ -76,8 +83,7 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
       {step.InputType === "Numeric" && <label className="block">Value {step.Unit && `(${step.Unit})`}
         <input type="number" value={typeof result?.value === "number" ? result.value : ""} onChange={(event) => {
           if (event.target.value === "") {
-            setResults((previous) => previous.filter((item) => item.stepId !== step.StepId));
-            onClear?.(step.StepId);
+            clear();
             return;
           }
           const value = Number(event.target.value);
@@ -94,7 +100,8 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
               else {
                 const values = Array.isArray(result?.value) ? result.value : [];
                 const next = event.target.checked ? [...values, option.Value] : values.filter((value) => value !== option.Value);
-                answer(next, next.every((value) => !step.Options.find((item) => item.Value === value)?.TriggersFailure));
+                if (next.length === 0) clear();
+                else answer(next, next.every((value) => !step.Options.find((item) => item.Value === value)?.TriggersFailure));
               }
             }} />{option.Label}
             <span className={option.TriggersFailure ? "text-red-700" : "text-green-700"}>{option.TriggersFailure ? "Unfavourable" : "Favourable"}</span>
@@ -110,7 +117,15 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
             if (!file) return;
             const reader = new FileReader();
             reader.onerror = () => alert("Could not read the failure photo.");
-            reader.onload = () => { if (typeof reader.result === "string") save({ ...result, photoPaths: [reader.result] }); };
+            const stepId = step.StepId;
+            reader.onload = () => {
+              const latest = resultsRef.current.find((entry) => entry.stepId === stepId);
+              if (!latest || typeof reader.result !== "string") {
+                alert("Could not attach the failure photo to this step.");
+                return;
+              }
+              save({ ...latest, photoPaths: [reader.result] });
+            };
             reader.readAsDataURL(file);
           }} />
           {result.photoPaths?.map((photo) => <img key={photo} src={photo} alt="Failure evidence" className="max-h-32" />)}

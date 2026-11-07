@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ChecklistBuilder } from "@/components/modules/ChecklistBuilder";
 import type {
   Building,
@@ -12,24 +12,17 @@ import type {
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
-
-const SAMPLE_SCHEDULES = [
-  {
-    scheduleId: "sched-001",
-    checklistCode: "HVAC-MONTHLY-001",
-    equipmentCodes: ["0000000001"],
-    frequency: "Monthly" as const,
-    leadTimeDays: 3,
-    marginDays: 5,
-  },
-];
+import { generatePMWorkRequests } from "@/lib/pm-generation";
+import { useApp } from "@/lib/hooks/useApp";
+import { PM_ScheduleSchema } from "@cafm/shared-schema";
 
 type TabType = "schedules" | "blueprints" | "generator";
 
 export default function SmartPMPage() {
   const [activeTab, setActiveTab] = useState<TabType>("schedules");
   const { data, setData } = useCafmStore();
-  const { activeSiteId } = useSiteContext();
+  const { activeSiteId, currentUser } = useSiteContext();
+  const { currentRole } = useApp();
   const [editing, setEditing] = useState<PM_ChecklistStandard | undefined>();
   const [builderVersion, setBuilderVersion] = useState(0);
   const blueprints = data.blueprints.filter((item) => item.SiteId === activeSiteId);
@@ -38,6 +31,8 @@ export default function SmartPMPage() {
   );
   const [horizonDays, setHorizonDays] = useState(30);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<PM_Schedule | null>(null);
+  const [selectedScheduleIds, setSelectedScheduleIds] = useState<string[]>([]);
   const [scheduleChecklistCode, setScheduleChecklistCode] = useState("");
   const [scheduleFrequency, setScheduleFrequency] =
     useState<PM_Schedule["Frequency"]>("Monthly");
@@ -54,6 +49,12 @@ export default function SmartPMPage() {
     room: Room | null;
   }>({ building: null, floor: null, room: null });
   const [scheduleEquipmentCodes, setScheduleEquipmentCodes] = useState<string[]>([]);
+  useEffect(() => {
+    setScheduleModalOpen(false);
+    setEditingSchedule(null);
+    setSelectedScheduleIds([]);
+    setEditing(undefined);
+  }, [activeSiteId]);
   const siteBuildings = useMemo(
     () => data.buildings.filter((item) => item.SiteId === activeSiteId),
     [data.buildings, activeSiteId],
@@ -71,7 +72,6 @@ export default function SmartPMPage() {
     [data.equipment, activeSiteId],
   );
   const visibleSchedules = [
-    ...SAMPLE_SCHEDULES,
     ...data.schedules
       .filter((schedule) => schedule.SiteId === activeSiteId)
       .map((schedule) => ({
@@ -86,8 +86,8 @@ export default function SmartPMPage() {
 
   const handleCreateSchedule = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!scheduleChecklistCode.trim()) {
-      alert("Enter a checklist code.");
+    if (!blueprints.some((blueprint) => blueprint.ChecklistCode === scheduleChecklistCode && blueprint.IsActive)) {
+      alert("Select an active blueprint at this site.");
       return;
     }
     if (scheduleEquipmentCodes.length === 0 && !scheduleLocation.building) {
@@ -103,7 +103,7 @@ export default function SmartPMPage() {
     }
     const now = new Date().toISOString();
     const schedule: PM_Schedule = {
-      ScheduleId: `PM-${Date.now()}`,
+      ScheduleId: editingSchedule?.ScheduleId ?? `PMS-${crypto.randomUUID()}`,
       ChecklistCode: scheduleChecklistCode.trim(),
       SiteId: activeSiteId,
       EquipmentCodes: scheduleEquipmentCodes,
@@ -111,7 +111,7 @@ export default function SmartPMPage() {
       LevelName: scheduleLocation.floor?.LevelName,
       RoomCode: scheduleLocation.room?.RoomCode,
       Frequency: scheduleFrequency,
-      FrequencyInterval: 1,
+      FrequencyInterval: editingSchedule?.FrequencyInterval ?? 1,
       ...(scheduleFrequency === "Meter-based"
         ? {
             MeterType: scheduleMeterType.trim(),
@@ -121,19 +121,42 @@ export default function SmartPMPage() {
       LeadTimeDays: scheduleLeadTime,
       MarginWindowDays: scheduleMarginWindow,
       NextDueDate: scheduleDueDate,
-      IsActive: true,
-      CreatedBy: "current-user",
-      CreatedAt: now,
+      IsActive: editingSchedule?.IsActive ?? true,
+      CreatedBy: editingSchedule?.CreatedBy ?? currentUser?.UserId ?? "current-user",
+      CreatedAt: editingSchedule?.CreatedAt ?? now,
       UpdatedAt: now,
     };
+    const parsed = PM_ScheduleSchema.safeParse(schedule);
+    if (!parsed.success) {
+      alert(parsed.error.issues.map((issue) => issue.message).join("\n"));
+      return;
+    }
     setData((current) => ({
       ...current,
-      schedules: [...current.schedules, schedule],
+      schedules: [...current.schedules.filter((item) => item.ScheduleId !== schedule.ScheduleId || item.SiteId !== activeSiteId), parsed.data],
     }));
     setScheduleModalOpen(false);
     setScheduleChecklistCode("");
     setScheduleEquipmentCodes([]);
     setScheduleLocation({ building: null, floor: null, room: null });
+  };
+
+  const openSchedule = (schedule?: PM_Schedule) => {
+    setEditingSchedule(schedule ?? null);
+    setScheduleChecklistCode(schedule?.ChecklistCode ?? "");
+    setScheduleFrequency(schedule?.Frequency ?? "Monthly");
+    setScheduleMeterType(schedule?.MeterType ?? "");
+    setScheduleMeterInterval(schedule?.MeterInterval ?? 1);
+    setScheduleDueDate(schedule?.NextDueDate ?? new Date().toISOString().slice(0, 10));
+    setScheduleLeadTime(schedule?.LeadTimeDays ?? 3);
+    setScheduleMarginWindow(schedule?.MarginWindowDays ?? 5);
+    setScheduleEquipmentCodes(schedule?.EquipmentCodes ?? []);
+    setScheduleLocation({
+      building: siteBuildings.find((item) => item.bl_id === schedule?.bl_id) ?? null,
+      floor: siteFloors.find((item) => item.bl_id === schedule?.bl_id && item.LevelName === schedule.LevelName) ?? null,
+      room: siteRooms.find((item) => item.bl_id === schedule?.bl_id && item.LevelName === schedule.LevelName && item.RoomCode === schedule.RoomCode) ?? null,
+    });
+    setScheduleModalOpen(true);
   };
 
   const handleBlueprintSave = (blueprint: PM_ChecklistStandard) => {
@@ -150,9 +173,16 @@ export default function SmartPMPage() {
   };
 
   const handleGenerateWRs = () => {
-    alert(
-      `Generated WRs using ${generatorMode} mode for ${generatorMode === "horizon" ? horizonDays + " days" : "selected items"}`
-    );
+    try {
+      const result = generatePMWorkRequests({ schedules: data.schedules, blueprints: data.blueprints,
+        equipment: data.equipment, workRequests: data.workRequests, siteId: activeSiteId, mode: generatorMode,
+        selectedIds: selectedScheduleIds, horizonDays, now: new Date(),
+        actor: { id: currentUser?.UserId ?? "current-user", name: currentUser?.DisplayName ?? "Current user", role: currentRole } });
+      setData((current) => ({ ...current, schedules: result.schedules, workRequests: result.workRequests }));
+      alert(`Generated ${result.generated} work request(s); skipped ${result.skipped} duplicate cycle(s). Meter-based schedules are excluded from horizon generation.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not generate work requests.");
+    }
   };
 
   return (
@@ -210,7 +240,7 @@ export default function SmartPMPage() {
                 <h2 className="text-2xl font-bold text-gray-900">PM Schedules</h2>
                 <button
                   type="button"
-                  onClick={() => setScheduleModalOpen(true)}
+                  onClick={() => openSchedule()}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                 >
                   Create PM Schedule
@@ -261,10 +291,17 @@ export default function SmartPMPage() {
                           {schedule.leadTimeDays} days
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
-                          <button className="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                          <button onClick={() => openSchedule(data.schedules.find((item) => item.ScheduleId === schedule.scheduleId && item.SiteId === activeSiteId))} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
                             Edit
                           </button>
-                          <button className="text-red-600 hover:text-red-800 text-sm font-medium">
+                          <button onClick={() => {
+                            if (data.workRequests.some((wr) => wr.SiteId === activeSiteId && wr.ScheduleId === schedule.scheduleId)) {
+                              alert("Schedules with work requests cannot be deleted.");
+                              return;
+                            }
+                            if (confirm("Delete this schedule?")) setData((current) => ({ ...current,
+                              schedules: current.schedules.filter((item) => item.SiteId !== activeSiteId || item.ScheduleId !== schedule.scheduleId) }));
+                          }} className="text-red-600 hover:text-red-800 text-sm font-medium">
                             Delete
                           </button>
                         </td>
@@ -308,7 +345,7 @@ export default function SmartPMPage() {
                       name="mode"
                       value="single"
                       checked={generatorMode === "single"}
-                      onChange={(e) => setGeneratorMode("single")}
+                      onChange={() => { setGeneratorMode("single"); setSelectedScheduleIds([]); }}
                       className="w-5 h-5"
                     />
                     <div>
@@ -325,7 +362,7 @@ export default function SmartPMPage() {
                       name="mode"
                       value="selected"
                       checked={generatorMode === "selected"}
-                      onChange={(e) => setGeneratorMode("selected")}
+                      onChange={() => { setGeneratorMode("selected"); setSelectedScheduleIds([]); }}
                       className="w-5 h-5"
                     />
                     <div>
@@ -373,6 +410,17 @@ export default function SmartPMPage() {
                   </p>
                 </div>
               )}
+              {generatorMode !== "horizon" && <fieldset className="border rounded p-4 space-y-2">
+                <legend>Select schedules</legend>
+                {data.schedules.filter((schedule) => schedule.SiteId === activeSiteId && schedule.IsActive).map((schedule) =>
+                  <label key={schedule.ScheduleId} className="block">
+                    <input type={generatorMode === "single" ? "radio" : "checkbox"} name={generatorMode === "single" ? "schedule" : undefined}
+                      checked={selectedScheduleIds.includes(schedule.ScheduleId)} onChange={(event) => setSelectedScheduleIds(
+                        generatorMode === "single" ? [schedule.ScheduleId] : event.target.checked
+                          ? [...selectedScheduleIds, schedule.ScheduleId] : selectedScheduleIds.filter((id) => id !== schedule.ScheduleId))} />{" "}
+                    {schedule.ScheduleId} — {schedule.ChecklistCode} — due {schedule.NextDueDate}
+                  </label>)}
+              </fieldset>}
 
               <button
                 onClick={handleGenerateWRs}
@@ -402,7 +450,7 @@ export default function SmartPMPage() {
             className="w-full max-w-3xl max-h-[92vh] overflow-y-auto bg-white rounded-xl shadow-xl"
           >
             <header className="px-6 py-4 border-b flex items-center justify-between">
-              <h2 className="text-xl font-bold">Create PM Schedule</h2>
+              <h2 className="text-xl font-bold">{editingSchedule ? "Edit" : "Create"} PM Schedule</h2>
               <button
                 type="button"
                 onClick={() => setScheduleModalOpen(false)}
@@ -415,13 +463,13 @@ export default function SmartPMPage() {
             <div className="p-6 space-y-4">
               <label className="block text-sm font-medium">
                 Checklist Code
-                <input
+                <select
                   required
                   value={scheduleChecklistCode}
                   onChange={(event) => setScheduleChecklistCode(event.target.value)}
                   className="mt-1 w-full px-3 py-2 border rounded"
-                  placeholder="e.g. HVAC-MONTHLY-001"
-                />
+                ><option value="">Select a blueprint</option>{blueprints.filter((item) => item.IsActive).map((item) =>
+                  <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.ChecklistCode} — {item.Title}</option>)}</select>
               </label>
               <LocationEquipmentPickerGroup
                 buildings={siteBuildings}
@@ -529,7 +577,7 @@ export default function SmartPMPage() {
                 type="submit"
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
               >
-                Create Schedule
+                {editingSchedule ? "Save Schedule" : "Create Schedule"}
               </button>
             </footer>
           </form>

@@ -6,13 +6,13 @@ import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 
-export function WRActivityTimeline({ workRequest }: { workRequest: BaseWorkRequest }) {
+export function WRActivityTimeline({ workRequest, actingRole }: { workRequest: BaseWorkRequest; actingRole?: string }) {
   const { setData } = useCafmStore();
   const { currentUser, activeLJRole } = useSiteContext();
   const { currentRole } = useApp();
   const actorId = currentUser?.UserId ?? "current-user";
   const actorName = currentUser?.DisplayName ?? "Current user";
-  const actorRole = activeLJRole ?? currentRole;
+  const actorRole = workRequest.WR_Type === "LJ" ? actingRole ?? activeLJRole ?? currentRole : currentRole;
   const [filter, setFilter] = useState<"all" | "comment" | "log">("all");
   const [text, setText] = useState("");
   const [editing, setEditing] = useState<string | null>(null);

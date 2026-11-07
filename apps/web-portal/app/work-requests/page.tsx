@@ -101,14 +101,13 @@ const mockWorkRequests: BaseWorkRequest[] = [
 ];
 
 export default function WorkRequestsPage() {
-  const { activeSiteId, activeLJRole } = useSiteContext();
+  const { activeSiteId, currentUser } = useSiteContext();
   const { currentRole } = useApp();
   const { data, setData } = useCafmStore();
   const workRequests = data.workRequests;
-  const setWorkRequests = (requests: BaseWorkRequest[]) =>
-    setData((current) => ({ ...current, workRequests: requests }));
   const [requestType, setRequestType] = useState<WR_Type>("PM");
   const [bucket, setBucket] = useState<"issued" | "technical" | "cancelled" | "completed">("issued");
+  const [teamQueue, setTeamQueue] = useState(false);
   useEffect(() => {
     const updateType = () => {
       const type = window.location.hash.slice(1);
@@ -133,6 +132,14 @@ export default function WorkRequestsPage() {
   const [textFilter, setTextFilter] = useState("");
   const [dueDateFrom, setDueDateFrom] = useState("");
   const [dueDateTo, setDueDateTo] = useState("");
+  useEffect(() => {
+    setDrawerOpen(false);
+    setFastJobOpen(false);
+    setSelectedWR(null);
+    setLocationFilter({ building: null, floor: null, room: null });
+    setSelectedEquipmentCodes([]);
+    setTeamQueue(false);
+  }, [activeSiteId]);
   const siteBuildings = data.buildings.filter((item) => item.SiteId === activeSiteId);
   const siteFloors = data.floors.filter((item) => item.SiteId === activeSiteId);
   const siteRooms = data.rooms.filter((item) => item.SiteId === activeSiteId);
@@ -147,6 +154,7 @@ export default function WorkRequestsPage() {
     { id: "completed" as const, label: "Completed (100%)", values: [100] },
   ];
   const filteredRequests = siteRequests.filter((wr) => {
+    if (requestType === "FJ" && teamQueue && wr.Percentage !== 78) return false;
     if (
       requestType === "PM" &&
       !buckets.find((item) => item.id === bucket)?.values.includes(wr.Percentage)
@@ -210,8 +218,17 @@ export default function WorkRequestsPage() {
       RequiresInventoryUpdate: false,
       AcceptanceGates: [],
       UpdatedAt: createdAt,
+      Attachments: job.photoUrl ? [{ id: crypto.randomUUID(), name: job.photoName ?? "fast-job-photo", type: job.photoType || "image/unknown", dataUrl: job.photoUrl }] : [],
+      Activity: [
+        { id: crypto.randomUUID(), kind: "log", actorId: currentUser?.UserId ?? "current-user",
+          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt,
+          text: `Fast Job created at 50% by ${currentUser?.DisplayName ?? "Current user"}` },
+        ...(job.photoUrl ? [{ id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
+          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt,
+          text: `Image '${job.photoName ?? "fast-job-photo"}' was added by ${currentUser?.DisplayName ?? "Current user"}` }] : []),
+      ],
     };
-    setWorkRequests([...workRequests, newWR]);
+    setData((current) => ({ ...current, workRequests: [...current.workRequests, newWR] }));
     setFastJobOpen(false);
   };
 
@@ -251,6 +268,7 @@ export default function WorkRequestsPage() {
         WorkRequestSubstatus: wr.ProcessTrack === "RFW" ? "New Request for Work" : "New Request for Quotation",
         Percentage: 0,
         ProcessTrack: wr.ProcessTrack ?? "RFQ",
+        AssignedRoles: wr.AssignedRoles,
         SiteId: activeSiteId,
         bl_id: wr.bl_id,
         LevelName: wr.LevelName,
@@ -269,23 +287,39 @@ export default function WorkRequestsPage() {
         RequiresInventoryUpdate: wr.RequiresInventoryUpdate || false,
         AcceptanceGates: wr.AcceptanceGates || [],
         EstimatedCostEur: wr.EstimatedCostEur,
+        Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentUser?.UserId ?? "current-user",
+          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt: new Date().toISOString(),
+          text: `Long Job created at 0% by ${currentUser?.DisplayName ?? "Current user"}` }],
       };
-      setWorkRequests([...workRequests, newWR]);
+      setData((current) => ({ ...current, workRequests: [...current.workRequests, newWR] }));
     } else if (drawerMode === "escalate" && selectedWR) {
       const ljWR: BaseWorkRequest = {
         ...selectedWR,
         WR_ID: `LJ-${Math.random().toString(36).substring(7).toUpperCase()}-2026`,
         WR_Type: "LJ",
         OriginatingFJ_WR_ID: selectedWR.WR_ID,
+        ProcessTrack: "RFQ",
+        AssignedRoles: { ...data.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === selectedWR.TradeId)?.assignments,
+          ...data.siteRoleMappings.find((item) => item.SiteId === activeSiteId)?.assignments },
         Percentage: 10,
         WorkRequestStatus: "Requested",
         WorkRequestSubstatus: "Work Request from Fast Job - On Hold",
+        ChecklistSteps: undefined,
+        ChecklistResults: undefined,
+        Attachments: [],
+        Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentUser?.UserId ?? "current-user",
+          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt: new Date().toISOString(),
+          text: `Long Job created at 10% from ${selectedWR.WR_ID} by ${currentUser?.DisplayName ?? "Current user"}` }],
         EstimatedCostEur: wr.EstimatedCostEur || selectedWR.EstimatedCostEur,
         RequiresSAT: wr.RequiresSAT !== undefined ? wr.RequiresSAT : selectedWR.RequiresSAT || false,
         RequiresDrawingUpdate: wr.RequiresDrawingUpdate !== undefined ? wr.RequiresDrawingUpdate : selectedWR.RequiresDrawingUpdate || false,
         RequiresInventoryUpdate: wr.RequiresInventoryUpdate !== undefined ? wr.RequiresInventoryUpdate : selectedWR.RequiresInventoryUpdate || false,
       };
-      setWorkRequests([...workRequests, ljWR]);
+      setData((current) => ({ ...current, workRequests: [...current.workRequests.map((item) => item.WR_ID === selectedWR.WR_ID && item.SiteId === selectedWR.SiteId
+        ? { ...item, EscalatedToLJ_WR_ID: ljWR.WR_ID, Activity: [...(item.Activity ?? []), {
+          id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
+          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt: new Date().toISOString(),
+          text: `Fast Job escalated to ${ljWR.WR_ID} by ${currentUser?.DisplayName ?? "Current user"}` }] } : item), ljWR] }));
     }
   };
 
@@ -345,7 +379,7 @@ export default function WorkRequestsPage() {
       </div>
       {currentRole === "TeamLeader" && requestType !== "LJ" && (
         <button type="button" className="block w-full text-left bg-blue-50 border border-blue-200 rounded p-4"
-          onClick={() => { if (requestType === "PM") setBucket("technical"); }}>
+          onClick={() => { if (requestType === "PM") setBucket("technical"); else setTeamQueue((value) => !value); }}>
           <strong>Team Leader Checklist &amp; WR Overview</strong>
           <span className="block text-sm">Review {siteRequests.filter((wr) => wr.Percentage === 78).length} technically completed {requestType} work requests.</span>
         </button>
@@ -463,7 +497,7 @@ export default function WorkRequestsPage() {
                   >
                     <Eye size={20} />
                   </button>
-                  {wr.WR_Type === "FJ" && wr.EstimatedCostEur! >= 750 && (
+                  {wr.WR_Type === "FJ" && !wr.EscalatedToLJ_WR_ID && (
                     <button
                       onClick={() => handleEscalateToLJ(wr)}
                       className="p-2 hover:bg-gray-100 rounded-lg text-orange-600"
@@ -535,6 +569,12 @@ export default function WorkRequestsPage() {
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onSubmit={handleSubmitWR}
+        onNavigate={(id) => {
+          const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId);
+          if (!target) { alert(`Work request ${id} is not available at this site.`); return; }
+          setSelectedWR(target);
+          setDrawerMode("view");
+        }}
         workRequest={selectedWR ? workRequests.find((wr) => wr.WR_ID === selectedWR.WR_ID && wr.SiteId === selectedWR.SiteId) ?? selectedWR : null}
         mode={drawerMode}
       />
