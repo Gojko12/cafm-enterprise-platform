@@ -160,6 +160,18 @@ export const BaseWorkRequestSchema = z.object({
   StepAuditLogs: z.array(PM_StepAuditLogSchema).optional(),
   ChecklistHistory: z.array(ChecklistHistoryEntrySchema).optional(),
   CraftpersonLabor: z.array(CraftpersonLaborSchema).optional(),
+  SpareParts: z.array(z.object({
+    id: z.string().min(1),
+    description: z.string(),
+    quantity: z.number().nonnegative(),
+    unitCostEur: z.number().nonnegative(),
+  })).optional(),
+  QuotationLines: z.array(z.object({
+    id: z.string().min(1),
+    description: z.string(),
+    quantity: z.number().nonnegative(),
+    unitCostEur: z.number().nonnegative(),
+  })).optional(),
   PMPIdOriginal: z.string().optional(),
   PMPIdSmart: z.string().optional(),
   PMProcedureDescription: z.string().optional(),
@@ -171,6 +183,9 @@ export const BaseWorkRequestSchema = z.object({
   DowntimeMinutes: z.number().nonnegative().optional(),
   KPINotes: z.string().optional(),
   AuditInspectionStatus: z.enum(["To Be Inspected", "Passed Inspected", "PM WRs to be corrected"]).optional(),
+  QA_InspectionStatus: z.enum(["Pending", "Passed", "ToBeCorrected"]).optional(),
+  QA_IssueDescription: z.string().optional(),
+  QA_CorrectionComment: z.string().optional(),
   Urgency: z.string().optional(),
   PreSATApproved: z.boolean().optional(),
   Activity: z.array(z.object({

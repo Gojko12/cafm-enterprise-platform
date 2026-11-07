@@ -482,3 +482,53 @@ Opening a PM Work Request opens a wide modal (`WR Details Popup`) with the follo
 8. **Persistent Bottom Collapsible Sections (Visible across tabs at the bottom of `WR Details Popup`)**:
    - **`Checklist history`** (collapsible `+`/`-` bar): Filterable table with columns `Timestamp`, `Performed by`, `Action type`, `Step reference`, `Details`.
    - **`History`** (collapsible `+`/`-` bar): Unified stream of **Human Comments** (from `Message text -> Post`, editable with visible version history) and **Automatic System Logs** (who changed status, who finished checklist, who added/deleted documents, when), with filter toggles for `All`, `Human Comments Only`, and `Automatic Logs Only`.
+
+## 16. Mendix Preventive Maintenance Operational Sub-Queues & Wide Multi-Tab `FJ` and `LJ` Details Popups
+
+### 16.1 Complete Mendix Preventive Maintenance Sub-Navigation & Queues
+Under Preventive Maintenance (`/preventive-maintenance` and `/smart-pm`), provide direct sub-navigation tabs/views matching the Mendix operational sidebar:
+1. **`PMP` (Preventive Maintenance Procedures / Blueprints)**: Create and edit procedures/checklists with Favourable/Unfavourable rules for Boolean, Numeric, SingleSelect, and MultiSelect steps.
+2. **`Assign PMP to EQ`**: Interactive bulk & single assignment matrix to link `PMP` blueprints directly to `Equipment` items (filtered via the Pop-Up Location Pickers `Building <-> Floor <-> Room` and 3-level Equipment hierarchy `Installation -> Subequipment -> SubSubEquipment`), automatically creating or updating `PM_Schedule` records.
+3. **`Define PM Schedules`** & **`Generate Work Request`**: Full CRUD on PM schedules and horizon/selected WR generator.
+4. **`Manage Craftperson`**: Dedicated view to manage Craftsperson profiles (`Name`, `LastName`, `Trade`, `Hourly rate`, `Working time / Shift hours`, `Assigned Site`, `Skill Level`) used across the `Assign Craftperson` tables.
+5. **The 6 Operational PM Work Request Queues**:
+   - **`Issued PM WRs`**: Active PMs at `50% (Issued)` and `55% (On Hold for Access / Labor / Parts)`.
+   - **`To Be Inspected PM WRs`**: PMs at `78% (Technically Completed)` awaiting Team Leader / QA inspection (`QA_InspectionStatus == 'Pending'` or not yet inspected).
+   - **`Passed Inspected PM WRs`**: PMs inspected by QA / Team Leader and marked as **Passed** (`QA_InspectionStatus == 'Passed'`), ready for or pushed to `100% Completed`.
+   - **`PM WRs to be corrected`**: PMs that failed QA inspection or Team Leader review (`QA_InspectionStatus == 'ToBeCorrected'`), displaying the mandatory `QA_IssueDescription` and `QA_CorrectionComment` so technicians can fix the issue and re-submit.
+   - **`Completed PM WRs`**: Closed PMs at `100% (Completed)`.
+   - **`Canceled PM WRs`**: Canceled PMs at `27% (Cancelled)`.
+
+### 16.2 Wide Multi-Tab `FJ Details Popup` (Fast Jobs < 750 EUR)
+Replace the narrow side drawer for Fast Jobs with a wide Mendix-style `FJ Details Popup` modal containing:
+- **Tab 1: `Work request details`**:
+  * Group Box 1 (`Fast Job Details`): `WR ID`, `Job ID`, `Work request status`, `Work request substatus` (`50%`, `55%`, `78%`, `27%`, `100%`), `Urgency`, `Trade name`, `Estimated Cost (< 750 EUR)`, `Actual Cost (EUR)`, `Created date`, `Start date`, `Due date`, `Margin date`, `Parent PM WR ID` (if spawned from a PM Follow-up).
+  * Group Box 2 (`Work Location`): `Room code`, `Level name`, `bl id`, `Problem location`.
+  * Group Box 3 (`Equipment`): `Equipment code`, `Local equipment code`, `Equipment name`, `Hierarchy Level` (`Installation / Subequipment / SubSubEquipment`).
+- **Tab 2: `Labor, parts & Completion`**:
+  * `Assign Craftperson` button and table (`Hourly rate`, `Working time`, `Name`, `LastName`), spare parts/materials cost rows, status buttons (`Cancel WR (27%)`, `On Hold (55%)`, `Technically Completed (78%)`, `Complete (100%)`), and a prominent **`Escalate to Long Job (>= 750 EUR at 10%)`** button (if the FJ cannot fix the problem or exceeds 750 EUR).
+  * `Message text` + `Post` button for human comments.
+- **Tab 3: `Attached Documents`**: `+ New WR Document` / photo upload with `Open` and `Delete` buttons.
+- **Tab 4: `AuditLog & QA`**: QA Pass / To Be Corrected inspection controls.
+- **Persistent Bottom `History` Accordion**: Unified stream of Human Comments (editable with visible prior version history) and Automatic System Logs (`All`, `Human Comments Only`, `Automatic Logs Only`).
+
+### 16.3 Wide Multi-Tab `LJ Details Popup` (Long Jobs >= 750 EUR, 0% to 100% Archived)
+Replace the narrow side drawer for Long Jobs with a wide Mendix-style `LJ Details Popup` modal containing a top header bar (showing `WR ID`, `Process: RFQ | RFW`, `Substatus % badge`, inline **`Act as LJ Role`** selector, and the always-available amber **`Print Yellow Page`** button) and 6 structured tabs:
+- **Tab 1: `Work request details & Roles`**:
+  * Group Box 1 (`Long Job Core`): `WR ID`, `Process (RFQ/RFW)`, `Work request status`, `Current Substatus (0%–100%)`, `Substatus Description`, `Trade`, `Estimated Cost (>= 750 EUR)`, `Actual Cost`, `Created Date`, `Due Date`, `Margin Date`, `Originating FJ WR ID`, `Parent PM WR ID`.
+  * Group Box 2 (`Work Location & Equipment`): `bl id`, `Level name`, `Room code`, `Problem location`, and optional `Equipment` details.
+  * Group Box 3 (`Assigned Trade & ESA Roles`): Auto-retrieved & editable role assignments for `ESA Trade Manager (ESA_TM)`, `ESA Cost Centre Manager (ESA_CCM)`, `Trade Manager (TRADE_TM)`, `Trade Contract Manager (TRADE_CM)`, `ESA Technical Officer (ESA_TO)`, `ESA Long Job Manager (ESA_LJM)`, `Draftsman / Drawing Office (ESA_DO)`, and `CIFM Inventory Admin (ESA_IM)`.
+- **Tab 2: `Quotation, Budget & Ordering (0% - 32%)`**:
+  * Interactive stage progression panel for `RFQ` (`0%`, `10%`, `20%`, `21%`, `23%`, `25%`, `26%`, `28% -> Convert RFQ to RFW 30%`) and `RFW` (`0%`, `10%`, `30%`, `31% On Hold for Budget`, `32% Work Request Ordered to Contractor`), contractor quotation breakdown table, and role-validated action buttons.
+- **Tab 3: `Execution, Labor & Freeze (32% - 78%)`**:
+  * `Commit (40%)`, `Work Execution (50%)`, and `On Hold / Freeze (55% for Access / Labor / Parts)` controls with automatic SLA Margin Date extension, plus `Assign Craftperson` labor table (`Hourly rate`, `Working time`, `Name`, `LastName`) and the **`Technically Completed`** button (which routes to `78%` if any Acceptance Gate is required, or directly to `94%` if no gates are required).
+- **Tab 4: `Acceptances: SAT, Drawing & Inventory (78% - 94%)`**:
+  * Checkboxes to configure project requirements: `Requires SAT`, `Requires Drawing/Engineering Update`, `Requires CIFM Inventory Update`.
+  * Interactive Gate Cards for **Pre-SAT (`TRADE_TM`)**, **SAT (`ESA_TO`/`ESA_TM`)**, **Drawing/Engineering (`ESA_DO` Draftsman)**, and **CIFM Inventory (`ESA_IM` Inventory Admin)** with `Approve / Give OK`, `Request Review`, and `Send Invitation` buttons that dynamically transition `78% -> 79% -> 80% -> 81% -> 94% (All Acceptances Completed)` and log every action in `History`.
+- **Tab 5: `Financial Closure & Yellow Page (94% - 100%)`**:
+  * Step-by-step post-acceptance buttons: `94% -> 95% (Completed - Cost Info + Customer Feedback by TRADE_TM)`, `95% -> 96% (Sign Yellow Page by TRADE_CM)`, `96% -> 97% (Approve Costs by ESA_TO/ESA_TM)`, `97% -> 98% (Final Approval by ESA_TO)`, `98% -> 99% (Confirm Invoice Information by ESA_TO/ESA_CCM)`, `99% -> 100% (Confirm Payment by TRADE_CM/TRADE_TM)`, and `100% -> 100% archived`.
+  * Embedded printable **Official Yellow Page Preview** showing all project metadata, cost tables, and timestamped digital signatures for every stage and acceptance gate.
+- **Tab 6: `Attached Documents`**:
+  * `+ New LJ Document` (quotations, redline CAD drawings, SAT protocols, invoices) with `Open` and `Delete` actions logged to `History`.
+- **Persistent Bottom `History` Accordion**:
+  * `Message text` + `Post` button and unified timeline with `All`, `Human Comments Only` (with `Edit` and visible prior versions), and `Automatic Logs Only`.

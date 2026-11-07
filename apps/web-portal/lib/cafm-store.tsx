@@ -38,6 +38,7 @@ interface DemoData {
   schedules: PM_Schedule[];
   workRequests: BaseWorkRequest[];
   users: UserAccess[];
+  craftspeople: { id: string; Name: string; LastName: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number }[];
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
 }
@@ -59,6 +60,7 @@ function seedData(): DemoData {
     schedules: [],
     workRequests: [...SAMPLE_WORK_REQUESTS],
     users,
+    craftspeople: [],
     tradeRoleMappings: sites.flatMap((site) => CLASSICAL_TRADES.map((trade) => ({
       SiteId: site, Trade: trade,
       assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
@@ -91,7 +93,8 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
             !["buildings", "floors", "rooms", "equipment", "blueprints", "schedules", "workRequests"].every((key) => Array.isArray((parsed as Record<string, unknown>)[key])) ||
             (("users" in parsed) && !Array.isArray((parsed as Record<string, unknown>).users)) ||
             (("tradeRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).tradeRoleMappings)) ||
-            (("siteRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleMappings))) {
+            (("siteRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleMappings)) ||
+            (("craftspeople" in parsed) && !Array.isArray((parsed as Record<string, unknown>).craftspeople))) {
           throw new Error("Stored demo data has an invalid format.");
         }
         const savedData = parsed as Partial<DemoData>;
@@ -106,7 +109,8 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        setData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings });
+        setData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings,
+          craftspeople: savedData.craftspeople ?? defaults.craftspeople });
       }
     } catch (error) {
       console.error("Could not load demo data", error);

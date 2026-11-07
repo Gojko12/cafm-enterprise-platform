@@ -391,6 +391,20 @@ export function PMWorkRequestPopup({
   };
 
   const addCraftperson = (userId: string) => {
+    const craftperson = data.craftspeople.find((item) => item.id === userId && item.SiteId === activeSiteId);
+    if (craftperson) {
+      if ((workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
+      const labor = { craftpersonId: userId, hourlyRate: craftperson.HourlyRate, workingTimeMinutes: 0,
+        name: craftperson.Name, lastName: craftperson.LastName };
+      updateWorkRequest((current) => ({
+        ...current,
+        AssignedCraftpersonIds: [...(current.AssignedCraftpersonIds ?? []), userId],
+        CraftpersonLabor: [...(current.CraftpersonLabor ?? []), labor],
+      }), `Craftperson ${craftperson.Name} ${craftperson.LastName} assigned to ${workRequest.WR_ID} by ${actorName}`);
+      setAssignModalOpen(false);
+      setCraftFilter("");
+      return;
+    }
     const user = data.users.find((item) => item.UserId === userId);
     if (!user || (workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
     const names = user.DisplayName.trim().split(/\s+/);
@@ -838,11 +852,46 @@ export function PMWorkRequestPopup({
 
           {activeTab === "AuditLog" && <section className="space-y-4 rounded border bg-white p-4">
             <h3 className="font-semibold">QA inspection controls</h3>
+            <p className="text-sm">QA status: <strong>{workRequest.QA_InspectionStatus ?? "Pending"}</strong></p>
+            <label className="block text-sm">QA_IssueDescription
+              <textarea value={workRequest.QA_IssueDescription ?? ""} onChange={(event) =>
+                updateWorkRequest((current) => ({ ...current, QA_IssueDescription: event.target.value }))}
+                className="mt-1 block w-full rounded border p-2" rows={2} />
+            </label>
+            <label className="block text-sm">QA_CorrectionComment
+              <textarea value={workRequest.QA_CorrectionComment ?? ""} onChange={(event) =>
+                updateWorkRequest((current) => ({ ...current, QA_CorrectionComment: event.target.value }))}
+                className="mt-1 block w-full rounded border p-2" rows={2} />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={workRequest.Percentage !== 78} onClick={() => updateWorkRequest((current) => ({
+                ...current, QA_InspectionStatus: "Passed", AuditInspectionStatus: "Passed Inspected",
+              }), `Passed inspection marked by ${actorName}`)}
+                className="rounded bg-green-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Mark Passed Inspection</button>
+              <button type="button" disabled={workRequest.Percentage !== 78} onClick={() => {
+                const reason = window.prompt("Correction reason (required):", workRequest.QA_IssueDescription ?? "");
+                if (!reason?.trim()) { window.alert("A correction reason is required."); return; }
+                updateWorkRequest((current) => ({
+                  ...current, QA_InspectionStatus: "ToBeCorrected",
+                  AuditInspectionStatus: "PM WRs to be corrected", QA_IssueDescription: reason.trim(),
+                }), `Sent to PM WRs to be corrected: ${reason.trim()} (${actorName})`);
+              }} className="rounded bg-red-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Send to &quot;PM WRs to be corrected&quot;</button>
+              {workRequest.QA_InspectionStatus === "Passed" && <button type="button"
+                onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
+                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white">Complete (100%)</button>}
+            </div>
             <label className="block max-w-md text-sm">Inspection status
               <select aria-label="QA inspection status" value={workRequest.AuditInspectionStatus ?? "To Be Inspected"}
                 onChange={(event) => {
                   const value = event.target.value as NonNullable<BaseWorkRequest["AuditInspectionStatus"]>;
-                  updateWorkRequest((current) => ({ ...current, AuditInspectionStatus: value }),
+                  if (value !== "To Be Inspected" && workRequest.Percentage !== 78) {
+                    window.alert("QA inspection is available only after Technically Completed (78%).");
+                    return;
+                  }
+                  updateWorkRequest((current) => ({
+                    ...current, AuditInspectionStatus: value,
+                    QA_InspectionStatus: value === "Passed Inspected" ? "Passed" : value === "PM WRs to be corrected" ? "ToBeCorrected" : "Pending",
+                  }),
                     `QA inspection status changed to ${value} by ${actorName}`);
                 }} className="mt-1 block w-full rounded border px-3 py-2">
                 {["To Be Inspected", "Passed Inspected", "PM WRs to be corrected"].map((item) => <option key={item}>{item}</option>)}
@@ -1013,6 +1062,15 @@ export function PMWorkRequestPopup({
           <input aria-label="Filter craftspeople" value={craftFilter} onChange={(event) => setCraftFilter(event.target.value)}
             placeholder="Filter craftspeople..." className="my-3 w-full rounded border px-3 py-2" />
           <div className="max-h-72 overflow-auto">
+            {data.craftspeople.filter((person) =>
+              person.SiteId === activeSiteId &&
+              (!workRequest.TradeId || person.Trade === workRequest.TradeId) &&
+              !workRequest.AssignedCraftpersonIds?.includes(person.id) &&
+              `${person.Name} ${person.LastName}`.toLowerCase().includes(craftFilter.toLowerCase()),
+            ).map((person) => <div key={person.id} className="flex items-center justify-between border-t py-3">
+              <span>{person.Name} {person.LastName} · {person.Trade} · {person.HourlyRate.toFixed(2)} EUR/hour</span>
+              <button type="button" onClick={() => addCraftperson(person.id)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white">Assign</button>
+            </div>)}
             {data.users.filter((user) =>
               user.AssignedSiteIds.includes(activeSiteId) &&
               (!workRequest.TradeId || user.Trades.includes(workRequest.TradeId)) &&

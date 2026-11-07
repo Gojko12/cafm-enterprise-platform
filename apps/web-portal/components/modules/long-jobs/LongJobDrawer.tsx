@@ -64,7 +64,7 @@ export function LongJobDrawer({
     ...workRequest,
   });
 
-  const [escalationCost, setEscalationCost] = useState<number>(750);
+  const [escalationCost, setEscalationCost] = useState<number>(workRequest?.EstimatedCostEur ?? 750);
   const [freezeName, setFreezeName] = useState(workRequest?.ActiveFreezeName ?? "");
   const [freezeReason, setFreezeReason] = useState(workRequest?.PlannedFreezeText ?? "");
   useEffect(() => {

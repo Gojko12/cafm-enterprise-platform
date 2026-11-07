@@ -1,0 +1,206 @@
+"use client";
+
+import React, { useState } from "react";
+import type { BaseWorkRequest } from "@cafm/shared-schema";
+import { WR_Statuses } from "@cafm/shared-schema";
+import { useCafmStore } from "@/lib/cafm-store";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { useApp } from "@/lib/hooks/useApp";
+
+type Tab = "Work request details" | "Labor, parts & Completion" | "Attached Documents" | "AuditLog & QA";
+
+export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalateToLJ }: {
+  workRequest: BaseWorkRequest;
+  onClose: () => void;
+  onNavigate: (id: string) => void;
+  onEscalateToLJ: (wr: BaseWorkRequest) => void;
+}) {
+  const { data, setData } = useCafmStore();
+  const { currentUser } = useSiteContext();
+  const { currentRole } = useApp();
+  const [tab, setTab] = useState<Tab>("Work request details");
+  const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyFilter, setHistoryFilter] = useState<"all" | "comment" | "log">("all");
+  const [message, setMessage] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const actorId = currentUser?.UserId ?? "current-user";
+  const actorName = currentUser?.DisplayName ?? "Current user";
+
+  const update = (change: (wr: BaseWorkRequest) => BaseWorkRequest, log?: string) => {
+    const now = new Date().toISOString();
+    setData((state) => ({ ...state, workRequests: state.workRequests.map((wr) => {
+      if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId) return wr;
+      const changed = change(wr);
+      return { ...changed, UpdatedAt: now, ...(log ? { Activity: [...(changed.Activity ?? []), {
+        id: crypto.randomUUID(), kind: "log" as const, actorId, actorName, actorRole: currentRole, createdAt: now, text: log,
+      }] } : {}) };
+    }) }));
+  };
+  const post = () => {
+    if (!message.trim()) return;
+    const now = new Date().toISOString();
+    update((wr) => ({ ...wr, Activity: [...(wr.Activity ?? []), {
+      id: crypto.randomUUID(), kind: "comment", actorId, actorName, actorRole: currentRole,
+      createdAt: now, text: message.trim(), editHistory: [],
+    }] }));
+    setMessage("");
+  };
+  const saveEdit = (id: string) => {
+    if (!draft.trim()) return;
+    const now = new Date().toISOString();
+    update((wr) => ({ ...wr, Activity: (wr.Activity ?? []).map((entry) =>
+      entry.id === id && entry.kind === "comment" && entry.actorId === actorId
+        ? { ...entry, text: draft.trim(), editedAt: now, editHistory: [
+          ...(entry.editHistory ?? []), { text: entry.text, timestamp: entry.editedAt ?? entry.createdAt },
+        ] } : entry) }));
+    setEditing(null);
+  };
+  const transition = (percentage: number, label: string) => {
+    const configured = WR_Statuses.find((status) => status.ESAWorkType === workRequest.ESAWorkType && status.Percentage === percentage);
+    if ([50, 78, 100].includes(percentage) && !configured) {
+      window.alert(`No WR_Statuses configuration exists for ${percentage}% ${workRequest.ESAWorkType}.`);
+      return;
+    }
+    if (percentage === 100 && workRequest.Percentage !== 78) {
+      window.alert("Complete (100%) is available only after Technically Completed (78%).");
+      return;
+    }
+    update((wr) => ({
+      ...wr, Percentage: percentage,
+      WorkRequestStatus: percentage === 55 ? "On Hold" : percentage === 27 ? "Cancelled" : configured!.WorkRequestStatus,
+      WorkRequestSubstatus: percentage === 55 ? "On Hold" : percentage === 27 ? "Cancelled" : configured!.WorkRequestSubstatus,
+      IsFrozen: percentage === 55,
+    }), `${label} (${workRequest.Percentage}% to ${percentage}%) by ${actorName}`);
+  };
+  const attach = (file: File) => {
+    const reader = new FileReader();
+    reader.onerror = () => window.alert(`Could not read ${file.name}.`);
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        window.alert(`Could not read ${file.name}.`);
+        return;
+      }
+      update((wr) => ({ ...wr, Attachments: [...(wr.Attachments ?? []), {
+        id: crypto.randomUUID(), name: file.name, type: file.type, dataUrl: reader.result as string,
+      }] }), `Document '${file.name}' was added by ${actorName}`);
+    };
+    reader.readAsDataURL(file);
+  };
+  const tabs: Tab[] = ["Work request details", "Labor, parts & Completion", "Attached Documents", "AuditLog & QA"];
+  const group = (title: string, children: React.ReactNode) => <details open className="rounded border bg-white">
+    <summary className="cursor-pointer bg-slate-50 px-4 py-3 font-semibold">{title}</summary>
+    <div className="grid gap-3 p-4 sm:grid-cols-2">{children}</div>
+  </details>;
+  const field = (label: string, value: React.ReactNode) => <div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-words text-sm">{value || "—"}</dd></div>;
+  const craftpeople = data.craftspeople.filter((item) => item.SiteId === workRequest.SiteId);
+
+  return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
+    <section role="dialog" aria-modal="true" aria-label="FJ Details Popup" className="flex h-[95vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
+      <header className="flex items-center justify-between border-b bg-white px-5 py-3">
+        <div><h2 className="text-xl font-bold">FJ Details Popup</h2><p className="text-sm text-slate-600">{workRequest.WR_ID} · {workRequest.Description}</p></div>
+        <div className="flex items-center gap-3"><span className="rounded bg-green-100 px-3 py-1 text-sm font-semibold">Fast Job · {workRequest.Percentage}%</span><button aria-label="Close FJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button></div>
+      </header>
+      <nav className="flex shrink-0 gap-1 overflow-x-auto border-b bg-white px-3 pt-2" aria-label="Fast Job detail tabs">
+        {tabs.map((item) => <button key={item} role="tab" aria-selected={tab === item} onClick={() => setTab(item)}
+          className={`shrink-0 rounded-t-md border px-3 py-2 text-sm ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
+      </nav>
+      <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        {tab === "Work request details" && <div className="space-y-4">
+          {group("Fast Job Details", <>
+            {field("WR ID", workRequest.WR_ID)}{field("Job ID", workRequest.JobID)}
+            {field("Work request status", workRequest.WorkRequestStatus)}{field("Work request substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}
+            {field("Urgency", workRequest.Urgency)}{field("Trade name", workRequest.TradeName)}
+            {field("Estimated Cost (< 750 EUR)", <label className="flex items-center gap-2"><input aria-label="Estimated Cost (< 750 EUR)" type="number" min="0" max="749.99" step="0.01"
+              value={workRequest.EstimatedCostEur ?? 0} onChange={(e) => {
+                const value = Number(e.target.value);
+                if (value >= 0 && value < 750) update((wr) => ({ ...wr, EstimatedCostEur: value }));
+              }} onBlur={(e) => {
+                if (Number(e.currentTarget.value) >= 750) window.alert("Fast Job estimated cost must be below 750 EUR. Escalate it to a Long Job instead.");
+              }} className="w-36 rounded border px-2 py-1" /> EUR</label>)}{field("Actual Cost (EUR)", `${workRequest.ActualCostEur ?? 0} EUR`)}
+            {field("Created date", workRequest.CreatedDate)}{field("Start date", workRequest.StartDate)}
+            {field("Due date", workRequest.DueDate)}{field("Margin date", workRequest.MarginDate)}
+            {field("Parent PM WR ID", workRequest.ParentPM_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.ParentPM_WR_ID!)}>{workRequest.ParentPM_WR_ID}</button> : "—")}
+          </>)}
+          {group("Work Location", <>{field("Room code", workRequest.RoomCode)}{field("Level name", workRequest.LevelName)}{field("bl id", workRequest.bl_id)}{field("Problem location", workRequest.ProblemLocation)}</>)}
+          {group("Equipment", <>{field("Equipment code", workRequest.EquipmentCodes.join(", "))}{field("Local equipment code", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.LocalEquipmentCode).filter(Boolean).join(", "))}
+            {field("Equipment name", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.EquipmentName).filter(Boolean).join(", "))}
+            {field("Hierarchy Level", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.IsInstallation ? "Installation" : "Subequipment / SubSubEquipment").join(", "))}</>)}
+        </div>}
+        {tab === "Labor, parts & Completion" && <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Assign Craftperson</h3>
+            <label className="rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white">Assign Craftperson
+              <select aria-label="Assign Craftperson" className="ml-2 rounded text-slate-900" value="" onChange={(e) => {
+                const person = craftpeople.find((item) => item.id === e.target.value);
+                if (!person || (workRequest.CraftpersonLabor ?? []).some((line) => line.craftpersonId === person.id)) return;
+                update((wr) => ({ ...wr, CraftpersonLabor: [...(wr.CraftpersonLabor ?? []), {
+                  craftpersonId: person.id, hourlyRate: person.HourlyRate, workingTimeMinutes: 0,
+                  name: person.Name, lastName: person.LastName,
+                }] }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
+              }}><option value="">Select…</option>{craftpeople.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} ({person.Trade})</option>)}</select>
+            </label>
+          </div>
+          <div className="overflow-x-auto rounded border bg-white"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-slate-50"><tr>{["Hourly rate", "Working time (minutes)", "Name", "LastName", "Action"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr></thead>
+            <tbody>{(workRequest.CraftpersonLabor ?? []).map((row) => <tr key={row.craftpersonId} className="border-t">
+              <td className="p-3">{row.hourlyRate.toFixed(2)} EUR</td><td className="p-3"><input type="number" min="0" value={row.workingTimeMinutes} onChange={(e) => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).map((line) => line.craftpersonId === row.craftpersonId ? { ...line, workingTimeMinutes: Number(e.target.value) } : line) }))} className="w-28 rounded border px-2 py-1" /></td>
+              <td className="p-3">{row.name}</td><td className="p-3">{row.lastName}</td><td className="p-3"><button className="text-red-700" onClick={() => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).filter((line) => line.craftpersonId !== row.craftpersonId) }), `${row.name} ${row.lastName} removed by ${actorName}`)}>Remove</button></td></tr>)}
+              {!workRequest.CraftpersonLabor?.length && <tr><td className="p-4 text-slate-500" colSpan={5}>No craftpeople assigned.</td></tr>}</tbody></table></div>
+          <section className="rounded border bg-white p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">Spare parts / materials</h3><button type="button" onClick={() => update((wr) => ({ ...wr, SpareParts: [...(wr.SpareParts ?? []), { id: crypto.randomUUID(), description: "", quantity: 1, unitCostEur: 0 }] }), `Spare part row added by ${actorName}`)} className="rounded border px-3 py-1 text-sm">+ Add Part</button></div>
+            <div className="mt-3 space-y-2">{(workRequest.SpareParts ?? []).map((part) => <div key={part.id} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
+              <input aria-label="Spare part description" value={part.description} onChange={(e) => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).map((item) => item.id === part.id ? { ...item, description: e.target.value } : item) }))} placeholder="Description" className="rounded border px-2 py-1" />
+              <input aria-label="Spare part quantity" type="number" min="0" value={part.quantity} onChange={(e) => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).map((item) => item.id === part.id ? { ...item, quantity: Number(e.target.value) } : item) }))} className="rounded border px-2 py-1" />
+              <input aria-label="Spare part unit cost" type="number" min="0" step="0.01" value={part.unitCostEur} onChange={(e) => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).map((item) => item.id === part.id ? { ...item, unitCostEur: Number(e.target.value) } : item) }))} className="rounded border px-2 py-1" />
+              <button type="button" onClick={() => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).filter((item) => item.id !== part.id) }), `Spare part '${part.description}' removed by ${actorName}`)} className="text-red-700">Remove</button>
+            </div>)}</div>
+            <p className="mt-2 text-sm text-slate-600">Materials total: {(workRequest.SpareParts ?? []).reduce((total, item) => total + item.quantity * item.unitCostEur, 0).toFixed(2)} EUR</p>
+            <label className="mt-3 block text-sm">Actual Cost (EUR)<input type="number" min="0" value={workRequest.ActualCostEur ?? 0} onChange={(e) => update((wr) => ({ ...wr, ActualCostEur: Number(e.target.value) }))} className="ml-3 w-36 rounded border px-2 py-1" /></label>
+          </section>
+          <div className="flex flex-wrap gap-2">{[
+            ["Cancel WR (27%)", 27], ["On Hold (55%)", 55], ["Technically Completed (78%)", 78], ["Complete (100%)", 100],
+          ].map(([label, percent]) => <button key={label} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white">{label}</button>)}
+            <button onClick={() => {
+              let estimatedCost = workRequest.EstimatedCostEur ?? 0;
+              if (estimatedCost < 750) {
+                estimatedCost = Number(window.prompt("Enter revised estimated cost in EUR (minimum 750):", "750"));
+                if (!Number.isFinite(estimatedCost) || estimatedCost < 750) { window.alert("Long Job escalation requires an estimate of at least 750 EUR."); return; }
+                update((wr) => ({ ...wr, EstimatedCostEur: estimatedCost }));
+              }
+              onEscalateToLJ({ ...workRequest, EstimatedCostEur: estimatedCost });
+            }} className="rounded bg-amber-500 px-4 py-2 font-bold text-slate-950">Escalate to Long Job (≥ 750 EUR at 10%)</button>
+          </div>
+          <label className="block rounded border bg-white p-4 text-sm">Message text<textarea value={message} onChange={(e) => setMessage(e.target.value)} className="mt-2 block w-full rounded border p-2" rows={3} /></label>
+          <button onClick={post} disabled={!message.trim()} className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50">Post</button>
+        </div>}
+        {tab === "Attached Documents" && <section className="space-y-4 rounded border bg-white p-4">
+          <h3 className="font-semibold">Attached Documents</h3><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New WR Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
+          {(workRequest.Attachments ?? []).map((doc) => <div key={doc.id} className="flex items-center justify-between border-b py-3"><span>{doc.name}</span><div className="flex gap-3"><a href={doc.dataUrl} target="_blank" rel="noreferrer" onClick={() => update((wr) => wr, `Document '${doc.name}' opened by ${actorName}`)} className="text-blue-700 underline">Open</a><button onClick={() => update((wr) => ({ ...wr, Attachments: (wr.Attachments ?? []).filter((item) => item.id !== doc.id) }), `Document '${doc.name}' deleted by ${actorName}`)} className="text-red-700">Delete</button></div></div>)}
+        </section>}
+        {tab === "AuditLog & QA" && <section className="space-y-4 rounded border bg-white p-4">
+          <h3 className="font-semibold">QA inspection status &amp; notes</h3>
+          <p>Inspection status: <strong>{workRequest.QA_InspectionStatus ?? "Pending"}</strong></p>
+          <textarea aria-label="QA inspection notes" value={workRequest.QA_IssueDescription ?? ""} onChange={(e) => update((wr) => ({ ...wr, QA_IssueDescription: e.target.value }))} placeholder="QA inspection notes" className="block w-full rounded border p-3" rows={3} />
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => update((wr) => ({ ...wr, QA_InspectionStatus: "Passed" }), `QA inspection passed by ${actorName}`)} className="rounded bg-green-700 px-4 py-2 text-white">Mark Passed Inspection</button>
+            <button onClick={() => {
+              const reason = window.prompt("Correction reason (required):", "");
+              if (!reason?.trim()) { window.alert("A correction reason is required."); return; }
+              update((wr) => ({ ...wr, QA_InspectionStatus: "ToBeCorrected", QA_IssueDescription: reason.trim() }), `QA sent WR for correction: ${reason.trim()} (${actorName})`);
+            }} className="rounded bg-red-700 px-4 py-2 text-white">Send to correction (reason required)</button>
+          </div>
+        </section>}
+      </main>
+      <section className="shrink-0 border-t bg-white">
+        <button aria-expanded={historyOpen} onClick={() => setHistoryOpen((open) => !open)} className="flex w-full items-center justify-between px-5 py-3 font-semibold">History <span>{historyOpen ? "−" : "+"}</span></button>
+        {historyOpen && <div className="max-h-64 space-y-3 overflow-y-auto px-5 pb-4">
+          <div className="flex flex-wrap gap-2">{([["all", "All"], ["comment", "Human Comments Only"], ["log", "Automatic Logs Only"]] as const).map(([key, label]) => <button key={key} aria-pressed={historyFilter === key} onClick={() => setHistoryFilter(key)} className={`rounded px-3 py-1 text-sm ${historyFilter === key ? "bg-blue-700 text-white" : "bg-slate-100"}`}>{label}</button>)}</div>
+          {(workRequest.Activity ?? []).filter((entry) => historyFilter === "all" || entry.kind === historyFilter).slice().reverse().map((entry) => <article key={entry.id} className="border-b pb-2 text-sm">
+            <div className="text-xs text-slate-500">{entry.actorName} · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
+            {editing === entry.id ? <><textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="mt-2 w-full rounded border p-2" /><button onClick={() => saveEdit(entry.id)} className="text-blue-700">Save</button></> : <p>{entry.text}</p>}
+            {entry.kind === "comment" && entry.actorId === actorId && editing !== entry.id && <button onClick={() => { setEditing(entry.id); setDraft(entry.text); }} className="text-blue-700">Edit</button>}
+            {!!entry.editHistory?.length && <details><summary>Prior versions</summary>{entry.editHistory.map((version, index) => <p key={`${entry.id}-${index}`} className="border-l pl-2 text-slate-600">{new Date(version.timestamp).toLocaleString()} — {version.text}</p>)}</details>}
+          </article>)}
+        </div>}
+      </section>
+    </section>
+  </div>;
+}
