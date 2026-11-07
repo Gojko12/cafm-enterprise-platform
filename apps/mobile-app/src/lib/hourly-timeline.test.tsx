@@ -59,4 +59,16 @@ describe("hourly dispatch timeline", () => {
     await act(async () => root.unmount());
     container.remove();
   });
+  it("expands a collapsed trade and scrolls the highlighted assignment into view", () => {
+    const scroll = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    const view = render(<HourlyTimeline {...props} />);
+    fireEvent.click(screen.getByText(/📁 Mechanical/));
+    expect(screen.queryByText(wr.WR_ID)).toBeNull();
+    view.rerender(<HourlyTimeline {...props} spotlight={{ id: wr.WR_ID, person: person.id, day: "2026-11-09", trade: person.Trade, token: 1 }} />);
+    const bar = screen.getByText(wr.WR_ID).parentElement!;
+    expect(bar.className).toContain("ring-4");
+    expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "center", inline: "center" });
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
 });

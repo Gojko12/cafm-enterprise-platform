@@ -197,6 +197,17 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         wr.FreezeEndDate = "2026-11-07";
       }
     });
+    const examples = workRequests.filter((wr) => wr.SiteId === site && (wr.WR_ID === `2026${String((Number(tag) - 1) * 77 + 1).padStart(6, "0")}` || wr.WR_ID === `2026${String((Number(tag) - 1) * 77 + 2).padStart(6, "0")}` || (wr.WR_Type === "LJ" && wr.Percentage === 50)));
+    examples.forEach((wr, index) => {
+      const selected = [siteCraft[index], siteCraft[index + 4], ...(index === 2 ? [siteCraft[index + 8]] : [])];
+      wr.AssignedCraftpersonIds = selected.map((person) => person.id);
+      wr.StartDate_DateToPerform = "2026-11-09";
+      wr.CraftpersonAssignments = selected.map((person, i) => ({
+        craftpersonId: person.id,
+        assignedStartDateTime: `2026-11-${String(9 + i).padStart(2, "0")}T${i === 0 ? "08:00" : "09:00"}`,
+        assignedEndDateTime: `2026-11-${String(9 + i).padStart(2, "0")}T${i === 0 ? "11:00" : "12:00"}`,
+      }));
+    });
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };
 }

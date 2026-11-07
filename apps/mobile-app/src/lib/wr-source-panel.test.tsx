@@ -7,7 +7,7 @@ import { section20Seed } from "../../../web-portal/lib/section20-seed";
 const seed = section20Seed(["SITE-01"]);
 const pm = { ...seed.workRequests[0], WR_ID: "PM-1", WR_Type: "PM" as const, Percentage: 50, AssignedCraftpersonIds: [], Description: "Pump" };
 const lj = { ...seed.workRequests[1], WR_ID: "LJ-1", WR_Type: "LJ" as const, Percentage: 20, AssignedCraftpersonIds: [], Description: "Repair" };
-const props = { requests: [pm, lj], people: seed.craftspeople, buildings: seed.buildings, freezes: [], now: "", onOpen: vi.fn(), onAssign: vi.fn() };
+const props = { requests: [pm, lj], people: seed.craftspeople, buildings: seed.buildings, freezes: [], now: "", onOpen: vi.fn(), onAssign: vi.fn(), onShow: vi.fn() };
 beforeEach(() => {
   const values = new Map<string, string>();
   vi.stubGlobal("localStorage", {
@@ -53,5 +53,33 @@ describe("work request source panel", () => {
     expect(screen.queryByText("Repair")).toBeNull();
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-09" } });
     expect(screen.queryByText("Pump")).toBeNull();
+  });
+  it("shows scheduled assignments in card and list view with working locator actions", () => {
+    const scheduled = { ...pm, AssignedCraftpersonIds: [seed.craftspeople[0].id], CraftpersonAssignments: [{ craftpersonId: seed.craftspeople[0].id, assignedStartDateTime: "2026-11-09T08:00", assignedEndDateTime: "2026-11-09T11:00" }] };
+    const onShow = vi.fn();
+    render(<WRSourcePanel {...props} requests={[scheduled]} onShow={onShow} />);
+    expect(screen.getByLabelText("Show scheduled WRs")).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("button", { name: /Show$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "List View" }));
+    fireEvent.click(screen.getByRole("button", { name: /Show$/ }));
+    expect(onShow).toHaveBeenCalledTimes(2);
+    expect(onShow).toHaveBeenCalledWith("PM-1");
+  });
+  it("filters independently by multiple trades and buildings", () => {
+    const first = { ...pm, TradeName: "Mechanical", bl_id: seed.buildings[0].bl_id };
+    const second = { ...lj, TradeName: "Electrical", bl_id: seed.buildings[1].bl_id };
+    render(<WRSourcePanel {...props} requests={[first, second]} />);
+    const trades = screen.getByText("Pool Trades (All)").closest("details")!;
+    fireEvent.click(within(trades).getByText("Clear"));
+    fireEvent.click(within(trades).getByLabelText("Mechanical"));
+    expect(screen.getByText("Pump")).toBeTruthy();
+    expect(screen.queryByText("Repair")).toBeNull();
+    fireEvent.click(within(trades).getByLabelText("Electrical"));
+    expect(screen.getByText("Repair")).toBeTruthy();
+    const buildings = screen.getByText("Pool Buildings (All)").closest("details")!;
+    fireEvent.click(within(buildings).getByText("Clear"));
+    fireEvent.click(within(buildings).getByLabelText(new RegExp(seed.buildings[1].bl_id)));
+    expect(screen.queryByText("Pump")).toBeNull();
+    expect(screen.getByText("Repair")).toBeTruthy();
   });
 });

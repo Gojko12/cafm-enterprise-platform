@@ -21,18 +21,26 @@ function weekLabel(day: string) {
   return `w.${week} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
-export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit }: {
+export type TimelineSpotlight = { id: string; person: string; day: string; trade: string; token: number };
+
+export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit, spotlight }: {
   dates: string[]; people: Person[]; requests: BaseWorkRequest[]; absences: CraftpersonAbsence[]; freezes: LocationFreeze[];
   site: string; firstHour: number; lastHour: number;
   visible: (wr: BaseWorkRequest) => boolean;
   onMove: (id: string, person: string, start: string, end: string, from?: string) => void;
   onOpen: (id: string) => void;
   onEdit: (wr: BaseWorkRequest, person: string) => void;
+  spotlight?: TimelineSpotlight | null;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const cleanup = useRef<(() => void) | null>(null);
+  const target = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
+  useEffect(() => { if (spotlight) setCollapsed((old) => old.filter((trade) => trade !== spotlight.trade)); }, [spotlight]);
+  useEffect(() => {
+    if (spotlight && target.current && typeof target.current.scrollIntoView === "function") target.current.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  }, [spotlight, collapsed, dates, firstHour, lastHour]);
   const width = (lastHour - firstHour) * HOUR_WIDTH;
   const weeks: Array<{ label: string; count: number }> = [];
   for (const day of dates) {
@@ -77,7 +85,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
       <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => <React.Fragment key={trade}>
         <tr className="bg-slate-100"><th className="sticky left-0 z-20 border-r bg-slate-100 p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th>{dates.length > 0 && <td colSpan={dates.length} />}</tr>
         {!collapsed.includes(trade) && people.filter((person) => person.Trade === trade).map((person) => <tr key={person.id}>
-          <th className="sticky left-0 z-20 border-r border-t bg-white p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900">{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
+          <th className={`sticky left-0 z-20 border-r border-t p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] ${spotlight?.person === person.id ? "bg-amber-100" : "bg-white dark:bg-slate-900"}`}>{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
           {dates.map((day) => {
             const start = wallMinutes(`${day}T00:00`) + firstHour * 60, end = start + (lastHour - firstHour) * 60;
             const cap = dailyCapacity(displayed, absences, site, person.id, day, person.ShiftHours, person.shiftStart, person.shiftEnd);
@@ -93,7 +101,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
               const wr = requests.find((item) => item.WR_ID === payload.id);
               if (!wr) { window.alert("The dragged work request is no longer available."); return; }
               const from = "from" in payload && typeof payload.from === "string" ? payload.from : undefined;
-              const previous = from ? intervalFor(wr, from) : null;
+              const previous = intervalFor(wr, person.id) ?? (from ? intervalFor(wr, from) : null);
               const duration = previous ? wallMinutes(previous.assignedEndDateTime) - wallMinutes(previous.assignedStartDateTime) : Math.max(30, (wr.ExpectedHours ?? 1) * 60);
               const slot = start + Math.max(0, Math.min(lastHour - firstHour - 1, Math.floor((event.clientX - event.currentTarget.getBoundingClientRect().left) / HOUR_WIDTH))) * 60;
               onMove(wr.WR_ID, person.id, fromWallMinutes(slot), fromWallMinutes(slot + duration), from);
@@ -110,6 +118,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 const color = leave.absenceType === "Vacation" ? "bg-amber-100/90 text-amber-900" : leave.absenceType === "Training" ? "bg-indigo-100/90 text-indigo-900" : leave.absenceType === "SickLeave" ? "bg-rose-100/90 text-rose-900" : "bg-teal-100/90 text-teal-900";
                 return <div key={leave.id} className={`pointer-events-none absolute inset-y-0 overflow-hidden border ${color}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, ...(leave.absenceType === "Vacation" ? { backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 6px, rgba(180, 83, 9, 0.1) 6px, rgba(180, 83, 9, 0.1) 9px)" } : {}) }} title={leave.absenceType}>{leave.absenceType === "Vacation" ? "🏖" : leave.absenceType === "Training" ? "🎓" : leave.absenceType === "SickLeave" ? "🤒" : "●"} {leave.absenceType}</div>;
               })}
+              {spotlight?.person === person.id && spotlight.day === day && <div className="pointer-events-none absolute inset-0 bg-amber-200/40" />}
               <div className="pointer-events-none absolute left-1 top-0">{cap.allocated.toFixed(1)} / {cap.available.toFixed(1)} h <span className="inline-block h-1 w-16 bg-slate-300"><span className={`block h-1 ${cap.allocated > cap.available ? "bg-red-600" : "bg-green-600"}`} style={{ width: `${cap.available ? Math.min(100, 100 * cap.allocated / cap.available) : cap.allocated ? 100 : 0}%` }} /></span></div>
               {entries.map(({ wr, interval }, index) => {
                 if (!interval) return null;
@@ -117,7 +126,8 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
                 const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}`;
                 const editable = ![27, 78, 100].includes(wr.Percentage);
-                return <div key={wr.WR_ID} title={title} draggable={editable} onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID, from: person.id }))} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
+                const highlighted = spotlight?.id === wr.WR_ID && spotlight.person === person.id && spotlight.day === day;
+                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={title} draggable={editable} onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID, from: person.id }))} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${highlighted ? "z-10 animate-pulse bg-amber-200 shadow-lg ring-4 ring-amber-400" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
                   {editable && left === wallMinutes(interval.assignedStartDateTime) && <span role="separator" aria-label="Resize start" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "start")} />}
                   <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_ID}{conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
                   {editable && <><button aria-label={`Edit time for ${wr.WR_ID}`} onClick={() => onEdit(wr, person.id)}>✎</button><button aria-label={`Shorten ${wr.WR_ID}`} onClick={() => onMove(wr.WR_ID, person.id, interval.assignedStartDateTime, fromWallMinutes(Math.max(wallMinutes(interval.assignedStartDateTime) + 30, wallMinutes(interval.assignedEndDateTime) - 30)), person.id)}>−</button><button aria-label={`Extend ${wr.WR_ID}`} onClick={() => onMove(wr.WR_ID, person.id, interval.assignedStartDateTime, fromWallMinutes(wallMinutes(interval.assignedEndDateTime) + 30), person.id)}>+</button></>}

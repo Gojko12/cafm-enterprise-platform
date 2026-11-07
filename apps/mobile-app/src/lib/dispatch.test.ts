@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CraftpersonAbsenceSchema } from "@cafm/shared-schema";
-import { addDays, assignmentAbsences, dailyCapacity, fromWallMinutes, frozenOn, intervalFor, resolveLeaveConflicts, wallMinutes } from "../../../web-portal/lib/dispatch";
+import { addDays, assignmentAbsences, dailyCapacity, fromWallMinutes, frozenOn, intervalFor, resolveLeaveConflicts, schedulePerson, wallMinutes } from "../../../web-portal/lib/dispatch";
 import { section20Seed } from "../../../web-portal/lib/section20-seed";
 
 describe("dispatch capacity", () => {
@@ -78,6 +78,29 @@ describe("dispatch capacity", () => {
       const seeded = section20Seed([site]);
       expect(seeded.craftspeople.every((person) => person.shiftStart === "07:00" && person.shiftEnd === "15:30")).toBe(true);
       expect(seeded.workRequests.some((request) => request.CraftpersonAssignments?.some((item) => item.assignedStartDateTime >= "2026-11-07T00:00" && item.assignedStartDateTime < "2026-11-14T00:00"))).toBe(true);
+    }
+  });
+  it("adds and reschedules individual craftspeople without losing existing intervals", () => {
+    const first = { craftpersonId: "person", assignedStartDateTime: "2026-11-09T08:00", assignedEndDateTime: "2026-11-09T11:00" };
+    const second = { craftpersonId: "peer", assignedStartDateTime: "2026-11-10T09:00", assignedEndDateTime: "2026-11-10T12:00" };
+    const initial = schedulePerson({ ...wr, AssignedCraftpersonIds: [], CraftpersonAssignments: undefined }, first);
+    const both = schedulePerson(initial, second);
+    expect(both.AssignedCraftpersonIds).toEqual(["person", "peer"]);
+    expect(both.CraftpersonAssignments).toEqual([first, second]);
+    const moved = schedulePerson(both, { ...second, assignedStartDateTime: "2026-11-11T09:00", assignedEndDateTime: "2026-11-11T12:00" });
+    expect(moved.AssignedCraftpersonIds).toEqual(["person", "peer"]);
+    expect(intervalFor(moved, "person")).toEqual(first);
+    expect(intervalFor(moved, "peer")?.assignedStartDateTime).toBe("2026-11-11T09:00");
+    const legacy = schedulePerson({ ...wr, AssignedCraftpersonIds: ["person"], CraftpersonAssignments: undefined }, second);
+    expect(intervalFor(legacy, "person")?.assignedStartDateTime).toBe("2026-11-06T07:00");
+    const unscheduled = schedulePerson({ ...wr, AssignedCraftpersonIds: ["person"], CraftpersonAssignments: undefined, StartDate_DateToPerform: undefined }, second);
+    expect(intervalFor(unscheduled, "person")).toBeNull();
+    expect(intervalFor(unscheduled, "peer")).toEqual(second);
+  });
+  it("seeds multi-person PM and LJ assignments at every site", () => {
+    for (const site of ["SITE-01", "SITE-02", "SITE-03"] as const) {
+      const requests = section20Seed([site]).workRequests;
+      for (const type of ["PM", "LJ"]) expect(requests.some((item) => item.WR_Type === type && item.AssignedCraftpersonIds.length >= 2 && item.CraftpersonAssignments?.length === item.AssignedCraftpersonIds.length)).toBe(true);
     }
   });
 });

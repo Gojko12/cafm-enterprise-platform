@@ -6,6 +6,8 @@ import type { BaseWorkRequest, LocationFreeze } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
 import { describeLocationFreeze, getCurrentLocationFreezes } from "../../lib/location-freezes";
 import { tradeColor } from "../../lib/trade-colors";
+import { intervalFor } from "../../lib/dispatch";
+import { MultiSelectFilter } from "../common/MultiSelectFilter";
 
 type Person = DemoData["craftspeople"][number];
 const fields = [
@@ -21,9 +23,9 @@ const ljStatuses: Record<number, string> = { 0: "New Request for Quotation", 10:
 const preferenceKey = "cafm-wr-source-preferences-v1";
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
 
-export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpen, onAssign }: {
+export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpen, onAssign, onShow }: {
   requests: BaseWorkRequest[]; people: Person[]; buildings: DemoData["buildings"]; freezes: LocationFreeze[]; now: string;
-  onOpen: (id: string) => void; onAssign: (id: string) => void;
+  onOpen: (id: string) => void; onAssign: (id: string) => void; onShow: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [mode, setMode] = useState<"card" | "list">("card");
@@ -32,13 +34,13 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
   const [storageError, setStorageError] = useState("");
   const [types, setTypes] = useState<string[]>(["PM", "FJ", "LJ"]);
   const [statuses, setStatuses] = useState<number[]>([]);
-  const [trades, setTrades] = useState<Array<typeof CLASSICAL_TRADES[number]>>([]);
-  const [building, setBuilding] = useState("");
+  const [trades, setTrades] = useState<string[] | null>(null);
+  const [buildingsFilter, setBuildingsFilter] = useState<string[] | null>(null);
   const [location, setLocation] = useState("");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [scheduled, setScheduled] = useState(false);
+  const [scheduled, setScheduled] = useState(true);
   const [sort, setSort] = useState<Field>("id");
   const [descending, setDescending] = useState(false);
   useEffect(() => {
@@ -70,7 +72,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
   const activeStatuses = statuses.filter((value) => value in options);
   const rows = requests.filter((wr) => types.includes(wr.WR_Type) &&
     (!activeStatuses.length || activeStatuses.includes(wr.Percentage)) &&
-    (!trades.length || trades.some((trade) => trade === wr.TradeName)) && (!building || wr.bl_id === building) &&
+    (trades === null || trades.includes(wr.TradeName ?? "")) && (buildingsFilter === null || buildingsFilter.includes(wr.bl_id ?? "")) &&
     [wr.bl_id, wr.LevelName, wr.RoomCode, buildings.find((item) => item.bl_id === wr.bl_id)?.Name].some((value) => String(value ?? "").toLowerCase().includes(location.toLowerCase())) &&
     (scheduled || !wr.AssignedCraftpersonIds.length || (!wr.StartDate_DateToPerform && !wr.CraftpersonAssignments?.some((entry) => wr.AssignedCraftpersonIds.includes(entry.craftpersonId)))) &&
     (!from || !!wr.DueDate && wr.DueDate.slice(0, 10) >= from) && (!to || !!wr.DueDate && wr.DueDate.slice(0, 10) <= to) &&
@@ -89,8 +91,8 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
         <input aria-label="Search work requests" className="w-full border p-1" placeholder="Search work requests" value={search} onChange={(event) => setSearch(event.target.value)} />
         <div>{["PM", "FJ", "LJ"].map((type) => <label key={type} className="mr-2"><input type="checkbox" checked={types.includes(type)} onChange={(event) => { const checked = event.target.checked; toggle(setTypes, type, checked); if (type === "LJ" && !checked) setStatuses((old) => old.filter((status) => status in commonStatuses)); }} /> {type}</label>)}</div>
         <details><summary>WR Status {activeStatuses.length ? `(${activeStatuses.length})` : "(All)"}</summary><div className="max-h-40 overflow-auto">{Object.entries(options).map(([number, label]) => <label key={number} className="block"><input type="checkbox" checked={activeStatuses.includes(Number(number))} onChange={(event) => toggle(setStatuses, Number(number), event.target.checked)} /> {number}% {label}</label>)}</div><button className={button} onClick={() => setStatuses([])}>Clear</button></details>
-        <details><summary>Trade {trades.length ? `(${trades.length})` : "(All)"}</summary>{CLASSICAL_TRADES.map((trade) => <label key={trade} className="block"><input type="checkbox" checked={trades.includes(trade)} onChange={(event) => toggle(setTrades, trade, event.target.checked)} /> <span className={`rounded border px-1 ${tradeColor(trade)}`}>● {trade}</span></label>)}<button className={button} onClick={() => setTrades([])}>Clear</button></details>
-        <label className="block">Building / Location <select value={building} onChange={(event) => setBuilding(event.target.value)}><option value="">All buildings</option>{buildings.map((item) => <option key={item.bl_id} value={item.bl_id}>{item.bl_id} · {item.Name}</option>)}</select></label>
+        <MultiSelectFilter label="Pool Trades" value={trades} onChange={setTrades} options={CLASSICAL_TRADES.map((trade) => ({ value: trade, label: trade, className: `rounded border px-1 ${tradeColor(trade)}` }))} />
+        <MultiSelectFilter label="Pool Buildings" value={buildingsFilter} onChange={setBuildingsFilter} options={buildings.map((item) => ({ value: item.bl_id, label: `${item.bl_id} · ${item.Name}` }))} />
         <input aria-label="Filter location" className="w-full border p-1" placeholder="Building, floor or room" value={location} onChange={(event) => setLocation(event.target.value)} />
         <label>Due From <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label> <label>To <input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         {from && to && from > to && <p role="alert" className="text-red-700">Due date range is invalid.</p>}
@@ -100,9 +102,9 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
         {mode === "card" ? rows.map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID }))} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)}`}>
           {fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <p key={id} className="truncate" title={`${label}: ${values(wr)[id]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
           {getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄ Freeze Active at Location</span>}
-          <div><button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button> <button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button></div>
-        </article>) : <table className="w-full table-fixed text-left" style={{ minWidth: `${shown.length * 144 + 80}px` }}><thead><tr>{fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <th key={id} className="w-36"><button className="truncate" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button></th>)}<th className="w-20">Actions</th></tr></thead><tbody>
-          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID }))} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{fields.filter(([id]) => shown.includes(id)).map(([id]) => <td key={id} className="truncate p-1" title={values(wr)[id]}>{cell(wr, id)}</td>)}<td>{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button></td></tr>)}
+          <div><button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button> <button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button> {wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</div>
+        </article>) : <table className="w-full table-fixed text-left" style={{ minWidth: `${shown.length * 144 + 230}px` }}><thead><tr>{fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <th key={id} className="w-36"><button className="truncate" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button></th>)}<th className="w-56">Actions</th></tr></thead><tbody>
+          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID }))} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{fields.filter(([id]) => shown.includes(id)).map(([id]) => <td key={id} className="truncate p-1" title={values(wr)[id]}>{cell(wr, id)}</td>)}<td>{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
         </tbody></table>}
         {!rows.length && <p className="p-2">No matching work requests.</p>}
       </div>

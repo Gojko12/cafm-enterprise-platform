@@ -22,6 +22,17 @@ export function intervalFor(wr: BaseWorkRequest, person: string): TimedAssignmen
   return { craftpersonId: person, assignedStartDateTime: start, assignedEndDateTime: fromWallMinutes(wallMinutes(start) + Math.max(30, (wr.ExpectedHours ?? 1) * 60)) };
 }
 
+export function schedulePerson(wr: BaseWorkRequest, assignment: TimedAssignment): BaseWorkRequest {
+  const ids = [...new Set([...wr.AssignedCraftpersonIds, assignment.craftpersonId])];
+  const otherIds = wr.AssignedCraftpersonIds.filter((id) => id !== assignment.craftpersonId);
+  const previous = otherIds.map((id) => intervalFor(wr, id)).filter((item): item is TimedAssignment => item !== null);
+  return {
+    ...wr, AssignedCraftpersonIds: ids, CraftpersonAssignments: [...previous, assignment],
+    StartDate_DateToPerform: previous.length === otherIds.length ? assignment.assignedStartDateTime.slice(0, 10) : undefined, StartDateTBD: false,
+    ...(ids.length === 1 ? { ExpectedHours: (wallMinutes(assignment.assignedEndDateTime) - wallMinutes(assignment.assignedStartDateTime)) / 60 } : {}),
+  };
+}
+
 export function absenceInterval(absence: CraftpersonAbsence, day: string) {
   if (absence.status !== "Approved" || day < absence.startDate || day > absence.endDate) return null;
   if (absence.isFullDay || !absence.startTime || !absence.endTime) return [`${day}T00:00`, `${addDays(day, 1)}T00:00`] as const;
