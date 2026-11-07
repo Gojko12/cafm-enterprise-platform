@@ -9,7 +9,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { LJRole, SiteId } from "@cafm/shared-schema";
+import { SiteId } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import type { SiteRoleAssignment } from "@cafm/shared-schema";
 
@@ -37,19 +37,6 @@ const NAV_ITEMS = [
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/admin/rbac", label: "RBAC Settings", icon: Lock },
   ]},
-];
-
-const LJ_ROLES: LJRole[] = [
-  "ESA_TO",
-  "ESA_TM",
-  "ESA_LJM",
-  "ESA_CCM",
-  "ESA_DO",
-  "ESA_IM",
-  "TRADE_CM",
-  "TRADE_TM",
-  "ESA_LONG_JOB",
-  "TRADE_LONG_JOB",
 ];
 
 const SITE_IDS: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
@@ -127,16 +114,9 @@ export function Sidebar() {
 }
 
 export function TopBar() {
-  const { currentRole, setCurrentRole, setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
-  const { activeSiteId, setActiveSiteId, activeLJRole, setActiveLJRole, activePerson, setActivePerson } = useSiteContext();
+  const { setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
+  const { activeSiteId, setActiveSiteId, activePerson, setActivePerson } = useSiteContext();
   const { data: storeData, reset } = useCafmStore();
-  const roles = ["SiteAdministrator", "ESA_LongJobManager", "PM_Planner", "QA_Inspector", "MobileTechnician", "TeamLeader", "StandardEmployee"];
-
-  const getRoleBadgeColor = (role: string) => {
-    if (role.includes("Admin")) return "bg-red-100 text-red-800";
-    if (role.includes("Manager") || role.includes("Planner")) return "bg-blue-100 text-blue-800";
-    return "bg-emerald-100 text-emerald-800";
-  };
 
   const getSiteName = (siteId: SiteId): string => {
     const siteNames: Record<SiteId, string> = {
@@ -148,28 +128,24 @@ export function TopBar() {
   };
   const activeAssignments: SiteRoleAssignment[] = storeData.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === activeSiteId && assignment.PersonName === activePerson);
-  const people = ["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "SiteAdmin"];
+  const people = [...new Set(["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "TeamLeader", ...storeData.siteRoleAssignments.map((item) => item.PersonName), "SiteAdmin"])];
 
   return (
-    <div className="min-h-20 h-auto bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between">
+    <div className="h-14 shrink-0 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
       <div className="flex items-center gap-4">
         <div className="text-right">
           <label className="text-xs font-medium text-gray-600" htmlFor="active-person">Active Person</label>
           <select id="active-person" aria-label="Active Person" value={activePerson} onChange={(event) => setActivePerson(event.target.value)}
             className="ml-2 max-w-40 rounded border border-gray-300 bg-white px-2 py-1 text-sm">
             {people.map((person) => <option key={person} value={person}>
-              {person === "SiteAdmin" ? "SiteAdmin (All Override)" : person === "Thomas" ? "Thomas (ESA_TO)" :
+              {person === "SiteAdmin" ? "SiteAdministrator (All Override)" : person === "Thomas" ? "Thomas (ESA_TO)" :
                 person === "Draftsman" ? "Draftsman (ESA_DO)" : person === "Inventory Admin" ? "Inventory Admin (ESA_IM)" : person}
             </option>)}
           </select>
-          <div className="mt-1 flex max-w-[32rem] flex-wrap justify-end gap-1">
-            {activePerson === "SiteAdmin" ? <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">All Override</span> :
-              activeAssignments.map((assignment) => <span key={assignment.AssignmentId}
-                className={`rounded px-2 py-0.5 text-xs font-semibold ${assignment.AssignmentLevel === "Main" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
-                {assignment.SiteId} · {assignment.Trade} · {assignment.RoleCode} · {assignment.AssignmentLevel}
-              </span>)}
-            {!activeAssignments.length && activePerson !== "SiteAdmin" && <span className="text-xs text-gray-500">No assignments at this site</span>}
-          </div>
+          <span tabIndex={0} title={activePerson === "SiteAdmin" ? "All Override" : activeAssignments.map((item) => `${item.Trade}: ${item.RoleCode} (${item.AssignmentLevel})`).join("\n") || "No assignments at this site"}
+            className="ml-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">
+            {activePerson === "SiteAdmin" ? "All Override" : `${activeAssignments.length} roles`}
+          </span>
         </div>
         {/* Site Context Switcher */}
         <div className="flex items-center gap-2">
@@ -194,42 +170,6 @@ export function TopBar() {
         <button onClick={reset} className="px-3 py-2 border rounded text-sm">Reset Demo Data</button>
       </div>
       
-      <div className="flex items-center gap-4">
-        {/* LJ Role Selector */}
-        <div className="text-right">
-          <p className="text-xs font-medium text-gray-600">LJ Role</p>
-          <select
-            value={activeLJRole || ""}
-            onChange={(e) => setActiveLJRole((e.target.value || null) as LJRole | null)}
-            className="px-2 py-1 rounded text-xs border border-gray-300 bg-white"
-          >
-            <option value="">None</option>
-            {LJ_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* System Role Selector */}
-        <div className="text-right">
-          <p className="text-sm font-medium text-gray-900">Current Role</p>
-          <div className="flex gap-2 mt-1">
-            <select
-              value={currentRole}
-              onChange={(e) => setCurrentRole(e.target.value as any)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border-0 ${getRoleBadgeColor(currentRole)}`}
-            >
-              {roles.map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

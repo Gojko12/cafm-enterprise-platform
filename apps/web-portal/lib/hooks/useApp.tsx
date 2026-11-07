@@ -1,15 +1,14 @@
 "use client";
 
-import React, { createContext, ReactNode, useState, useCallback } from "react";
+import React, { createContext, ReactNode, useState } from "react";
 import { UserRole, ROLE_PERMISSIONS } from "@cafm/shared-schema";
-import { SiteContextProvider } from "@/lib/contexts/SiteContext";
-import { CafmStoreProvider } from "@/lib/cafm-store";
+import { SiteContextProvider, useSiteContext } from "@/lib/contexts/SiteContext";
+import { CafmStoreProvider, useCafmStore } from "@/lib/cafm-store";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 
 export interface AppContextType {
   // Role management
   currentRole: UserRole;
-  setCurrentRole: (role: UserRole) => void;
   canAccess: (permission: string) => boolean;
 
   // Location hierarchy
@@ -27,22 +26,31 @@ export interface AppContextType {
 export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [currentRole, setCurrentRole] = useState<UserRole>("SiteAdministrator");
+  return <SiteContextProvider><CafmStoreProvider><ScopedAppProvider>{children}</ScopedAppProvider></CafmStoreProvider></SiteContextProvider>;
+}
+
+function ScopedAppProvider({ children }: { children: ReactNode }) {
+  const { activePerson, activeSiteId, currentUser } = useSiteContext();
+  const { data } = useCafmStore();
+  const matchingUser = [currentUser, ...data.users].find((user) => user &&
+    (user.DisplayName === activePerson || user.UserId === activePerson) && user.AssignedSiteIds.includes(activeSiteId));
+  const roles: UserRole[] = activePerson === "SiteAdmin" ? ["SiteAdministrator"] : [
+    ...(activePerson === "TeamLeader" ? ["TeamLeader" as const] : []),
+    ...(matchingUser && matchingUser.SystemRole !== "SiteAdministrator" ? [matchingUser.SystemRole] : []),
+    ...data.siteRoleAssignments.filter((assignment) => assignment.SiteId === activeSiteId && assignment.PersonName === activePerson)
+      .map((assignment) => assignment.RoleCode),
+  ];
+  const currentRole = roles[0] ?? "StandardEmployee";
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [useSampleData] = useState(true);
 
-  const canAccess = useCallback(
-    (permission: string) => {
-      return ROLE_PERMISSIONS[currentRole].includes(permission as any);
-    },
-    [currentRole],
-  );
+  const canAccess = (permission: string) => (roles.length ? roles : [currentRole])
+    .some((role) => ROLE_PERMISSIONS[role].some((item) => item === permission));
 
   const value: AppContextType = {
     currentRole,
-    setCurrentRole,
     canAccess,
     selectedBuilding,
     selectedFloor,
@@ -55,9 +63,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={value}>
-      <SiteContextProvider>
-        <CafmStoreProvider>{children}</CafmStoreProvider>
-      </SiteContextProvider>
+      {children}
     </AppContext.Provider>
   );
 }

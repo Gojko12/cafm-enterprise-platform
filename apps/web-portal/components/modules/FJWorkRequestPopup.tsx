@@ -96,14 +96,14 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
   const craftpeople = data.craftspeople.filter((item) => item.SiteId === workRequest.SiteId);
 
   return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
-    <section role="dialog" aria-modal="true" aria-label="FJ Details Popup" className="flex h-[95vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
+    <section role="dialog" aria-modal="true" aria-label="FJ Details Popup" className="flex h-[95vh] w-[96vw] max-w-[96vw] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
       <header className="flex items-center justify-between border-b bg-white px-5 py-3">
         <div><h2 className="text-xl font-bold">FJ Details Popup</h2><p className="text-sm text-slate-600">{workRequest.WR_ID} · {workRequest.Description}</p></div>
         <div className="flex items-center gap-3"><span className="rounded bg-green-100 px-3 py-1 text-sm font-semibold">Fast Job · {workRequest.Percentage}%</span><button aria-label="Close FJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button></div>
       </header>
-      <nav className="flex shrink-0 gap-1 overflow-x-auto border-b bg-white px-3 pt-2" aria-label="Fast Job detail tabs">
-        {tabs.map((item) => <button key={item} role="tab" aria-selected={tab === item} onClick={() => setTab(item)}
-          className={`shrink-0 rounded-t-md border px-3 py-2 text-sm ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
+      <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Fast Job detail tabs">
+        {tabs.map((item) => <button key={item} role="tab" aria-label={item} title={item} aria-selected={tab === item} onClick={() => setTab(item)}
+          className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === "Work request details" && <div className="space-y-4">

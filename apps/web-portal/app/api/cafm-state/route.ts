@@ -32,6 +32,7 @@ const stateSchema = z.object({
   craftspeople: records,
   siteRoleAssignments: records,
   workRequests: records,
+  deletedWorkRequests: records.optional(),
   users: records,
   tradeRoleMappings: records,
   siteRoleMappings: records,
@@ -66,6 +67,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   const scoped = ["buildings", "floors", "rooms", "desks", "equipment", "schedules", "craftspeople", "siteRoleAssignments", "workRequests", "tradeRoleMappings", "siteRoleMappings"] as const;
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
+  if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return false;
   return true;
 }

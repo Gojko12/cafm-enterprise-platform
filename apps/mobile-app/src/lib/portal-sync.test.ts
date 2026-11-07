@@ -18,6 +18,7 @@ const makeState = () => ({
   desks: [], equipment: [] as Equipment[],
   blueprints: [], schedules: [], craftspeople: [], siteRoleAssignments: [],
   users: [], tradeRoleMappings: [], siteRoleMappings: [], workRequests: [structuredClone(original)],
+  deletedWorkRequests: [] as BaseWorkRequest[],
   mobileMutationIds: [] as string[],
 });
 
@@ -66,6 +67,7 @@ describe("portal synchronization", () => {
       Result: false, TechnicianId: "TECH-001", Timestamp: "2026-01-02T10:00:00Z",
       ImmutableChecksum: "checksum", TechnicianComment: "Needs repair",
     });
+
     await engine.queueMutation("SESSION_LOG", {
       WR_ID: "WR-1", SessionId: "session-1", TechnicianId: "TECH-001",
       StartedAt: "2026-01-02T10:00:00Z", StoppedAt: "2026-01-02T10:15:00Z",
@@ -84,6 +86,20 @@ describe("portal synchronization", () => {
     expect(state.workRequests[0]).toEqual(synced);
     expect(await db.getAllFromIndex("syncQueue", "by-status", "PENDING")).toHaveLength(0);
     expect(await db.getAllFromIndex("photoQueue", "by-status", "PENDING")).toHaveLength(0);
+  });
+
+  it("preserves archived request histories when mobile pushes another request", async () => {
+    const archived = { ...original, WR_ID: "DELETED-1", Activity: [{
+      id: "delete-1", kind: "log" as const, actorId: "admin", actorName: "Admin",
+      actorRole: "SiteAdministrator", createdAt: "2026-01-03", text: "Work request deleted",
+    }] };
+    state.deletedWorkRequests = [archived];
+    const db = await getDB();
+    await db.put("workRequests", original);
+    const engine = new OfflineEngine();
+    await engine.saveWorkRequest({ ...original, Description: "Mobile update" });
+    await engine.syncNow();
+    expect(state.deletedWorkRequests).toEqual([archived]);
   });
 
   it("retains queued changes when the portal edited the same request", async () => {

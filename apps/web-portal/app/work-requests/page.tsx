@@ -12,6 +12,7 @@ import { FastJobModal, type FastJobData } from "@/components/modules/FastJobModa
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
+import { WRDataGrid } from "@/components/modules/WRDataGrid";
 import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
 
@@ -109,6 +110,7 @@ export default function WorkRequestsPage() {
   const { data, setData } = useCafmStore();
   const workRequests = data.workRequests;
   const [requestType, setRequestType] = useState<WR_Type>("PM");
+  const [view, setView] = useState<"grid" | "card">("grid");
   const [bucket, setBucket] = useState<"issued" | "inspection" | "passed" | "corrected" | "completed" | "cancelled">("issued");
   const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
   const [teamQueue, setTeamQueue] = useState(false);
@@ -477,7 +479,11 @@ export default function WorkRequestsPage() {
         </div>
       </section>
 
-      {/* Work Requests List */}
+      <div className="flex gap-2" aria-label="Work request view">
+        <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")} className={`rounded px-3 py-2 ${view === "grid" ? "bg-blue-600 text-white" : "border bg-white"}`}>Data Grid</button>
+        <button type="button" aria-pressed={view === "card"} onClick={() => setView("card")} className={`rounded px-3 py-2 ${view === "card" ? "bg-blue-600 text-white" : "border bg-white"}`}>Card View</button>
+      </div>
+      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}`} requests={filteredRequests} onOpen={handleViewWR} /> :
       <div className="grid gap-4">
         {filteredRequests.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
@@ -632,8 +638,7 @@ export default function WorkRequestsPage() {
             </div>
           ))
         )}
-      </div>
-
+      </div>}
       {/* Drawer */}
       {pmPopupWR && <PMWorkRequestPopup
         key={`${pmPopupWR.SiteId}-${pmPopupWR.WR_ID}`}

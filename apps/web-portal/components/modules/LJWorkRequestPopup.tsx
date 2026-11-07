@@ -2,7 +2,6 @@
 
 import React, { useState } from "react";
 import type { BaseWorkRequest, LJRole } from "@cafm/shared-schema";
-import { LJRoleEnum } from "@cafm/shared-schema";
 import { useCafmStore, ASSIGNMENT_ROLES } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 
@@ -72,9 +71,8 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   onNavigate: (id: string) => void;
 }) {
   const { data, setData } = useCafmStore();
-  const { activeLJRole, setActiveLJRole, currentUser, activePerson } = useSiteContext();
+  const { currentUser, activePerson } = useSiteContext();
   const [tab, setTab] = useState<Tab>(TABS[0]);
-  const [role, setRole] = useState<LJRole>(activeLJRole ?? "ESA_TO");
   const [historyOpen, setHistoryOpen] = useState(true);
   const [actionsOpen, setActionsOpen] = useState(true);
   const [showAllActions, setShowAllActions] = useState(false);
@@ -90,14 +88,12 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
     assignment.PersonName === activePerson &&
     (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)) &&
     (assignment.AssignmentLevel === "Main" || assignment.AssignmentLevel === "Deputy"));
+  const role = activePerson === "SiteAdmin" ? "SiteAdministrator" : activeAssignments.map((assignment) => assignment.RoleCode).join(", ") || "Unassigned";
   const ljAssignments = data.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === workRequest.SiteId &&
     (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)));
   const hasPermission = (allowedRoles: readonly LJRole[]) => activePerson === "SiteAdmin" ||
     allowedRoles.some((allowedRole) => activeAssignments.some((assignment) => assignment.RoleCode === allowedRole));
-  const notificationRecipients = data.siteRoleAssignments.filter((assignment) =>
-    assignment.SiteId === workRequest.SiteId && assignment.ReceiveNotifications &&
-    (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)));
 
   const update = (change: (wr: BaseWorkRequest) => BaseWorkRequest, log?: string) => {
     const now = new Date().toISOString();
@@ -155,13 +151,6 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
           ...(entry.editHistory ?? []), { text: entry.text, timestamp: entry.editedAt ?? entry.createdAt },
         ] } : entry) }));
     setEditing(null);
-  };
-  const setActingRole = (value: string) => {
-    const parsed = LJRoleEnum.safeParse(value);
-    if (!parsed.success) return;
-    setRole(parsed.data);
-    setActiveLJRole(parsed.data);
-    update((wr) => wr, `Acting LJ role changed to ${parsed.data} by ${actorName}`);
   };
   const changeAssignedRole = (key: keyof NonNullable<BaseWorkRequest["AssignedRoles"]>, value: string) => {
     update((wr) => ({ ...wr, AssignedRoles: { ...wr.AssignedRoles, [key]: value || undefined } }),
@@ -331,19 +320,17 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   };
 
   return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
-    <section role="dialog" aria-modal="true" aria-label="LJ Details Popup" className="flex h-[95vh] w-full max-w-[1600px] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
+    <section role="dialog" aria-modal="true" aria-label="LJ Details Popup" className="flex h-[95vh] w-[96vw] max-w-[96vw] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b bg-white px-5 py-3">
-        <div><h2 className="text-xl font-bold">LJ Details Popup</h2><p className="text-sm text-slate-600">{workRequest.WR_ID} · {workRequest.Description}</p></div>
-        <div className="flex flex-wrap items-center gap-2"><span className="rounded bg-indigo-100 px-3 py-1 text-sm font-semibold">Process: {track}</span>
-          <span className="rounded bg-slate-800 px-3 py-1 text-sm font-bold text-white">{workRequest.Percentage}% · {workRequest.WorkRequestSubstatus}</span>
-          <label className="text-sm">Act as LJ Role<select aria-label="Act as LJ Role" value={role} onChange={(e) => setActingRole(e.target.value)} className="ml-2 rounded border px-2 py-1">{LJRoleEnum.options.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <div><h2 className="text-xl font-bold">LJ Details Popup</h2></div>
+        <div className="flex flex-wrap items-center gap-2">
           <button onClick={printYellowPage} className="rounded bg-amber-400 px-4 py-2 font-bold text-slate-950">Print Yellow Page</button>
           <button aria-label="Close LJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button>
         </div>
       </header>
-      <nav className="flex shrink-0 gap-1 overflow-x-auto border-b bg-white px-3 pt-2" aria-label="Long Job detail tabs">
-        {TABS.map((item) => <button key={item} role="tab" aria-selected={tab === item} onClick={() => setTab(item)}
-          className={`shrink-0 rounded-t-md border px-3 py-2 text-sm ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
+      <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Long Job detail tabs">
+        {TABS.map((item) => <button key={item} role="tab" aria-label={item} title={item} aria-selected={tab === item} onClick={() => setTab(item)}
+          className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === TABS[0] && <div className="space-y-4">
@@ -354,30 +341,25 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
               </button>
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input type="checkbox" checked={showAllActions} onChange={(event) => setShowAllActions(event.target.checked)} />
-                Show All Mendix Action Buttons (Matrix View)
+                Show all
               </label>
             </header>
             {actionsOpen && <div className="space-y-3 p-4">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded bg-slate-800 px-2 py-1 font-semibold text-white">{workRequest.SiteId} · {workRequest.TradeName ?? workRequest.TradeId ?? "No trade"}</span>
-                <span className="rounded bg-blue-100 px-2 py-1 font-semibold text-blue-800">Current stage: {workRequest.Percentage}%</span>
-                <span className="font-semibold text-slate-500">Notification recipients:</span>
-                {notificationRecipients.map((assignment) => <span key={assignment.AssignmentId} className="rounded bg-emerald-100 px-2 py-1 text-emerald-800">
-                  {assignment.PersonName} · {assignment.RoleCode} · {assignment.AssignmentLevel}
-                </span>)}
-                {!notificationRecipients.length && <span className="text-slate-500">None assigned</span>}
-                <span className="font-semibold text-slate-500">Main/Deputy:</span>
-                {ljAssignments.map((assignment) => <span key={`actor-${assignment.AssignmentId}`} className={`rounded px-2 py-1 ${assignment.AssignmentLevel === "Main" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
-                  {assignment.PersonName} · {assignment.RoleCode} · {assignment.AssignmentLevel}
-                </span>)}
-              </div>
               <div className="flex flex-wrap gap-2">
                 {visibleActions.map((action) => {
                   const available = canUseAction(action);
-                  return <button key={action.id} type="button" disabled={!available} onClick={() => runAction(action)}
-                    title={`${action.source.join(", ")}% → ${action.target}% · Roles: ${action.roles.join(", ")}${available ? "" : " · Not available for this stage/person"}`}
-                    className="rounded border border-blue-400 bg-white px-3.5 py-2 text-sm text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40">
-                    {action.label}
+                  const source = action.id === "cancel" ? (track === "RFQ" ? [0, 10, 20, 21, 23] : [0, 10]) :
+                    action.id === "convert-rfw" ? (track === "RFQ" ? [25, 28] : [0, 10]) : action.source;
+                  const allowedRoles = action.id === "technical-complete" && workRequest.Percentage !== 50
+                    ? action.roles.filter((item) => item !== "ESA_IM") : action.roles;
+                  const assigned = [...new Set(ljAssignments.filter((assignment) => allowedRoles.includes(assignment.RoleCode)).map((assignment) => assignment.PersonName))];
+                  const label = action.id === "convert-rfw" ? "Accept & Convert to RFW (30%)" :
+                    action.id === "technical-complete" ? "Technically Completed (78%/94%)" :
+                    action.label.replace(/\s+\([\d_,&\s]+\)$/, "");
+                  return <button key={action.id} type="button" aria-disabled={!available} onClick={() => { if (available) runAction(action); }}
+                    title={`Can be used at: ${source.map((stage) => `${stage}%`).join(", ")} (${action.id === "cancel" || action.id === "convert-rfw" ? track : action.tracks?.join("/") ?? "RFQ/RFW"})\nAllowed Roles: ${allowedRoles.join(", ")} (${assigned.join(", ") || "No assigned people"})${available ? "" : "\nNot available for this stage/person"}`}
+                    className="rounded border border-blue-400 bg-white px-3.5 py-2 text-sm text-blue-600 hover:bg-blue-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-40">
+                    {label}
                   </button>;
                 })}
                 {!visibleActions.length && <p className="text-sm text-slate-500">No actions are available for this stage and active person.</p>}

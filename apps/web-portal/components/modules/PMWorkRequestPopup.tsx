@@ -568,7 +568,7 @@ export function PMWorkRequestPopup({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-2 sm:p-5" role="presentation">
       <section role="dialog" aria-modal="true" aria-label="WR Details Popup"
-        className="flex h-[96vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
+        className="flex h-[96vh] w-[96vw] max-w-[96vw] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
         <header className="flex shrink-0 items-center justify-between border-b bg-white px-5 py-3">
           <div>
             <h2 className="text-lg font-bold text-slate-900">WR Details Popup</h2>
@@ -578,11 +578,11 @@ export function PMWorkRequestPopup({
             className="rounded px-3 py-2 text-xl leading-none text-slate-600 hover:bg-slate-100">×</button>
         </header>
 
-        <nav aria-label="WR detail tabs" className="flex shrink-0 gap-1 overflow-x-auto border-b bg-white px-3 pt-2">
+        <nav aria-label="WR detail tabs" className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2">
           {TABS.map((tab) => (
-            <button type="button" key={tab} role="tab" aria-selected={activeTab === tab}
+            <button type="button" key={tab} role="tab" aria-label={tab} title={tab} aria-selected={activeTab === tab}
               onClick={() => setActiveTab(tab)}
-              className={`shrink-0 rounded-t-md border px-3 py-2 text-sm ${activeTab === tab
+              className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${activeTab === tab
                 ? "border-blue-600 bg-blue-50 font-semibold text-blue-800"
                 : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
               {tab}

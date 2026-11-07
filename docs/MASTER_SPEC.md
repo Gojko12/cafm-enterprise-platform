@@ -633,3 +633,11 @@ Include a toggle in the `Actions` header:
 
 ### 18.3 Live Bulk Import and Export
 - Provide downloadable `.xlsx` and CSV templates, a dry-run preview of new and changed records with row and field validation errors, and a commit operation that persists validated records. A preview must describe the actual submitted file and a commit must not report success before persistence succeeds.
+
+## 19. Work Request UI and Data Grid
+
+- The portal header is a single compact row. Active Person determines site-assigned roles; SiteAdmin provides the explicit all-role demo override. The role count exposes assignments on hover or focus.
+- PM, FJ and LJ details use a wide dialog and a single compact tab row. The LJ Actions panel shows concise action names; its hover text identifies source stages, eligible roles and assigned people, and unavailable actions remain non-executable.
+- Work request views default to an editable grid with per-column combined filters, full-details links, selection of visible rows, and a Card View alternative. Edits and bulk changes append before/after details to each request's history. Location edits preserve the building/floor/room hierarchy and clear incompatible equipment. Hidden selections are counted in the bulk bar.
+- Bulk deletion moves the full request, including its deletion history entry, into the site-scoped persisted `deletedWorkRequests` archive rather than discarding its history. The mobile synchronization payload preserves this archive.
+- Grid status changes use the configured `WR_Statuses`, require the Team Leader or SiteAdministrator for 100% completion, and require passed PM QA. Frozen requests and LJ workflows must be handled through their full popups. The 55% and 27% options require popup handling because they are not currently defined in the central status configuration; rejected bulk changes do not partially apply.

@@ -34,6 +34,7 @@ export interface DemoData {
   blueprints: PM_ChecklistStandard[];
   schedules: PM_Schedule[];
   workRequests: BaseWorkRequest[];
+  deletedWorkRequests?: BaseWorkRequest[];
   users: UserAccess[];
   craftspeople: { id: string; Name: string; LastName: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number }[];
   tradeRoleMappings: TradeRoleMapping[];

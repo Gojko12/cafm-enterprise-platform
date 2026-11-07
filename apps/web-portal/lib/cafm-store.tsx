@@ -58,6 +58,7 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     blueprints: data.blueprints.filter((item) => !item.SiteId || item.SiteId === site),
     schedules: data.schedules.filter((item) => item.SiteId === site),
     workRequests: data.workRequests.filter((item) => item.SiteId === site),
+    deletedWorkRequests: (data.deletedWorkRequests ?? []).filter((item) => item.SiteId === site),
     users: data.users.filter((item) => item.AssignedSiteIds.includes(site))
       .map((item) => ({ ...item, AssignedSiteIds: [site] })),
     craftspeople: data.craftspeople.filter((item) => item.SiteId === site),
@@ -125,6 +126,7 @@ function seedData(): DemoData {
   return {
     sites,
     mobileMutationIds: [],
+    deletedWorkRequests: [],
     buildings: [...ESOC_BUILDINGS, ...ESTEC_BUILDINGS, ...ESRIN_BUILDINGS],
     floors: [...ESOC_FLOORS, ...ESTEC_FLOORS, ...ESRIN_FLOORS],
     rooms: [...ESOC_ROOMS, ...ESTEC_ROOMS, ...ESRIN_ROOMS],
