@@ -29,6 +29,23 @@ export const WRStatusDefinitionSchema = z.object({
 
 export type WRStatusDefinition = z.infer<typeof WRStatusDefinitionSchema>;
 
+export const ChecklistHistoryEntrySchema = z.object({
+  id: z.string().min(1),
+  timestamp: z.string().min(1),
+  performedBy: z.string().min(1),
+  actionType: z.string().min(1),
+  stepReference: z.string().optional(),
+  details: z.string().min(1),
+});
+
+export const CraftpersonLaborSchema = z.object({
+  craftpersonId: z.string().min(1),
+  hourlyRate: z.number().nonnegative(),
+  workingTimeMinutes: z.number().nonnegative(),
+  name: z.string().min(1),
+  lastName: z.string().min(1),
+});
+
 export const WR_Statuses: readonly WRStatusDefinition[] = Object.freeze([
   {
     WorkRequestStatus: "Issued",
@@ -137,8 +154,24 @@ export const BaseWorkRequestSchema = z.object({
     ESA_IM: z.string().optional(),
   }).optional(),
   ChecklistSteps: z.array(PM_ScheduleStepSchema).optional(),
+  ChecklistStandardCode: z.string().optional(),
+  ChecklistCompleted: z.boolean().optional(),
   ChecklistInstances: z.array(PM_WorkRequestStepSchema).optional(),
   StepAuditLogs: z.array(PM_StepAuditLogSchema).optional(),
+  ChecklistHistory: z.array(ChecklistHistoryEntrySchema).optional(),
+  CraftpersonLabor: z.array(CraftpersonLaborSchema).optional(),
+  PMPIdOriginal: z.string().optional(),
+  PMPIdSmart: z.string().optional(),
+  PMProcedureDescription: z.string().optional(),
+  PMProcedureDescriptionSmart: z.string().optional(),
+  ResponsibleCompany: z.string().optional(),
+  ResponsiblePerson: z.string().optional(),
+  PMSIdOriginal: z.string().optional(),
+  PMSIdSmart: z.string().optional(),
+  DowntimeMinutes: z.number().nonnegative().optional(),
+  KPINotes: z.string().optional(),
+  AuditInspectionStatus: z.enum(["To Be Inspected", "Passed Inspected", "PM WRs to be corrected"]).optional(),
+  Urgency: z.string().optional(),
   PreSATApproved: z.boolean().optional(),
   Activity: z.array(z.object({
     id: z.string(),
@@ -174,6 +207,8 @@ export const BaseWorkRequestSchema = z.object({
 });
 
 export type BaseWorkRequest = z.infer<typeof BaseWorkRequestSchema>;
+export type ChecklistHistoryEntry = z.infer<typeof ChecklistHistoryEntrySchema>;
+export type CraftpersonLabor = z.infer<typeof CraftpersonLaborSchema>;
 
 // Acceptance Gate Schemas (Section 11.4)
 export const AcceptanceGateStatusEnum = z.enum([

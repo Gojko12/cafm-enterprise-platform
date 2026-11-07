@@ -9,6 +9,7 @@ import type { Building, Floor, Room } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { FastJobModal, type FastJobData } from "@/components/modules/FastJobModal";
+import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
 
@@ -123,6 +124,7 @@ export default function WorkRequestsPage() {
     "create"
   );
   const [selectedWR, setSelectedWR] = useState<BaseWorkRequest | null>(null);
+  const [pmPopupWR, setPmPopupWR] = useState<BaseWorkRequest | null>(null);
   const [locationFilter, setLocationFilter] = useState<{
     building: Building | null;
     floor: Floor | null;
@@ -136,6 +138,7 @@ export default function WorkRequestsPage() {
     setDrawerOpen(false);
     setFastJobOpen(false);
     setSelectedWR(null);
+    setPmPopupWR(null);
     setLocationFilter({ building: null, floor: null, room: null });
     setSelectedEquipmentCodes([]);
     setTeamQueue(false);
@@ -239,6 +242,10 @@ export default function WorkRequestsPage() {
   };
 
   const handleViewWR = (wr: BaseWorkRequest) => {
+    if (wr.WR_Type === "PM") {
+      setPmPopupWR(wr);
+      return;
+    }
     setSelectedWR(wr);
     setDrawerMode("view");
     setDrawerOpen(true);
@@ -564,6 +571,27 @@ export default function WorkRequestsPage() {
       </div>
 
       {/* Drawer */}
+      {pmPopupWR && <PMWorkRequestPopup
+        key={`${pmPopupWR.SiteId}-${pmPopupWR.WR_ID}`}
+        workRequest={workRequests.find((wr) => wr.WR_ID === pmPopupWR.WR_ID && wr.SiteId === pmPopupWR.SiteId) ?? pmPopupWR}
+        onClose={() => setPmPopupWR(null)}
+        onNavigate={(id) => {
+          const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId);
+          if (!target) { alert(`Work request ${id} is not available at this site.`); return; }
+          if (target.WR_Type === "LJ") {
+            setPmPopupWR(null);
+            setSelectedWR(target);
+            setDrawerMode("view");
+            setDrawerOpen(true);
+          } else {
+            setPmPopupWR(target);
+          }
+        }}
+        onEscalateToLJ={(wr) => {
+          setPmPopupWR(null);
+          handleEscalateToLJ(wr);
+        }}
+      />}
       <LongJobDrawer
         key={`${activeSiteId}-${drawerMode}-${selectedWR?.WR_ID || "new"}-${drawerOpen}`}
         isOpen={drawerOpen}

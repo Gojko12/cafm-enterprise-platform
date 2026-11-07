@@ -26,6 +26,8 @@ export const EquipmentSchema = z.object({
   EquipmentCode: z.string().min(1),
   LocalEquipmentCode: z.string().optional(),
   EquipmentName: z.string().min(1),
+  EquipmentStandardDescription: z.string().optional(),
+  EquipmentStandardId: z.string().optional(),
   EquipmentUseEnglish: z.string().optional(),
   IsInstallation: z.boolean().default(false),
   Status: EquipmentStatusSchema.default("Active"),

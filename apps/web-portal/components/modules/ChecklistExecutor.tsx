@@ -138,7 +138,7 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
         <button type="button" disabled={index === 0} onClick={() => setIndex(index - 1)} className="px-3 py-2 border rounded disabled:opacity-40">Back</button>
         {index < steps.length - 1
           ? <button type="button" onClick={() => setIndex(index + 1)} className="px-3 py-2 bg-blue-600 text-white rounded">Next</button>
-          : <button type="button" onClick={finish} className="px-3 py-2 bg-green-700 text-white rounded">Finish &amp; Complete (78%)</button>}
+          : <button type="button" onClick={finish} className="px-3 py-2 bg-green-700 text-white rounded">Finish Checklist</button>}
       </div>
     </div>
   </div>;

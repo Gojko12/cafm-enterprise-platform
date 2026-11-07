@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 
 export interface PM_StepDefinition {
@@ -6,24 +6,29 @@ export interface PM_StepDefinition {
   StepNumber: number;
   StepTitle: string;
   InputType: "Boolean" | "Numeric" | "SingleSelect" | "MultiSelect" | "FreeText";
+  IsRequired?: boolean;
+  favourableBoolean?: boolean;
   MinThreshold?: number;
   MaxThreshold?: number;
   Unit?: string;
-  Options?: Array<{ OptionId: string; OptionValue: string }>;
+  RequiresPhotoOnFailure?: boolean;
+  RequiresCommentOnFailure?: boolean;
+  Options?: Array<{ OptionId: string; OptionValue: string; TriggersFailure?: boolean }>;
 }
 
-interface PM_StepExecutionValue {
+export interface PM_StepExecutionValue {
   StepId: string;
   Value: string | number | boolean | string[];
   PhotoUrl?: string;
   TechnicianComment?: string;
   Timestamp: string;
+  Passed: boolean;
 }
 
 interface ChecklistExecutorProps {
   wr: BaseWorkRequest;
   steps: PM_StepDefinition[];
-  onStepComplete?: (stepValues: PM_StepExecutionValue[]) => void;
+  onStepComplete?: (stepValues: PM_StepExecutionValue[]) => void | Promise<void>;
   onOpenFollowUpFJ?: () => void;
   onEscalateLJ?: () => void;
   onClose?: () => void;
@@ -38,13 +43,34 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
   onClose,
 }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [stepValues, setStepValues] = useState<PM_StepExecutionValue[]>([]);
+  const [stepValues, setStepValues] = useState<PM_StepExecutionValue[]>(() =>
+    (wr.ChecklistResults ?? []).map((result) => {
+      const step = steps.find((item) => item.StepId === result.stepId);
+      const value = step?.InputType === "Boolean"
+        ? result.value === "true"
+        : result.value;
+      return {
+        StepId: result.stepId,
+        Value: value,
+        Timestamp: result.completedAt,
+        Passed: result.passed,
+        ...(result.photoPaths?.[0] ? { PhotoUrl: result.photoPaths[0] } : {}),
+        ...(result.comment ? { TechnicianComment: result.comment } : {}),
+      };
+    }),
+  );
   const [failurePhoto, setFailurePhoto] = useState<string | null>(null);
   const [failureComment, setFailureComment] = useState("");
   const [stepFailed, setStepFailed] = useState(false);
 
   const currentStep = steps[currentStepIndex];
   const isLastStep = currentStepIndex === steps.length - 1;
+  useEffect(() => {
+    const saved = stepValues.find((item) => item.StepId === currentStep?.StepId);
+    setFailurePhoto(saved?.PhotoUrl ?? null);
+    setFailureComment(saved?.TechnicianComment ?? "");
+    setStepFailed(saved ? !saved.Passed : false);
+  }, [currentStep?.StepId, stepValues]);
 
   const handleBooleanInput = (value: boolean) => {
     const newValues = [...stepValues];
@@ -56,26 +82,31 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
         ...newValues[existingIndex],
         Value: value,
         Timestamp: timestamp,
+        Passed: value === (currentStep.favourableBoolean ?? true),
       };
     } else {
       newValues.push({
         StepId: currentStep.StepId,
         Value: value,
         Timestamp: timestamp,
+        Passed: value === (currentStep.favourableBoolean ?? true),
       });
     }
     setStepValues(newValues);
 
-    if (!value) {
-      setStepFailed(true);
-    }
+    setStepFailed(value !== (currentStep.favourableBoolean ?? true));
   };
 
   const handleNumericInput = (value: string) => {
     const newValues = [...stepValues];
     const existingIndex = newValues.findIndex((v) => v.StepId === currentStep.StepId);
     const timestamp = new Date().toISOString();
-    const numValue = parseFloat(value);
+    const numValue = Number(value);
+    if (!value.trim() || !Number.isFinite(numValue)) {
+      setStepValues(newValues.filter((item) => item.StepId !== currentStep.StepId));
+      setStepFailed(false);
+      return;
+    }
 
     const isOutOfRange =
       (currentStep.MinThreshold !== undefined && numValue < currentStep.MinThreshold) ||
@@ -86,12 +117,14 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
         ...newValues[existingIndex],
         Value: numValue,
         Timestamp: timestamp,
+        Passed: !isOutOfRange,
       };
     } else {
       newValues.push({
         StepId: currentStep.StepId,
         Value: numValue,
         Timestamp: timestamp,
+        Passed: !isOutOfRange,
       });
     }
     setStepValues(newValues);
@@ -112,10 +145,53 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
     }
   };
 
+  const handleTextInput = (value: string) => {
+    const existing = stepValues.find((item) => item.StepId === currentStep.StepId);
+    const next: PM_StepExecutionValue = {
+      ...(existing ?? { StepId: currentStep.StepId, Passed: true }),
+      Value: value,
+      Timestamp: new Date().toISOString(),
+    };
+    setStepValues([...stepValues.filter((item) => item.StepId !== currentStep.StepId), next]);
+  };
+
+  const handleOptionInput = (optionValue: string, selected: boolean) => {
+    const existing = stepValues.find((item) => item.StepId === currentStep.StepId);
+    const currentValues = Array.isArray(existing?.Value) ? existing.Value : [];
+    const nextValues = selected
+      ? [...currentValues, optionValue]
+      : currentValues.filter((value) => value !== optionValue);
+    const failed = nextValues.some((value) =>
+      currentStep.Options?.find((option) => option.OptionValue === value)?.TriggersFailure,
+    );
+    const next: PM_StepExecutionValue = {
+      ...(existing ?? { StepId: currentStep.StepId, Passed: true }),
+      Value: nextValues,
+      Timestamp: new Date().toISOString(),
+      Passed: !failed,
+    };
+    setStepValues([...stepValues.filter((item) => item.StepId !== currentStep.StepId), next]);
+    setStepFailed(failed);
+  };
+
   const handleNextStep = () => {
-    if (stepFailed && !failurePhoto) {
+    if (stepFailed && currentStep.RequiresPhotoOnFailure !== false && !failurePhoto) {
       alert("Photo is required when a step fails");
       return;
+    }
+    if (stepFailed && currentStep.RequiresCommentOnFailure !== false && !failureComment.trim()) {
+      alert("A comment is required when a step fails");
+      return;
+    }
+
+    const currentValue = stepValues.find((item) => item.StepId === currentStep.StepId);
+    if (currentValue) {
+      setStepValues([...stepValues.filter((item) => item.StepId !== currentStep.StepId), {
+        ...currentValue,
+        ...(failurePhoto ? { PhotoUrl: failurePhoto } : {}),
+        ...(failureComment.trim() ? { TechnicianComment: failureComment.trim() } : {}),
+        Passed: !stepFailed,
+      }]);
     }
 
     if (currentStepIndex < steps.length - 1) {
@@ -128,6 +204,15 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
 
   const handlePreviousStep = () => {
     if (currentStepIndex > 0) {
+      const currentValue = stepValues.find((item) => item.StepId === currentStep.StepId);
+      if (currentValue) {
+        setStepValues([...stepValues.filter((item) => item.StepId !== currentStep.StepId), {
+          ...currentValue,
+          ...(failurePhoto ? { PhotoUrl: failurePhoto } : {}),
+          ...(failureComment.trim() ? { TechnicianComment: failureComment.trim() } : {}),
+          Passed: !stepFailed,
+        }]);
+      }
       setCurrentStepIndex(currentStepIndex - 1);
       setStepFailed(false);
       setFailurePhoto(null);
@@ -135,14 +220,41 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
     }
   };
 
-  const handleSubmitChecklist = () => {
-    if (stepFailed && !failurePhoto) {
+  const handleSubmitChecklist = async () => {
+    if (stepFailed && currentStep.RequiresPhotoOnFailure !== false && !failurePhoto) {
       alert("Photo is required when a step fails");
       return;
     }
 
-    if (onStepComplete) {
-      onStepComplete(stepValues);
+    if (stepFailed && currentStep.RequiresCommentOnFailure !== false && !failureComment.trim()) {
+      alert("A comment is required when a step fails");
+      return;
+    }
+    const currentValue = stepValues.find((item) => item.StepId === currentStep.StepId);
+    const finalValues = stepValues.map((item) => item.StepId === currentStep.StepId
+      ? { ...item, ...(failurePhoto ? { PhotoUrl: failurePhoto } : {}),
+          ...(failureComment.trim() ? { TechnicianComment: failureComment.trim() } : {}) }
+      : item);
+    const answered = new Set(finalValues.filter((item) =>
+      !(typeof item.Value === "string" && !item.Value.trim()) &&
+      !(Array.isArray(item.Value) && item.Value.length === 0),
+    ).map((item) => item.StepId));
+    const missing = steps.filter((step) => step.IsRequired !== false && !answered.has(step.StepId));
+    if (!currentValue && currentStep.IsRequired !== false) {
+      alert(`Answer the current step before submitting: ${currentStep.StepTitle}`);
+      return;
+    }
+    if (missing.length) {
+      alert(`Complete the required answers for: ${missing.map((step) => step.StepTitle).join(", ")}`);
+      return;
+    }
+    const checkedValues = finalValues.map((item) => item.StepId === currentStep.StepId
+      ? { ...item, Passed: !stepFailed }
+      : item);
+    try {
+      await onStepComplete?.(checkedValues);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not save the completed checklist.");
     }
   };
 
@@ -222,7 +334,17 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
               {currentStep.Options.map((opt) => (
                 <button
                   key={opt.OptionId}
-                  onClick={() => handleNumericInput(opt.OptionValue)}
+                  onClick={() => {
+                    const failed = opt.TriggersFailure ?? false;
+                    const next: PM_StepExecutionValue = {
+                      StepId: currentStep.StepId,
+                      Value: opt.OptionValue,
+                      Timestamp: new Date().toISOString(),
+                      Passed: !failed,
+                    };
+                    setStepValues([...stepValues.filter((item) => item.StepId !== currentStep.StepId), next]);
+                    setStepFailed(failed);
+                  }}
                   className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-sm"
                 >
                   {opt.OptionValue}
@@ -231,10 +353,26 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
             </div>
           )}
 
+          {currentStep.InputType === "MultiSelect" && currentStep.Options && (
+            <div className="space-y-2">
+              {currentStep.Options.map((option) => (
+                <label key={option.OptionId} className="flex items-center gap-2 rounded border p-3">
+                  <input type="checkbox"
+                    checked={Array.isArray(stepValues.find((item) => item.StepId === currentStep.StepId)?.Value) &&
+                      (stepValues.find((item) => item.StepId === currentStep.StepId)?.Value as string[]).includes(option.OptionValue)}
+                    onChange={(event) => handleOptionInput(option.OptionValue, event.target.checked)} />
+                  {option.OptionValue}
+                </label>
+              ))}
+            </div>
+          )}
+
           {currentStep.InputType === "FreeText" && (
             <textarea
               placeholder="Enter observations..."
               rows={4}
+              value={String(stepValues.find((item) => item.StepId === currentStep.StepId)?.Value ?? "")}
+              onChange={(event) => handleTextInput(event.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm"
               aria-label="Free text input"
             />
@@ -250,10 +388,10 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
               <label className="text-sm font-medium text-gray-700 block mb-2">
                 Capture Photo
               </label>
-              {failurePhoto ? (
+              {failurePhoto || stepValues.find((item) => item.StepId === currentStep.StepId)?.PhotoUrl ? (
                 <div className="relative">
                   <img
-                    src={failurePhoto}
+                    src={failurePhoto ?? stepValues.find((item) => item.StepId === currentStep.StepId)?.PhotoUrl}
                     alt="Failure photo"
                     className="w-full h-40 object-cover rounded"
                   />

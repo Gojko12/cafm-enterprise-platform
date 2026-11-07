@@ -648,6 +648,7 @@ export function LongJobDrawer({
                         const reopened = percentage === 50 ? (wr.ChecklistInstances ?? []).filter((step) => step.IsCompleted) : [];
                         return { ...wr, ...status, UpdatedAt: now,
                           ChecklistInstances: percentage === 50 ? wr.ChecklistInstances?.map((step) => ({ ...step, IsCompleted: false })) : wr.ChecklistInstances,
+                          ...(percentage === 50 ? { ChecklistCompleted: false } : {}),
                           StepAuditLogs: [...(wr.StepAuditLogs ?? []), ...reopened.map((step) => ({
                             AuditLogId: crypto.randomUUID(), StepInstanceId: step.StepInstanceId, WR_ID: wr.WR_ID,
                             ActorId: currentUser?.UserId ?? "current-user", Action: "reopened" as const, OccurredAt: now,
@@ -698,7 +699,7 @@ export function LongJobDrawer({
                   onClear={(stepId) => setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
                     if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 50) return wr;
                     const actorName = currentUser?.DisplayName ?? "Current user";
-                    return { ...wr, ChecklistResults: (wr.ChecklistResults ?? []).filter((item) => item.stepId !== stepId),
+                    return { ...wr, ChecklistCompleted: false, ChecklistResults: (wr.ChecklistResults ?? []).filter((item) => item.stepId !== stepId),
                       StepAuditLogs: [...(wr.StepAuditLogs ?? []), { AuditLogId: crypto.randomUUID(),
                         StepInstanceId: `${wr.WR_ID}:${stepId}`, WR_ID: wr.WR_ID, ActorId: currentUser?.UserId ?? "current-user",
                         Action: "reopened" as const, PreviousValue: wr.ChecklistResults?.find((item) => item.stepId === stepId),
@@ -719,7 +720,8 @@ export function LongJobDrawer({
                     const auditValue = (value: typeof result | undefined) => value && ({
                       ...value, photoPaths: value.photoPaths?.map(() => "Photo attached"),
                     });
-                    return { ...wr, ChecklistResults: [...(wr.ChecklistResults ?? []).filter((item) => item.stepId !== result.stepId), result],
+                    return { ...wr, ...(changed ? { ChecklistCompleted: false } : {}),
+                      ChecklistResults: [...(wr.ChecklistResults ?? []).filter((item) => item.stepId !== result.stepId), result],
                       StepAuditLogs: changed ? [...(wr.StepAuditLogs ?? []), { AuditLogId: crypto.randomUUID(),
                         StepInstanceId: `${wr.WR_ID}:${result.stepId}`, WR_ID: wr.WR_ID, ActorId: currentUser?.UserId ?? "current-user",
                         Action: "modified" as const, PreviousValue: auditValue(previous),
@@ -734,8 +736,6 @@ export function LongJobDrawer({
                           text: `Failure image for ${stepTitle} ${result.photoPaths?.length ? "added or replaced" : "removed"} by ${actorName}` }] : [])] : wr.Activity };
                   }) }))}
                   onComplete={(results) => {
-                    const status = configuredTransition(workRequest, 78);
-                    if (!status) return false;
                     const actorName = currentUser?.DisplayName ?? "Current user";
                     const now = new Date().toISOString();
                     const assessedResults = results.filter((result) =>
@@ -748,16 +748,19 @@ export function LongJobDrawer({
                       return false;
                     }
                     setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
-                      if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== 50) return wr;
-                      return { ...wr, ...status, ChecklistResults: results,
+                      if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== workRequest.Percentage) return wr;
+                      return { ...wr, ChecklistCompleted: true, ChecklistResults: results,
                         ChecklistInstances: wr.ChecklistInstances ? completedInstances : undefined,
                         StepAuditLogs: [...(wr.StepAuditLogs ?? []), ...completedInstances.filter((step) => step.IsCompleted).map((step) => ({
                           AuditLogId: crypto.randomUUID(), StepInstanceId: step.StepInstanceId, WR_ID: wr.WR_ID,
                           ActorId: currentUser?.UserId ?? "current-user", Action: "completed" as const, OccurredAt: now,
-                        }))], UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
+                        }))], ChecklistHistory: [...(wr.ChecklistHistory ?? []), {
+                          id: crypto.randomUUID(), timestamp: now, performedBy: actorName,
+                          actionType: "Checklist completed", details: `${results.length} of ${checklistSteps.length} steps answered`,
+                        }], UpdatedAt: now, Activity: [...(wr.Activity ?? []), {
                         id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
                         actorName, actorRole: currentRole, createdAt: now,
-                        text: `${actorName} finished checklist (${results.length}/${checklistSteps.length} steps, ${assessedResults.filter((result) => result.passed).length} favourable, ${assessedResults.filter((result) => !result.passed).length} unfavourable); WR set to 78%`,
+                        text: `Checklist finished by ${actorName} (${results.length}/${checklistSteps.length} steps, ${assessedResults.filter((result) => result.passed).length} favourable, ${assessedResults.filter((result) => !result.passed).length} unfavourable)`,
                       }] };
                     }) }));
                   }} />}

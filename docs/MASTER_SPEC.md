@@ -423,3 +423,62 @@ Every Work Request (`PM`, `FJ`, and `LJ`) must include a unified **Activity & Co
    - Any user can post a comment (`authorName`, `authorRole`, `createdAt`, `text`).
    - A user can click **`Edit`** on their own comment to update the text.
    - Editing a comment NEVER deletes or hides the old text: the previous text and its timestamp are pushed into `editHistory[]`, and the comment card displays an `(Edited)` badge with a visible/expandable **"Previous Versions"** history showing every prior version of that comment to all users.
+
+## 15. Mendix-Style Multi-Tab PM `WR Details Popup` & Manual 78% Completion Rule
+
+### 15.1 Strict Rule: Finishing a Checklist NEVER Auto-Advances Status to 78%
+- Completing all steps in a checklist must NEVER automatically change `WorkRequestStatus` or `SubstatusPercentage` to `78%`.
+- When all checklist steps are answered, mark the checklist as completed and log `"Checklist finished by {User}"` in `Checklist history` and `History`, while keeping the WR at `50% (Issued)` (or `55% On Hold`) so the user can still log labor hours, upload documents, or create follow-up Fast Jobs.
+- Moving a PM WR to `27% (Cancelled)`, `55% (On Hold for Access/Labor/Parts)`, `78% (Technically Completed)`, or `100% (Completed)` is ALWAYS an explicit manual action performed in the **`Labor, parts & Completion`** tab.
+
+### 15.2 Wide Multi-Tab `WR Details Popup` Structure (Exact Mendix Layout)
+Opening a PM Work Request opens a wide modal (`WR Details Popup`) with the following 8 top tabs and 2 persistent bottom collapsible sections:
+
+1. **Tab 1: `Work request details`** (4 collapsible Group Boxes):
+   - **Group Box 1 — `Work Request`**:
+     * Left column: `WR ID`, `Work request status`, `Start date (Date To Perform)`, `Start date (TBD)`, `created date`.
+     * Right column: `ESA Work Type`, `Work request substatus` (e.g., `50%`, `55%`, `78%`, `27%`, `100%`), `Due date`, `Margin date`, `Trade name`, `Expected hours`.
+   - **Group Box 2 — `Work Location`**:
+     * Left column: `Room code`, `Level name`, `bl id`.
+     * Right column: `Problem location`.
+   - **Group Box 3 — `Equipment` (Group box)**:
+     * Left column: `Equipment code`, `Local equipment code`, `Equipment name`, `Equipment Standard Description`, `Equipment standard ID`.
+     * Right column: `Is installation` (Yes / No dropdown).
+   - **Group Box 4 — `Preventive Maintenance Procedure Details`**:
+     * Left column: `PMP ID Original`, `PMP ID Smart`, `PM Procedure Description`, `PM Procedure Description SMART`, `Responsible company`, `Responsible person`.
+     * Right column: `PMS ID Original`, `PMS ID Smart`.
+
+2. **Tab 2: `Labor, parts & Completion`**:
+   - **`Assign Craftperson`** button + `WR ID` header.
+   - **Craftperson Labor Table** with filter row and columns: `Hourly rate`, `Working time` (hours/minutes), `Name`, `LastName` (with ability to assign craftspeople and log working time).
+   - **`WR Statuses` Selector Dropdown**: Allows selecting `50% - Issued`, `55% - On Hold for Access`, `55% - On Hold for Labor`, `55% - On Hold for Parts`, `78% - Technically Completed`, `27% - Cancelled`, `100% - Completed`.
+   - **3 Explicit Status Action Buttons**:
+     * Red button: **`Cancel WR (27%)`**
+     * Blue outlined button: **`Technically Completed (78%)`**
+     * Blue outlined button: **`Complete (100%)`** (for Team Leader / Supervisor closure)
+   - **`Message text` textarea + `Post` button**: Posts a human comment directly into the bottom `History` section.
+
+3. **Tab 3: `KPI & Others`**:
+   - SLA compliance status (Before Due Date / Within Margin Date / Overdue), On-Hold/Freeze details (`55%` reason), downtime tracking, and KPI notes.
+
+4. **Tab 4: `Attached Documents`**:
+   - **`+ New WR Document`** button + `Name` search filter input.
+   - Document table showing attached files (e.g., `.xlsx`, `.pdf`, images) with **`Open`** and **`Delete`** buttons on every row. Adding or deleting a document automatically writes an entry to `History`.
+
+5. **Tab 5: `Checklist`** & **Tab 8: `Checklist - Smart PM`**:
+   - **`Checklist - Smart PM`** tab displays:
+     * `Checklist Standard` dropdown/field showing the active blueprint.
+     * **`Modify Checklist..`** button (opens the interactive step-by-step Checklist Executor modal to fill or update answers without auto-closing the WR to 78%).
+     * Filterable Step Table with columns: `Sequence`, `Checklist step`, `Expected value Unit`, `Measured value`, `Is completed` (`Yes`/`No` filter), `Craftperson comment`, plus **Favourable (Green) / Unfavourable (Red)** status badge and failure photo preview.
+   - **`Checklist`** tab displays legacy/standard checklist summary items or read-only print view.
+
+6. **Tab 6: `PM Follow-up`**:
+   - **`Create FastJob`** button (opens a modal pre-linked to this PM's Equipment and Location to create a reactive Fast Job `< 750 EUR`, which can later be escalated to a Long Job `>= 750 EUR`).
+   - Filterable table of linked Follow-Up Fast Jobs with columns: `Urgency`, `Description`, `Reported date`, `Problem location`, `Job ID`, `Due date`, `Start date`, and current status (clicking a row opens that Fast Job).
+
+7. **Tab 7: `AuditLog`**:
+   - QA / Technical Audit inspection records (`To Be Inspected`, `Passed Inspected`, `PM WRs to be corrected`) and full system audit trail.
+
+8. **Persistent Bottom Collapsible Sections (Visible across tabs at the bottom of `WR Details Popup`)**:
+   - **`Checklist history`** (collapsible `+`/`-` bar): Filterable table with columns `Timestamp`, `Performed by`, `Action type`, `Step reference`, `Details`.
+   - **`History`** (collapsible `+`/`-` bar): Unified stream of **Human Comments** (from `Message text -> Post`, editable with visible version history) and **Automatic System Logs** (who changed status, who finished checklist, who added/deleted documents, when), with filter toggles for `All`, `Human Comments Only`, and `Automatic Logs Only`.

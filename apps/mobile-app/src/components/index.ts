@@ -13,4 +13,4 @@ export {
 export { WorkSessionTimer } from "./WorkSessionTimer";
 export { QRScanner } from "./QRScanner";
 export { EquipmentInspectionView } from "./EquipmentInspectionView";
-export { ChecklistExecutor, type PM_StepDefinition } from "./ChecklistExecutor";
+export { ChecklistExecutor, type PM_StepDefinition, type PM_StepExecutionValue } from "./ChecklistExecutor";

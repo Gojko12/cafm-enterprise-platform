@@ -9,6 +9,7 @@ import {
   QRScanner,
   EquipmentInspectionView,
   PM_StepDefinition,
+  PM_StepExecutionValue,
 } from "./components";
 import {
   BaseWorkRequest,
@@ -282,7 +283,84 @@ export default function App() {
           <ChecklistExecutor
             wr={selectedWR}
             steps={checklistSteps}
-            onStepComplete={() => {
+            onStepComplete={async (stepValues: PM_StepExecutionValue[]) => {
+              if (!engine) throw new Error("Offline storage is not ready. Please try again.");
+              const now = new Date().toISOString();
+              const actorName = currentTechnicianId;
+              const checklistResults = stepValues.map((result) => ({
+                stepId: result.StepId,
+                value: typeof result.Value === "boolean" ? String(result.Value) : result.Value,
+                passed: result.Passed,
+                completedAt: result.Timestamp,
+                ...(result.PhotoUrl ? { photoPaths: [result.PhotoUrl] } : {}),
+                ...(result.TechnicianComment ? { comment: result.TechnicianComment } : {}),
+              }));
+              const completedInstances = selectedWR.ChecklistInstances?.map((instance) => {
+                const answer = stepValues.find((item) => item.StepId === instance.StepId);
+                if (!answer) return instance;
+                const values = Array.isArray(answer.Value) ? answer.Value : [answer.Value];
+                return {
+                  ...instance,
+                  ValueBoolean: instance.InputType === "Boolean" && typeof answer.Value === "boolean" ? answer.Value : undefined,
+                  ValueNumeric: instance.InputType === "Numeric" && typeof answer.Value === "number" ? answer.Value : undefined,
+                  ValueText: instance.InputType === "FreeText" && typeof answer.Value === "string" ? answer.Value : undefined,
+                  SelectedOptionIds: instance.InputType === "SingleSelect" || instance.InputType === "MultiSelect"
+                    ? values.map((value) => instance.Options.find((option) => option.Value === String(value))?.OptionId)
+                      .filter((id): id is string => id !== undefined)
+                    : undefined,
+                  PhotoIds: answer.PhotoUrl
+                    ? [...instance.PhotoIds, `ChecklistResults/${instance.StepId}/${now}`]
+                    : instance.PhotoIds,
+                  TechnicianComment: answer.TechnicianComment,
+                  IsFailed: !answer.Passed,
+                  IsCompleted: true,
+                  CompletedBy: currentTechnicianId,
+                  CompletedAt: now,
+                };
+              });
+              const savedWR: BaseWorkRequest = {
+                ...selectedWR,
+                ChecklistCompleted: true,
+                ChecklistResults: checklistResults,
+                ChecklistInstances: completedInstances,
+                StepAuditLogs: [
+                  ...(selectedWR.StepAuditLogs ?? []),
+                  ...(completedInstances ?? []).filter((step) => step.IsCompleted).map((step) => ({
+                    AuditLogId: crypto.randomUUID(),
+                    StepInstanceId: step.StepInstanceId,
+                    WR_ID: selectedWR.WR_ID,
+                    ActorId: currentTechnicianId,
+                    Action: "completed" as const,
+                    OccurredAt: now,
+                  })),
+                ],
+                ChecklistHistory: [
+                  ...(selectedWR.ChecklistHistory ?? []),
+                  {
+                    id: crypto.randomUUID(),
+                    timestamp: now,
+                    performedBy: actorName,
+                    actionType: "Checklist completed",
+                    details: `${checklistResults.length} of ${checklistSteps.length} steps answered`,
+                  },
+                ],
+                UpdatedAt: now,
+                Activity: [
+                  ...(selectedWR.Activity ?? []),
+                  {
+                    id: crypto.randomUUID(),
+                    kind: "log",
+                    actorId: currentTechnicianId,
+                    actorName,
+                    actorRole: "MobileTechnician",
+                    createdAt: now,
+                    text: `Checklist finished by ${actorName}`,
+                  },
+                ],
+              };
+              await engine.saveWorkRequest(savedWR);
+              setMyWRs((current) => current.map((wr) => wr.WR_ID === savedWR.WR_ID ? savedWR : wr));
+              setUnassignedWRs((current) => current.map((wr) => wr.WR_ID === savedWR.WR_ID ? savedWR : wr));
               setCurrentView("home");
               setSelectedWR(null);
             }}
