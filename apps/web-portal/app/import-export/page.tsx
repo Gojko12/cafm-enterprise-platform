@@ -1,311 +1,137 @@
 "use client";
 
-import React, { useState } from "react";
-import { Upload, Download, AlertCircle } from "lucide-react";
-
-type ImportEntityType = "locations" | "equipment" | "blueprints" | "schedules" | "trades" | "employees";
-
-interface ValidationError {
-  row: number;
-  column: string;
-  message: string;
-  severity: "error" | "warning";
-}
-
-interface ImportPreview {
-  entityType: ImportEntityType;
-  newRecords: number;
-  updatedRecords: number;
-  errors: ValidationError[];
-}
+import React, { useEffect, useRef, useState } from "react";
+import { useCafmStore, type DemoData } from "@/lib/cafm-store";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { downloadSite, downloadTemplate, dryRun, entities, type Entity, type Preview } from "@/lib/bulk-import";
 
 export default function ImportExportPage() {
-  const [activeTab, setActiveTab] = useState<"import" | "export">("import");
-  const [selectedEntity, setSelectedEntity] = useState<ImportEntityType>("locations");
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const { data, commitSnapshot } = useCafmStore();
+  const { activeSiteId } = useSiteContext();
+  const [entity, setEntity] = useState<Entity>("buildings");
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [baseline, setBaseline] = useState<DemoData | null>(null);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
 
-  const entities = [
-    { id: "locations", label: "Locations (Buildings, Floors, Rooms)" },
-    { id: "equipment", label: "Equipment Registry" },
-    { id: "blueprints", label: "PM Checklist Blueprints" },
-    { id: "schedules", label: "PM Schedules" },
-    { id: "trades", label: "Trades & Skills" },
-    { id: "employees", label: "Employees & Craftspeople" },
-  ];
+  useEffect(() => {
+    generation.current++;
+    setBusy(false);
+    setFile(null);
+    setPreview(null);
+    setBaseline(null);
+    setMessage("");
+  }, [activeSiteId, entity]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
-      // Simulate preview generation
-      setPreview({
-        entityType: selectedEntity,
-        newRecords: 42,
-        updatedRecords: 8,
-        errors: [
-          {
-            row: 15,
-            column: "EquipmentCode",
-            message: "Duplicate equipment code",
-            severity: "error",
-          },
-          {
-            row: 23,
-            column: "DueDate",
-            message: "Invalid date format (expected YYYY-MM-DD)",
-            severity: "error",
-          },
-          {
-            row: 31,
-            column: "ExpectedHours",
-            message: "Value exceeds maximum (8 hours)",
-            severity: "warning",
-          },
-        ],
-      });
+  const runPreview = async (selected: File) => {
+    const request = ++generation.current;
+    setFile(selected);
+    setPreview(null);
+    setBaseline(null);
+    setMessage("");
+    setBusy(true);
+    try {
+      if (selected.size > 10 * 1024 * 1024) throw new Error("File exceeds the 10 MB limit.");
+      const buffer = await selected.arrayBuffer();
+      const result = dryRun(buffer, selected.name, entity, data, activeSiteId);
+      if (request !== generation.current) return;
+      setPreview(result);
+      setBaseline(data);
+    } catch (error) {
+      if (request === generation.current) setMessage(error instanceof Error ? error.message : "Could not read the file.");
+    } finally {
+      if (request === generation.current) setBusy(false);
     }
   };
 
-  const handleDownloadTemplate = () => {
-    alert(`Downloaded ${selectedEntity} template as .xlsx`);
+  const commit = async () => {
+    if (!preview || !baseline || preview.errors.length || !preview.diffs.length) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await commitSnapshot(baseline, preview.next);
+      setMessage(`Saved ${preview.diffs.length} records to disk for ${activeSiteId}.`);
+      setPreview(null);
+      setBaseline(null);
+      setFile(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Import could not be saved.");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleCommitImport = () => {
-    alert(
-      `Imported ${preview?.newRecords} new records and updated ${preview?.updatedRecords} records`
-    );
-    setPreview(null);
-    setUploadedFile(null);
+  const changed = baseline !== null && JSON.stringify(data) !== JSON.stringify(baseline);
+  const newCount = preview?.diffs.filter((item) => item.operation === "Insert").length ?? 0;
+  const updateCount = preview?.diffs.filter((item) => item.operation === "Update").length ?? 0;
+  const button = "rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50";
+  const display = (value: unknown) => {
+    const text = value === undefined ? "(empty)" : JSON.stringify(value);
+    return text.length > 200 ? `${text.slice(0, 200)}…` : text;
   };
-
+  const exportData = (format: "xlsx" | "json" | "csv") => {
+    try {
+      downloadSite(data, activeSiteId, format, entity);
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Export failed.");
+    }
+  };
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">
-          Bulk Import / Export
-        </h1>
-        <p className="text-gray-600 mb-6">
-          Upload .xlsx or .csv files with dry-run validation preview
-        </p>
-
-        {/* Tabs */}
-        <div className="bg-white rounded-t-lg border-b border-gray-200 mb-6">
-          <div className="px-6 py-4 flex gap-8">
-            <button
-              onClick={() => setActiveTab("import")}
-              className={`px-4 py-2 font-semibold border-b-2 transition-colors ${
-                activeTab === "import"
-                  ? "text-blue-600 border-blue-600"
-                  : "text-gray-600 border-transparent hover:text-gray-900"
-              }`}
-            >
-              Import
-            </button>
-            <button
-              onClick={() => setActiveTab("export")}
-              className={`px-4 py-2 font-semibold border-b-2 transition-colors ${
-                activeTab === "export"
-                  ? "text-blue-600 border-blue-600"
-                  : "text-gray-600 border-transparent hover:text-gray-900"
-              }`}
-            >
-              Export
-            </button>
-          </div>
+    <div className="mx-auto max-w-7xl space-y-6 p-6">
+      <h1 className="text-3xl font-bold">Bulk Import / Export</h1>
+      <p>Active site: <strong>{activeSiteId}</strong>. Each import updates one entity type; locations are imported as buildings, floors, then rooms.</p>
+      <div className="space-y-4 rounded bg-white p-5 shadow">
+        <label className="block font-medium" htmlFor="import-entity">Entity type</label>
+        <select id="import-entity" value={entity} onChange={(event) => {
+          const value = event.target.value;
+          if (Object.prototype.hasOwnProperty.call(entities, value)) setEntity(value as Entity);
+        }} className="rounded border p-2">
+          {(Object.keys(entities) as Entity[]).map((key) => <option key={key} value={key}>{entities[key].label}</option>)}
+        </select>
+        <div className="flex flex-wrap gap-2">
+          <button className={button} onClick={() => downloadTemplate(entity, "csv")}>Download CSV template</button>
+          <button className={button} onClick={() => downloadTemplate(entity, "xlsx")}>Download Excel template</button>
         </div>
-
-        {/* Content */}
-        <div className="bg-white rounded-b-lg p-6">
-          {activeTab === "import" ? (
-            // IMPORT TAB
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  Select Entity Type *
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {entities.map((entity) => (
-                    <label
-                      key={entity.id}
-                      className={`flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors ${
-                        selectedEntity === entity.id
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="entity"
-                        value={entity.id}
-                        checked={selectedEntity === entity.id}
-                        onChange={(e) => setSelectedEntity(e.target.value as ImportEntityType)}
-                        className="w-4 h-4"
-                      />
-                      <span className="font-medium text-gray-900">
-                        {entity.label}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* File Upload */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">
-                  Upload File (.xlsx or .csv)
-                </label>
-                <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 rounded-lg p-8 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors">
-                  <Upload size={32} className="text-gray-400" />
-                  <div className="text-center">
-                    <p className="font-medium text-gray-900">
-                      {uploadedFile?.name || "Click to upload or drag and drop"}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      .xlsx or .csv files up to 50MB
-                    </p>
-                  </div>
-                  <input
-                    type="file"
-                    accept=".xlsx,.csv"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              {/* Download Template Button */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-blue-900">
-                    Need a template?
-                  </p>
-                  <p className="text-sm text-blue-700">
-                    Download the {selectedEntity} template with required columns
-                  </p>
-                </div>
-                <button
-                  onClick={handleDownloadTemplate}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium whitespace-nowrap"
-                >
-                  <Download size={18} />
-                  Download Template
-                </button>
-              </div>
-
-              {/* Dry-Run Preview */}
-              {preview && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Dry-Run Validation Preview
-                  </h3>
-
-                  {/* Summary */}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <p className="text-sm text-green-700">New Records</p>
-                      <p className="text-3xl font-bold text-green-600">
-                        {preview.newRecords}
-                      </p>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-sm text-blue-700">Updated Records</p>
-                      <p className="text-3xl font-bold text-blue-600">
-                        {preview.updatedRecords}
-                      </p>
-                    </div>
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <p className="text-sm text-red-700">Errors</p>
-                      <p className="text-3xl font-bold text-red-600">
-                        {preview.errors.filter((e) => e.severity === "error").length}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Errors List */}
-                  {preview.errors.length > 0 && (
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-                        <p className="font-semibold text-gray-900 flex items-center gap-2">
-                          <AlertCircle size={18} />
-                          Validation Issues ({preview.errors.length})
-                        </p>
-                      </div>
-                      <div className="divide-y divide-gray-200 max-h-64 overflow-y-auto">
-                        {preview.errors.map((error, i) => (
-                          <div key={i} className="px-4 py-3 flex items-start gap-3">
-                            <span
-                              className={`text-xs font-bold px-2 py-1 rounded ${
-                                error.severity === "error"
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }`}
-                            >
-                              {error.severity.toUpperCase()}
-                            </span>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-900">
-                                Row {error.row}, Column: {error.column}
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                {error.message}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Commit Button */}
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => {
-                        setPreview(null);
-                        setUploadedFile(null);
-                      }}
-                      className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleCommitImport}
-                      className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                    >
-                      Commit Import to Database
-                    </button>
-                  </div>
-                </div>
-              )}
+        <p className="text-sm text-gray-600">XLSX files must contain a sheet named <code>{entity}</code>. Nested values such as checklist steps and equipment codes use JSON in a cell. Blank update cells retain their previous value. Maximum 10 MB and 10,000 rows.</p>
+        <label className="block font-medium" htmlFor="import-file">Upload CSV or XLSX for dry-run</label>
+        <input id="import-file" type="file" accept=".csv,.xlsx" disabled={busy} onChange={(event) => {
+          const selected = event.target.files?.[0];
+          event.target.value = "";
+          if (selected) void runPreview(selected);
+        }} />
+        {file && <p>File: {file.name}</p>}
+        {message && <p role="status" className="rounded bg-amber-50 p-3">{message}</p>}
+        {preview && (
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Dry-Run Validation &amp; Diff Preview</h2>
+            <p>New Records to Insert: <strong>{newCount}</strong> · Existing Records to Update: <strong>{updateCount}</strong> · Errors: <strong>{preview.errors.length}</strong></p>
+            {changed && <p role="alert" className="text-red-700">Site data changed since this preview. Upload the file again before committing.</p>}
+            <div className="max-h-80 overflow-auto">
+              <table className="w-full text-left text-sm">
+                <thead><tr><th>Row</th><th>Operation</th><th>Unique code</th><th>Changed columns</th></tr></thead>
+                <tbody>{preview.diffs.map((item) => <tr key={item.row} className="border-t align-top"><td>{item.row}</td><td>{item.operation}</td><td>{item.code}</td><td>{item.changes.length
+                  ? item.changes.map((change) => <div key={change.field}><strong>{change.field}</strong>: {display(change.before)} → {display(change.after)}</div>)
+                  : "No changes"}</td></tr>)}</tbody>
+              </table>
             </div>
-          ) : (
-            // EXPORT TAB
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">Export Data</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {entities.map((entity) => (
-                  <button
-                    key={entity.id}
-                    className="flex items-center justify-between gap-4 p-6 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors group"
-                  >
-                    <div className="text-left">
-                      <p className="font-semibold text-gray-900">
-                        {entity.label}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        Export as .xlsx file
-                      </p>
-                    </div>
-                    <Download
-                      size={24}
-                      className="text-gray-400 group-hover:text-blue-600 transition-colors"
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+            {preview.errors.length > 0 && <div className="max-h-80 overflow-auto"><h3 className="font-semibold text-red-700">Row / Column Validation Errors</h3>
+              <table className="w-full text-left text-sm"><thead><tr><th>Row</th><th>Column</th><th>Error</th></tr></thead>
+                <tbody>{preview.errors.map((error, index) => <tr className="border-t" key={index}><td>{error.row}</td><td>{error.column}</td><td>{error.message}</td></tr>)}</tbody>
+              </table></div>}
+            <button className={button} disabled={busy || changed || preview.errors.length > 0 || !preview.diffs.length} onClick={() => void commit()}>Commit Import to Database</button>
+          </div>
+        )}
+      </div>
+      <div className="space-y-3 rounded bg-white p-5 shadow">
+        <h2 className="text-xl font-semibold">Export Current Site Data</h2>
+        <p>Excel includes all supported entity sheets. JSON includes the entire current site snapshot. CSV exports the selected entity.</p>
+        <div className="flex flex-wrap gap-2">
+          <button className={button} onClick={() => exportData("xlsx")}>Export Excel</button>
+          <button className={button} onClick={() => exportData("json")}>Export JSON</button>
+          <button className={button} onClick={() => exportData("csv")}>Export selected CSV</button>
         </div>
       </div>
     </div>

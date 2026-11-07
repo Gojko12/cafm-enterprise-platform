@@ -165,4 +165,16 @@ describe("portal synchronization", () => {
     expect(postCount).toBe(0);
     expect(await db.get("workRequests", "SITE-02-WR")).toMatchObject({ SiteId: "SITE-02" });
   });
+
+  it("uses the localhost development token without configuration", async () => {
+    vi.stubEnv("VITE_CAFM_SYNC_TOKEN", "");
+    vi.stubEnv("DEV", true);
+    await new OfflineEngine().syncNow();
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3000/api/cafm-state",
+      expect.objectContaining({ headers: expect.objectContaining({
+        Authorization: "Bearer cafm-local-development-sync-token-2026",
+      }) }),
+    );
+  });
 });

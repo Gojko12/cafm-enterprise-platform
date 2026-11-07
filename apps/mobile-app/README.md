@@ -68,7 +68,7 @@ syncMetadata      - Last sync time & conflict tracking
 ```
 
 ### Sync Strategy
-- Set `VITE_CAFM_SYNC_TOKEN` in `.env.local` to the same locally generated token used by the web portal; see the web portal README for setup. No Firebase credentials are needed.
+- Local development on localhost uses the same public fallback token as the portal. For a custom token or non-development mode, set `VITE_CAFM_SYNC_TOKEN` in `.env.local` to the portal's locally configured token; see the web portal README. No Firebase credentials are needed.
 - The portal must first initialize the selected site. The mobile app syncs with `http://localhost:3000/api/cafm-state`, using the active site and technician as demo selectors.
 - Work requests, step audits, stopped work sessions, and photos remain queued until the portal confirms the write. A conflicting work-request edit is reported and retained for manual resolution. Legacy queued edits without a recorded baseline cannot safely overwrite an existing portal request.
 - The shared browser-visible token and selectors do not authenticate users or enforce production per-person site permissions. Use this local demo only on a trusted machine and network.

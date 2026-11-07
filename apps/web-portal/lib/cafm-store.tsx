@@ -3,7 +3,9 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
+import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
+import type { DemoData } from "./cafm-data";
+export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 import {
   ESOC_BUILDINGS, ESOC_EQUIPMENT, ESOC_FLOORS, ESOC_ROOMS,
   ESTEC_BUILDINGS, ESTEC_EQUIPMENT, ESTEC_FLOORS, ESTEC_ROOMS,
@@ -20,59 +22,16 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-export interface TradeRoleMapping {
-  SiteId: SiteId;
-  Trade: string;
-  assignments: Partial<Record<AssignmentRole, string>>;
-}
-export interface SiteRoleMapping {
-  SiteId: SiteId;
-  assignments: Partial<Record<AssignmentRole, string>>;
-}
-
-interface DemoData {
-  sites: SiteId[];
-  buildings: Building[];
-  floors: Floor[];
-  rooms: Room[];
-  desks: ExtractedDesk[];
-  equipment: Equipment[];
-  blueprints: PM_ChecklistStandard[];
-  schedules: PM_Schedule[];
-  workRequests: BaseWorkRequest[];
-  users: UserAccess[];
-  craftspeople: { id: string; Name: string; LastName: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number }[];
-  tradeRoleMappings: TradeRoleMapping[];
-  siteRoleMappings: SiteRoleMapping[];
-  siteRoleAssignments: SiteRoleAssignment[];
-  mobileMutationIds: string[];
-}
-
-export interface ExtractedDesk {
-  id: string;
-  SiteId: SiteId;
-  bl_id: string;
-  LevelName: string;
-  RoomCode: string;
-  centerX: number;
-  centerY: number;
-  widthM?: number | null;
-  heightM?: number | null;
-  name?: string | null;
-  deskType: string;
-  isPermanent: boolean;
-}
-
 const STORAGE_KEY = "cafm-demo-data-v1";
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
-const SYNC_TOKEN = process.env.NEXT_PUBLIC_CAFM_SYNC_TOKEN;
-
 async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
-  if (!SYNC_TOKEN || SYNC_TOKEN.length < 32) throw new Error("Local demo sync token is not configured.");
+  const token = process.env.NEXT_PUBLIC_CAFM_SYNC_TOKEN ||
+    (process.env.NODE_ENV === "development" && window.location.hostname === "localhost" ? "cafm-local-development-sync-token-2026" : undefined);
+  if (!token || token.length < 32) throw new Error("Local demo sync token is not configured.");
   const response = await fetch("/api/cafm-state", {
     method,
-    headers: { Authorization: `Bearer ${SYNC_TOKEN}`, "X-CAFM-Site-Id": site, "X-CAFM-Person": person, ...(body ? { "Content-Type": "application/json" } : {}) },
+    headers: { Authorization: `Bearer ${token}`, "X-CAFM-Site-Id": site, "X-CAFM-Person": person, ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
@@ -191,6 +150,7 @@ interface Store {
   data: DemoData;
   setData: React.Dispatch<React.SetStateAction<DemoData>>;
   reset: () => void;
+  commitSnapshot: (expected: DemoData, next: DemoData) => Promise<void>;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -393,7 +353,38 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     setReady(true);
   };
 
-  return <StoreContext.Provider value={{ data, setData, reset }}>
+  const commitSnapshot = async (expected: DemoData, next: DemoData) => {
+    if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
+    if (busy.current) throw new Error("Synchronization is in progress. Try again.");
+    const before = JSON.stringify(expected);
+    if (JSON.stringify(current.current) !== before) throw new Error("Data changed since preview. Run the dry-run again.");
+    busy.current = true;
+    try {
+      const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next });
+      revision.current = result.revision;
+      acknowledged.current = JSON.stringify(next);
+      if (JSON.stringify(current.current) !== before) {
+        blocked.current = true;
+        throw new Error("Import was saved on the server, but local data changed during the commit. Local edits were retained; resolve the conflict.");
+      }
+      current.current = next;
+      setData(next);
+      try {
+        localStorage.setItem(storageKey, acknowledged.current);
+        localStorage.setItem(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+        localStorage.removeItem(pendingKey);
+      } catch (error) {
+        blocked.current = true;
+        console.error("Could not cache committed import", error);
+        throw new Error("Import was saved on the server, but the browser cache could not be updated. Reload before editing.");
+      }
+      setSyncError(null);
+    } finally {
+      busy.current = false;
+    }
+  };
+
+  return <StoreContext.Provider value={{ data, setData, reset, commitSnapshot }}>
     {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}
     {ready ? children : <div>Loading saved CAFM data...</div>}
   </StoreContext.Provider>;

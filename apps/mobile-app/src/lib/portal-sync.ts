@@ -48,7 +48,9 @@ export function stable(value: unknown): string {
 }
 
 async function request(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
-  const token = import.meta.env.VITE_CAFM_SYNC_TOKEN;
+  const token = import.meta.env.VITE_CAFM_SYNC_TOKEN ||
+    (import.meta.env.DEV && typeof window !== "undefined" && window.location.hostname === "localhost"
+      ? "cafm-local-development-sync-token-2026" : undefined);
   if (!token || token.length < 32) throw new Error("Synchronization is not configured. Changes remain on this device.");
   const response = await fetch("http://localhost:3000/api/cafm-state", {
     method,

@@ -31,6 +31,7 @@ import { OfflineEngine } from "./offline-engine";
 describe("offline sync safety", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Portal unavailable")));
     mocks.getAllFromIndex.mockResolvedValue([]);
     mocks.get.mockResolvedValue(undefined);
   });
@@ -64,7 +65,7 @@ describe("offline sync safety", () => {
     const listener = vi.fn();
     engine.onSyncStatusChange(listener);
 
-    await expect(engine.syncNow()).rejects.toThrow("Synchronization is not configured");
+    await expect(engine.syncNow()).rejects.toThrow("Portal unavailable");
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ pending: 1, synced: 0 }));
     expect(mocks.put).not.toHaveBeenCalled();
   });

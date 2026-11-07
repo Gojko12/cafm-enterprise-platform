@@ -12,8 +12,10 @@ also synchronize it to `.data/cafm-db.json` through `/api/cafm-state`. Reset
 Demo Data replaces the selected site's state after confirmation. Conflicting
 local edits are retained and reported instead of silently overwritten.
 
-Local sync is disabled until a shared token is configured. Generate a random
-token of at least 32 characters locally; set `CAFM_SYNC_TOKEN` and
+Local development on localhost uses a publicly known fallback token, so the
+portal and mobile development servers sync without Firebase credentials or
+token configuration. In other modes the token must be configured explicitly.
+To override it, generate a random token of at least 32 characters locally; set `CAFM_SYNC_TOKEN` and
 `NEXT_PUBLIC_CAFM_SYNC_TOKEN` to that value in the web portal's `.env.local`,
 and `VITE_CAFM_SYNC_TOKEN` to the same value in the mobile app's `.env.local`.
 Restart both development servers after changing the variables. Open the portal
@@ -25,6 +27,25 @@ headers are demo selectors, not authenticated identities; the token is exposed
 to both clients and is not per-user authorization. Keep the servers on a
 trusted machine and network. This mode does not provide production RBAC or
 security isolation against a user who can access the demo token.
+
+### Bulk import and export
+
+The import/export page downloads CSV or XLSX templates for buildings, floors,
+rooms, equipment, checklist standards, schedules, site role assignments and
+work requests. Import one entity at a time; XLSX sheets must use the selected
+entity's sheet name. Nested values, including checklist steps, histories and
+equipment lists, are JSON in individual cells. A blank update cell preserves
+the current value. Imports are limited to 10 MB and 10,000 rows, reject formulas,
+and must pass row, schema and site-reference validation. Work-request status
+transitions are not allowed through import; use the normal workflow.
+
+The dry-run compares against the current site snapshot. If it changes, preview
+again. Commit is acknowledged only after the revision-checked disk write.
+XLSX exports include all site snapshot collections; JSON exports the entire
+snapshot; CSV exports the selected entity. CSV export rejects formula-like
+values to avoid spreadsheet injection; use XLSX or JSON for those values.
+Only import files from trusted sources. Spreadsheet parsing runs in the browser
+and is intended for the local demo, not an untrusted multi-user service.
 
 Trade-role assignments and demo users, PM schedules, generated work requests,
 checklist snapshots, activity entries, comments and attachments also use this
