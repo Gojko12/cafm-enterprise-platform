@@ -7,6 +7,7 @@ import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipm
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
+import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
 
 export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest }) {
   const { data, setData } = useCafmStore();
@@ -68,7 +69,8 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
     });
     setError("Save requested. Close and reopen the details popup before making further changes.");
   };
-  return <details className="rounded border bg-white">
+  const conflicts = getActiveFreezeConflictsForWR(workRequest, data.locationFreezes);
+  return <>{conflicts.length > 0 && <div role="status" className="rounded border border-cyan-500 bg-cyan-50 p-3 text-sm"><strong>❄ Planned in Freeze Period</strong>{conflicts.map((item) => <p key={item.id}>{describeLocationFreeze(item)}</p>)}</div>}<details className="rounded border bg-white">
     <summary className="cursor-pointer bg-slate-50 p-3 font-semibold">Edit work request details</summary>
     <div className="space-y-3 p-3 text-sm">
       {error && <p role="status">{error}</p>}
@@ -92,5 +94,5 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
         }} />
       <button type="button" onClick={save} className="rounded bg-blue-700 px-3 py-2 text-white">Save details</button>
     </div>
-  </details>;
+  </details></>;
 }

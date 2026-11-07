@@ -72,8 +72,9 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     const siteRooms = rooms.filter((item) => item.SiteId === site);
     for (let i = 0; i < 12; i++) {
       const trade = CLASSICAL_TRADES[i % CLASSICAL_TRADES.length];
-      craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Marko", "Anna", "Pieter", "Sofia", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
-        LastName: ["Novak", "Meyer", "Visser", "Rossi", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, SkillLevel: 2 + i % 3 });
+      craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Gregor", "Tomaž", "Blaž", "Eva", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
+        LastName: ["GOJKOŠEK", "Gojkošek", "Gojkošek", "Veselič", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i],
+        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, SkillLevel: 2 + i % 3 });
     }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];

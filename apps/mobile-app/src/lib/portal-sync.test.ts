@@ -113,6 +113,17 @@ describe("portal synchronization", () => {
     expect(state).toMatchObject({ craftpersonAbsences: [absence] });
   });
 
+  it("preserves location freezes while synchronizing mobile mutations", async () => {
+    const freeze = { id: "freeze-1", siteId: "SITE-01", buildingId: "BL-1", title: "Access restriction", description: "Testing", responsiblePerson: "Mark", startDateTime: "2026-11-06T08:00", endDateTime: "2026-11-07T18:00", allowPM: false, allowFJ: true, allowLJ: false };
+    Object.assign(state, { locationFreezes: [freeze] });
+    const db = await getDB();
+    await db.put("workRequests", original);
+    const engine = new OfflineEngine();
+    await engine.saveWorkRequest({ ...original, Description: "Mobile update" });
+    await engine.syncNow();
+    expect(state).toMatchObject({ locationFreezes: [freeze] });
+  });
+
   it("normalizes legacy equipment statuses when pulling portal state", async () => {
     const equipment = { ...ESOC_EQUIPMENT[0], Status: "Under Repair" };
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ revision, state: { ...state, equipment: [equipment] } }) })));

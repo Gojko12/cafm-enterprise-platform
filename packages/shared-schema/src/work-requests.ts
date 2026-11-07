@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { LocationHierarchySchema, SiteIdSchema } from "./locations.js";
 import { PM_ScheduleStepSchema, PM_StepAuditLogSchema, PM_WorkRequestStepSchema } from "./smart-pm.js";
-import { CalendarDateSchema } from "./dispatch.js";
+import { CalendarDateSchema, LocalDateTimeSchema } from "./dispatch.js";
 
 export const WR_Type = z.enum(["PM", "LJ", "FJ"]);
 export type WR_Type = z.infer<typeof WR_Type>;
@@ -133,6 +133,11 @@ export const BaseWorkRequestSchema = z.object({
   LevelName: z.string().min(1).optional(),
   SiteId: SiteIdSchema,
   AssignedCraftpersonIds: z.array(z.string().min(1)).default([]),
+  CraftpersonAssignments: z.array(z.object({
+    craftpersonId: z.string().min(1),
+    assignedStartDateTime: LocalDateTimeSchema,
+    assignedEndDateTime: LocalDateTimeSchema,
+  }).refine((entry) => entry.assignedStartDateTime < entry.assignedEndDateTime, { path: ["assignedEndDateTime"], message: "End must be after start." })).optional(),
   AssignedUserIds: z.array(z.string().min(1)).default([]),
   CreatedBy: z.string().min(1),
   ActiveFreezeName: z.string().optional(),
