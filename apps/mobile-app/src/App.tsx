@@ -110,11 +110,8 @@ export default function App() {
   }, []);
 
   const handleSyncNow = async () => {
-    if (engine) {
-      // Simulate sync operation
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log("Sync completed");
-    }
+    if (!engine) throw new Error("The offline engine is not ready.");
+    await engine.syncNow();
   };
 
   const handleToggleOfflineMode = (isOffline: boolean) => {

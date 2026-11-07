@@ -1,4 +1,4 @@
-import { getDB, MobileAppDB } from "./db.js";
+import { getDB } from "./db.js";
 import { BaseWorkRequest, Building, Floor, Room, Equipment } from "@cafm/shared-schema";
 
 /**
@@ -77,7 +77,7 @@ export class OfflineEngine {
     this.isOnline = online;
     this.onlineChangeListeners.forEach((listener) => listener(online));
     if (online) {
-      this.syncNow();
+      void this.syncNow().catch((error) => console.error("Background sync failed:", error));
     }
   }
 
@@ -86,7 +86,6 @@ export class OfflineEngine {
   }
 
   onSyncStatusChange(listener: (status: SyncStatus) => void): void {
-    this.syncStatusListeners.forEach((l) => l);
     this.syncStatusListeners.push(listener);
   }
 
@@ -95,14 +94,17 @@ export class OfflineEngine {
    */
   async saveWorkRequest(wr: BaseWorkRequest): Promise<void> {
     const db = await getDB();
-    await db.put("workRequests", wr);
-
-    if (this.isOnline) {
-      await this.queueSync({
-        MutationType: "WR_UPDATE",
-        Payload: wr,
-      });
-    }
+    const tx = db.transaction(["workRequests", "syncQueue"], "readwrite");
+    await tx.objectStore("workRequests").put(wr);
+    await tx.objectStore("syncQueue").put({
+      QueueId: uuidv4(),
+      MutationType: "WR_UPDATE",
+      Payload: wr,
+      SyncStatus: "PENDING",
+      CreatedAt: new Date().toISOString(),
+      RetryCount: 0,
+    });
+    await tx.done;
   }
 
   /**
@@ -242,10 +244,6 @@ export class OfflineEngine {
 
     await db.put("photoQueue", entry);
 
-    if (this.isOnline) {
-      await this.syncPhotos();
-    }
-
     return queueId;
   }
 
@@ -265,56 +263,12 @@ export class OfflineEngine {
   }
 
   /**
-   * Internal queue for sync mutations
-   */
-  private async queueSync(data: {
-    MutationType: "WR_UPDATE" | "WR_ASSIGNMENT" | "STEP_COMPLETE" | "PHOTO_UPLOAD" | "SESSION_LOG";
-    Payload: Record<string, unknown>;
-  }): Promise<void> {
-    const db = await getDB();
-    const queueId = uuidv4();
-
-    await db.put("syncQueue", {
-      QueueId: queueId,
-      MutationType: data.MutationType,
-      Payload: data.Payload,
-      SyncStatus: "PENDING",
-      CreatedAt: new Date().toISOString(),
-      RetryCount: 0,
-    });
-  }
-
-  /**
    * Get pending sync mutations
    */
   async getPendingSyncItems(): Promise<number> {
     const db = await getDB();
     const items = await db.getAllFromIndex("syncQueue", "by-status", "PENDING");
     return items.length;
-  }
-
-  /**
-   * Sync photos to server (stub for cloud function call)
-   */
-  private async syncPhotos(): Promise<void> {
-    const db = await getDB();
-    const photos = await db.getAllFromIndex("photoQueue", "by-status", "PENDING");
-
-    for (const photo of photos) {
-      try {
-        // In production: call Cloud Storage API here
-        // For now: mark as synced after simulated delay
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        photo.SyncStatus = "SYNCED";
-        photo.SyncedAt = new Date().toISOString();
-        await db.put("photoQueue", photo);
-      } catch (error) {
-        photo.SyncStatus = "FAILED";
-        photo.ErrorMessage = String(error);
-        await db.put("photoQueue", photo);
-      }
-    }
   }
 
   /**
@@ -331,7 +285,7 @@ export class OfflineEngine {
    */
   async syncNow(): Promise<SyncStatus> {
     if (this.syncInProgress) {
-      return { synced: 0, failed: 0, pending: 0, lastSyncTime: await this.getLastSyncTime() };
+      throw new Error("Synchronization is already in progress.");
     }
 
     this.syncInProgress = true;
@@ -340,48 +294,15 @@ export class OfflineEngine {
     try {
       const db = await getDB();
 
-      // Get pending items
       const syncItems = await db.getAllFromIndex("syncQueue", "by-status", "PENDING");
       const photoItems = await db.getAllFromIndex("photoQueue", "by-status", "PENDING");
-
       status.pending = syncItems.length + photoItems.length;
-
-      // Simulate sync operations with conflict resolution
-      for (const item of syncItems) {
-        try {
-          // In production: call Firestore API with conflict detection
-          await new Promise((resolve) => setTimeout(resolve, 50));
-
-          item.SyncStatus = "SYNCED";
-          item.SyncedAt = new Date().toISOString();
-          await db.put("syncQueue", item);
-          status.synced++;
-        } catch (error) {
-          item.SyncStatus = "FAILED";
-          item.ErrorMessage = String(error);
-          item.RetryCount++;
-          await db.put("syncQueue", item);
-          status.failed++;
-        }
-      }
-
-      // Sync photos
-      await this.syncPhotos();
-
-      // Update last sync time
-      await db.put("syncMetadata", {
-        key: "lastSyncTime",
-        value: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-
       status.lastSyncTime = await this.getLastSyncTime();
       this.syncStatusListeners.forEach((listener) => listener(status));
+      throw new Error("Synchronization is not configured. Changes remain on this device.");
     } finally {
       this.syncInProgress = false;
     }
-
-    return status;
   }
 
   isOnlineNow(): boolean {

@@ -617,3 +617,18 @@ Inside the Long Job Popup (`WR` tab), render a prominent collapsible **`Actions`
 Include a toggle in the `Actions` header:
 1. **`Filter by Current Stage & Active Person's Role (Default)`**: Shows ONLY the buttons allowed at the current substatus for the active user's `Site Role Assignment` (`Main` or `Deputy` on that Site + Trade).
 2. **`Show All Mendix Buttons (Overview Mode)`**: Shows the entire Mendix button grid from the screenshot so the user can see all buttons and which stages/roles unlock them.
+
+## 18. Full-Stack Integration & Persistence Upgrade
+
+### 18.1 Disk-Backed State and Offline Synchronization
+- The web portal exposes `/api/cafm-state` for the complete platform state, persisted on disk in `.data/cafm-db.json` or an equivalent SQLite database as well as cached in browser storage. The mobile app at `http://localhost:3001` can access the portal at `http://localhost:3000` through explicitly configured CORS.
+- State includes sites and locations, equipment hierarchy, classical trades, site role assignments including Main/Deputy and notification preferences, blueprints, schedules, craftspeople, and PM/FJ/LJ work requests including history and checklist history.
+- Web changes become available to mobile, and offline checklist answers, evidence, work sessions and follow-up work requests synchronize back to web. Both manual and background synchronization must retain unsent changes on failure and report conflicts rather than silently overwrite concurrent changes or report simulated success.
+- Disk persistence and the sync API must preserve site isolation and access controls; CORS is not authentication. Writes must be validated and crash-safe, and concurrent clients must not lose changes.
+
+### 18.2 Live CAD Room Extraction
+- `/api/cad-parse` accepts DXF uploads or a generated sample and invokes the Python CAD parser using `ezdxf` and Shapely. It returns room codes, net areas in square metres, GeoJSON/SVG geometry, and extracted desks.
+- The locations and floor-plan views consume the results for the selected site, building and floor. Import must validate drawing units and geometry, and must not silently replace unrelated floor data.
+
+### 18.3 Live Bulk Import and Export
+- Provide downloadable `.xlsx` and CSV templates, a dry-run preview of new and changed records with row and field validation errors, and a commit operation that persists validated records. A preview must describe the actual submitted file and a commit must not report success before persistence succeeds.

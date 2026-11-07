@@ -3,7 +3,7 @@ import { formatDistanceToNow } from "date-fns";
 
 interface MobileHeaderProps {
   activeSiteId: string;
-  onSyncNow?: () => void;
+  onSyncNow?: () => Promise<void>;
   isSimulatedOffline?: boolean;
   onToggleOfflineMode?: (isOffline: boolean) => void;
 }
@@ -28,9 +28,14 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
     try {
       if (onSyncNow) {
         await onSyncNow();
+      } else {
+        throw new Error("Synchronization is not available.");
       }
       setLastSyncTime(new Date());
       setPendingCount(0);
+    } catch (error) {
+      console.error("Sync failed:", error);
+      alert(error instanceof Error ? error.message : "Synchronization failed.");
     } finally {
       setIsSyncing(false);
     }
