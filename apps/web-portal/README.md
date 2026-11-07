@@ -235,6 +235,7 @@ The route invokes the CAD parser's `.venv` Python interpreter. Set
 `CAFM_CAD_PYTHON` to an alternate Python executable if needed. If the
 interpreter is unavailable, the limited ASCII DXF fallback supports straight,
 closed LWPOLYLINE room boundaries and TEXT labels; drawings with voids, desks,
-curves, or other unsupported room entities require Python. Desk coordinates are
-returned by the API but are not yet saved to the platform's desk registry.
-Room changes currently persist in browser storage, not on the server.
+curves, or other unsupported room entities require Python. Extracted desks are
+stored alongside rooms in the portal's browser storage, scoped to the selected
+floor. Importing another drawing replaces extracted desks for that floor.
+Room and desk changes currently persist in browser storage, not on the server.

@@ -30,9 +30,11 @@ export interface SiteRoleMapping {
 }
 
 interface DemoData {
+  sites: SiteId[];
   buildings: Building[];
   floors: Floor[];
   rooms: Room[];
+  desks: ExtractedDesk[];
   equipment: Equipment[];
   blueprints: PM_ChecklistStandard[];
   schedules: PM_Schedule[];
@@ -42,6 +44,21 @@ interface DemoData {
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
   siteRoleAssignments: SiteRoleAssignment[];
+}
+
+export interface ExtractedDesk {
+  id: string;
+  SiteId: SiteId;
+  bl_id: string;
+  LevelName: string;
+  RoomCode: string;
+  centerX: number;
+  centerY: number;
+  widthM?: number | null;
+  heightM?: number | null;
+  name?: string | null;
+  deskType: string;
+  isPermanent: boolean;
 }
 
 const STORAGE_KEY = "cafm-demo-data-v1";
@@ -102,9 +119,11 @@ function seedData(): DemoData {
     SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
   })));
   return {
+    sites,
     buildings: [...ESOC_BUILDINGS, ...ESTEC_BUILDINGS, ...ESRIN_BUILDINGS],
     floors: [...ESOC_FLOORS, ...ESTEC_FLOORS, ...ESRIN_FLOORS],
     rooms: [...ESOC_ROOMS, ...ESTEC_ROOMS, ...ESRIN_ROOMS],
+    desks: [],
     equipment: [...ESOC_EQUIPMENT, ...ESTEC_EQUIPMENT, ...ESRIN_EQUIPMENT],
     blueprints: [],
     schedules: [],
@@ -146,6 +165,8 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
             (("tradeRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).tradeRoleMappings)) ||
             (("siteRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleMappings)) ||
             (("siteRoleAssignments" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleAssignments)) ||
+            (("sites" in parsed) && !Array.isArray((parsed as Record<string, unknown>).sites)) ||
+            (("desks" in parsed) && !Array.isArray((parsed as Record<string, unknown>).desks)) ||
             (("craftspeople" in parsed) && !Array.isArray((parsed as Record<string, unknown>).craftspeople))) {
           throw new Error("Stored demo data has an invalid format.");
         }

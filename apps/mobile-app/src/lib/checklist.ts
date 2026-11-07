@@ -109,12 +109,8 @@ export async function stopWorkSession(
 
   await db.put("workSessions", session);
 
-  // Queue sync
   const engine = getOfflineEngine();
-  await engine.saveWorkRequest({
-    WR_ID: session.WR_ID,
-    TotalTimeMinutes: totalMinutes,
-  } as any);
+  await engine.queueMutation("SESSION_LOG", { ...session });
 
   return { totalTimeMinutes: totalMinutes };
 }
@@ -171,11 +167,8 @@ export async function logStepCompletion(
     await engine.queuePhotoUpload(wrId, compressedDataUrl, originalSizeKB, compressedSizeKB, stepId);
   }
 
-  // Queue sync
   const engine = getOfflineEngine();
-  await engine.saveWorkRequest({
-    WR_ID: wrId,
-  } as any);
+  await engine.queueMutation("STEP_COMPLETE", { ...auditEntry, TechnicianComment: technicianComment });
 }
 
 /**

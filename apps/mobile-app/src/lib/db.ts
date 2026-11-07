@@ -1,4 +1,6 @@
+/// <reference types="vite/client" />
 import { openDB, DBSchema, IDBPDatabase } from "idb";
+import { createMemoryDatabase } from "./memory-db";
 import {
   BaseWorkRequest,
   Building,
@@ -80,24 +82,24 @@ export interface MobileAppDB extends DBSchema {
     value: Building;
   };
   floors: {
-    key: string;
+    key: [string, string];
     value: Floor;
     indexes: {
       "by-bl_id": string;
     };
   };
   rooms: {
-    key: string;
+    key: [string, string, string];
     value: Room;
     indexes: {
-      "by-location": string;
+      "by-location": [string, string];
     };
   };
   equipment: {
     key: string;
     value: Equipment;
     indexes: {
-      "by-location": string;
+      "by-location": [string, string, string];
       "by-trade": string;
     };
   };
@@ -155,6 +157,14 @@ let db: IDBPDatabase<MobileAppDB> | null = null;
 
 async function initDB(): Promise<IDBPDatabase<MobileAppDB>> {
   if (db) return db;
+
+  if (typeof indexedDB === "undefined") {
+    if (import.meta.env.MODE !== "test") {
+      throw new Error("IndexedDB is unavailable; offline data cannot be saved.");
+    }
+    db = createMemoryDatabase();
+    return db;
+  }
 
   db = await openDB<MobileAppDB>("cafm-mobile-app-db", 1, {
     upgrade(db) {

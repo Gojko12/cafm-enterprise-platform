@@ -13,7 +13,17 @@ const resultSchema = z.object({
     NetAreaM2: z.number().nonnegative(),
     Polygon: GeoJSONPolygonSchema,
   })).min(1),
-  desks: z.array(z.unknown()),
+  desks: z.array(z.object({
+    desk_id: z.string().min(1),
+    desk_name: z.string().nullable().optional(),
+    room_code: z.string().min(1),
+    center_x: z.number().finite(),
+    center_y: z.number().finite(),
+    width_m: z.number().nonnegative().nullable().optional(),
+    height_m: z.number().nonnegative().nullable().optional(),
+    desk_type: z.string(),
+    is_permanent: z.boolean(),
+  })),
 });
 
 export function CadUpload({ floor }: { floor: Floor }) {
@@ -55,7 +65,24 @@ export function CadUpload({ floor }: { floor: Floor }) {
             });
           }
         }
-        return { ...current, rooms };
+        const desks = current.desks.filter((desk) =>
+          desk.SiteId !== floor.SiteId || desk.bl_id !== floor.bl_id || desk.LevelName !== floor.LevelName,
+        );
+        desks.push(...parsed.desks.map((desk) => ({
+          id: JSON.stringify([floor.SiteId, floor.bl_id, floor.LevelName, desk.desk_id]),
+          SiteId: floor.SiteId,
+          bl_id: floor.bl_id,
+          LevelName: floor.LevelName,
+          RoomCode: desk.room_code,
+          centerX: desk.center_x,
+          centerY: desk.center_y,
+          widthM: desk.width_m,
+          heightM: desk.height_m,
+          name: desk.desk_name,
+          deskType: desk.desk_type,
+          isPermanent: desk.is_permanent,
+        })));
+        return { ...current, rooms, desks };
       });
       setMessage(`Imported ${parsed.rooms.length} rooms; ${parsed.desks.length} desks extracted.`);
     } catch (error) {

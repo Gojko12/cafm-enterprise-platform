@@ -4,7 +4,7 @@ import {
   getOfflineEngine,
   compressPhoto,
 } from "../lib/offline-engine";
-import { clearAllData, closeDB } from "../lib/db";
+import { clearAllData, closeDB, getDB } from "../lib/db";
 import {
   useFilterStore,
   applyFilters,
@@ -166,8 +166,19 @@ describe("WorkSession Timer", () => {
 
     await stopWorkSession(sessionId, reason);
 
-    const session = await getActiveWorkSession("2026000001");
+    const session = await (await getDB()).get("workSessions", sessionId);
     expect(session?.TimerOverrideReason).toBe(reason);
+    const queued = await (await getDB()).getAllFromIndex("syncQueue", "by-type", "SESSION_LOG");
+    expect(queued[0]?.Payload.SessionId).toBe(sessionId);
+  });
+
+  it("does not overwrite a work request when logging a session", async () => {
+    const engine = getOfflineEngine();
+    const wr = createTestWR({ WR_ID: "2026000001" });
+    await engine.saveWorkRequest(wr);
+    const sessionId = await startWorkSession(wr.WR_ID, "TECH001");
+    await stopWorkSession(sessionId);
+    expect(await engine.getWorkRequest(wr.WR_ID)).toEqual(wr);
   });
 });
 
@@ -196,6 +207,16 @@ describe("Checklist Step Execution", () => {
 
     const auditLog = await getStepAuditLog("2026000001");
     expect(auditLog[0].ImmutableChecksum).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("queues a step audit without replacing the work request", async () => {
+    const engine = getOfflineEngine();
+    const wr = createTestWR({ WR_ID: "2026000001" });
+    await engine.saveWorkRequest(wr);
+    await logStepCompletion(wr.WR_ID, "STEP001", "TECH001", "PASS", true);
+    expect(await engine.getWorkRequest(wr.WR_ID)).toEqual(wr);
+    const queued = await (await getDB()).getAllFromIndex("syncQueue", "by-type", "STEP_COMPLETE");
+    expect(queued[0]?.Payload.StepId).toBe("STEP001");
   });
 
   it("should validate numeric thresholds", () => {
@@ -296,10 +317,10 @@ describe("Filter & Equipment Picker", () => {
     expect(store.filters.selectedEquipmentCodes?.size).toBe(0);
 
     store.toggleEquipmentSelection("EQ001");
-    expect(store.filters.selectedEquipmentCodes?.has("EQ001")).toBe(true);
+    expect(useFilterStore.getState().filters.selectedEquipmentCodes?.has("EQ001")).toBe(true);
 
     store.toggleEquipmentSelection("EQ001");
-    expect(store.filters.selectedEquipmentCodes?.has("EQ001")).toBe(false);
+    expect(useFilterStore.getState().filters.selectedEquipmentCodes?.has("EQ001")).toBe(false);
   });
 
   it("should reset all filters", () => {
@@ -311,9 +332,9 @@ describe("Filter & Equipment Picker", () => {
 
     store.resetFilters();
 
-    expect(store.filters.bl_id).toBeUndefined();
-    expect(store.filters.trade).toBeUndefined();
-    expect(store.filters.selectedEquipmentCodes?.size).toBe(0);
+    expect(useFilterStore.getState().filters.bl_id).toBeUndefined();
+    expect(useFilterStore.getState().filters.trade).toBeUndefined();
+    expect(useFilterStore.getState().filters.selectedEquipmentCodes?.size).toBe(0);
   });
 
   it("should count applied filters", () => {

@@ -271,6 +271,21 @@ export class OfflineEngine {
     return items.length;
   }
 
+  async queueMutation(
+    mutationType: "STEP_COMPLETE" | "SESSION_LOG",
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const db = await getDB();
+    await db.put("syncQueue", {
+      QueueId: uuidv4(),
+      MutationType: mutationType,
+      Payload: payload,
+      SyncStatus: "PENDING",
+      CreatedAt: new Date().toISOString(),
+      RetryCount: 0,
+    });
+  }
+
   /**
    * Get last sync time
    */

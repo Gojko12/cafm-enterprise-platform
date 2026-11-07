@@ -1,14 +1,14 @@
 # CAFM Enterprise Mobile App — Phase 5: Offline-First Field Application
 
 ## Overview
-Production-grade offline-first mobile web application for technicians and QA inspectors. Built with React, TypeScript, Zustand, and IndexedDB for true offline persistence and bidirectional sync.
+Offline-first mobile web application for technicians and QA inspectors. Built with React, TypeScript, Zustand, and IndexedDB. Server synchronization is not yet configured.
 
 ## Architecture
 
 ### Core Libraries
 - **React 18** + TypeScript for UI components
 - **Zustand** for state management (filters, sync status, technician profile)
-- **IndexedDB** (`idb` library) for local persistence with automatic fallback to localStorage
+- **IndexedDB** (`idb` library) for local persistence. Tests use an in-memory fallback when IndexedDB is unavailable; production reports an error instead of silently losing data.
 - **Vite** for fast development and optimized builds
 - **Vitest** for comprehensive unit & integration testing
 
@@ -18,20 +18,20 @@ Production-grade offline-first mobile web application for technicians and QA ins
    - Location hierarchy caching (Building → Floor → Room)
    - Equipment registry with trade filters
    - Checklist blueprints & step definitions
-   - Automatic background sync when online + manual "Sync Now" trigger
+   - Queues offline changes; "Sync Now" currently reports that server synchronization is unavailable
    - Online/Offline mode simulator toggle
 
 2. **Photo Compression** (`src/lib/offline-engine.ts :: compressPhoto()`)
    - Canvas-based downscaling (max 800×800px)
    - WebP compression at 70% quality
    - Tracks original vs. compressed file sizes
-   - Auto-queues for sync when online
+   - Queues photos for synchronization
 
 3. **Work Session Timer** (`src/lib/checklist.ts`)
    - Start/Pause/Stop timer with microsecond-level accuracy
    - Manual override with mandatory reason logging
    - Automatic WorkSession record persistence
-   - Integration with WR TotalTimeMinutes tracking
+   - Queues stopped work sessions for synchronization
 
 4. **Checklist Execution** (`src/lib/checklist.ts`)
    - Step-by-step checklist navigation (Boolean, Numeric, Select, FreeText)
@@ -68,10 +68,8 @@ syncMetadata      - Last sync time & conflict tracking
 ```
 
 ### Sync Strategy
-- **Automatic**: Detects online status; syncs queued mutations when connectivity restored
-- **Manual**: User-triggered "Sync Now" button with live status indicator
-- **Conflict Resolution**: Last-write-wins for WR updates; preserves immutable PM_StepAuditLog
-- **Retry Logic**: Failed items marked with error message; max 3 retries
+- Work-request changes, step audits, stopped work sessions and photos are retained locally until a real sync transport is configured.
+- The manual sync action reports the configuration error instead of marking pending entries as synchronized. Online reconnection logs the same error.
 
 ## Usage
 
