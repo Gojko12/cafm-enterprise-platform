@@ -13,6 +13,27 @@ import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { CadUpload } from "@/components/modules/CadUpload";
+import { OverviewTable } from "@/components/common/TableColumns";
+import type { Building, Floor, Room } from "@cafm/shared-schema";
+
+const buildingColumns = [
+  { id: "code", label: "Building", value: (item: Building) => item.bl_id },
+  { id: "name", label: "Name", value: (item: Building) => item.Name },
+  { id: "address", label: "Address", value: (item: Building) => item.Address },
+];
+const floorColumns = [
+  { id: "building", label: "Building", value: (item: Floor) => item.bl_id },
+  { id: "floor", label: "Floor", value: (item: Floor) => item.LevelName },
+  { id: "number", label: "Floor Number", value: (item: Floor) => item.FloorNumber },
+  { id: "area", label: "Gross Area (m²)", value: (item: Floor) => item.GrossAreaM2 },
+];
+const roomColumns = [
+  { id: "building", label: "Building", value: (item: Room) => item.bl_id },
+  { id: "floor", label: "Floor", value: (item: Room) => item.LevelName },
+  { id: "code", label: "Room", value: (item: Room) => item.RoomCode },
+  { id: "name", label: "Name", value: (item: Room) => item.Name },
+  { id: "area", label: "Net Area (m²)", value: (item: Room) => item.NetAreaM2 },
+];
 
 export function LocationHierarchyManager() {
   const {
@@ -73,6 +94,18 @@ export function LocationHierarchyManager() {
             )}
           </div>
         </div>
+
+        <section className="space-y-4 rounded-lg border bg-white p-4">
+          <h2 className="font-semibold">Buildings</h2>
+          <OverviewTable preferenceKey="locations-buildings" columns={buildingColumns} rows={sampleData.buildings} rowKey={(item) => item.bl_id}
+            onRow={(item) => { setSelectedBuilding(item); setSelectedFloor(null); setSelectedRoom(null); }} />
+          <h2 className="font-semibold">Floors</h2>
+          <OverviewTable preferenceKey="locations-floors" columns={floorColumns} rows={sampleData.floors.filter((item) => !selectedBuilding || item.bl_id === selectedBuilding.bl_id)}
+            rowKey={(item) => `${item.bl_id}:${item.LevelName}`} onRow={(item) => { setSelectedBuilding(sampleData.buildings.find((building) => building.bl_id === item.bl_id) ?? null); setSelectedFloor(item); setSelectedRoom(null); }} />
+          <h2 className="font-semibold">Rooms</h2>
+          <OverviewTable preferenceKey="locations-rooms" columns={roomColumns} rows={sampleData.rooms.filter((item) => (!selectedBuilding || item.bl_id === selectedBuilding.bl_id) && (!selectedFloor || item.LevelName === selectedFloor.LevelName))}
+            rowKey={(item) => `${item.bl_id}:${item.LevelName}:${item.RoomCode}`} onRow={(item) => { setSelectedBuilding(sampleData.buildings.find((building) => building.bl_id === item.bl_id) ?? null); setSelectedFloor(sampleData.floors.find((floor) => floor.bl_id === item.bl_id && floor.LevelName === item.LevelName) ?? null); setSelectedRoom(item); }} />
+        </section>
 
         {/* Selected Room Details */}
         {selectedRoom && (

@@ -23,7 +23,6 @@ const NAV_ITEMS = [
     { href: "/desk-reservations", label: "Desk Reservations", icon: Settings },
   ]},
   { section: "Operations", items: [
-    { href: "/work-requests", label: "Work Requests", icon: Wrench },
     { href: "/work-requests#PM", label: "Preventive Maintenance", icon: Wrench },
     { href: "/work-requests#FJ", label: "Fast Jobs", icon: Wrench },
     { href: "/work-requests#LJ", label: "Long Jobs", icon: Wrench },

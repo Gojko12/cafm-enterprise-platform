@@ -1,447 +1,189 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
-import { QrCode, Download, BarChart3, Filter, ChevronDown } from "lucide-react";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  getFilteredRowModel,
-  ColumnDef,
-  flexRender,
-} from "@tanstack/react-table";
+import React, { useEffect, useState } from "react";
+import { EQUIPMENT_CATEGORIES, EquipmentSchema, TechnicalSpecificationsSchema } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
+import { OverviewTable } from "@/components/common/TableColumns";
+import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import type { Equipment } from "@cafm/shared-schema";
+import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
+import { FJWorkRequestPopup } from "./FJWorkRequestPopup";
+import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
+
+const columns = [
+  { id: "code", label: "EQ ID", value: (eq: Equipment) => eq.EquipmentCode },
+  { id: "name", label: "Name", value: (eq: Equipment) => eq.EquipmentName },
+  { id: "local", label: "Local name", value: (eq: Equipment) => eq.EquipmentNameLocal },
+  { id: "category", label: "Category", value: (eq: Equipment) => eq.Category ? `${eq.Category} - ${EQUIPMENT_CATEGORIES[eq.Category]}` : undefined },
+  { id: "level", label: "Hierarchy Level", value: (eq: Equipment) => eq.HierarchyLevel },
+  { id: "parent", label: "Parent", value: (eq: Equipment) => eq.ParentEquipmentCode },
+  { id: "building", label: "Building", value: (eq: Equipment) => eq.bl_id },
+  { id: "floor", label: "Floor", value: (eq: Equipment) => eq.LevelName },
+  { id: "room", label: "Room", value: (eq: Equipment) => eq.RoomCode },
+  { id: "status", label: "Status", value: (eq: Equipment) => eq.Status },
+  { id: "criticality", label: "Criticality", value: (eq: Equipment) => eq.Criticality },
+];
 
 export function EquipmentRegistry() {
   const { data } = useCafmStore();
   const { activeSiteId } = useSiteContext();
-  const equipment = useMemo(() => data.equipment.filter((item) => item.SiteId === activeSiteId), [data.equipment, activeSiteId]);
-
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-  const [filterText, setFilterText] = useState("");
-  const [detailsOpen, setDetailsOpen] = useState<string | null>(null);
-  const [showQrPreview, setShowQrPreview] = useState(false);
-
-  // Define table columns
-  const columns = useMemo<ColumnDef<Equipment>[]>(
-    () => [
-      {
-        accessorKey: "EquipmentCode",
-        header: "Equipment Code",
-        cell: (info) => (
-          <span className="font-mono font-semibold text-blue-600">
-            {info.getValue() as string}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "EquipmentName",
-        header: "Equipment Name",
-        cell: (info) => <span>{info.getValue() as string}</span>,
-      },
-      {
-        accessorKey: "LocalEquipmentCode",
-        header: "Local Code",
-        cell: (info) => (
-          <span className="text-xs text-gray-600">
-            {(info.getValue() as string) || "—"}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "Criticality",
-        header: "Criticality",
-        cell: (info) => {
-          const crit = info.getValue() as string;
-          const colors: Record<string, string> = {
-            Critical: "bg-red-100 text-red-800",
-            High: "bg-orange-100 text-orange-800",
-            Medium: "bg-yellow-100 text-yellow-800",
-            Low: "bg-gray-100 text-gray-800",
-          };
-          return (
-            <span
-              className={`px-2 py-1 rounded text-xs font-semibold ${colors[crit] || ""}`}
-            >
-              {crit}
-            </span>
-          );
-        },
-      },
-      {
-        accessorKey: "Status",
-        header: "Status",
-        cell: (info) => (
-          <span className="text-xs font-medium">
-            {info.getValue() as string}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "RoomCode",
-        header: "Room",
-        cell: (info) => (
-          <span className="text-sm text-gray-600">{info.getValue() as string}</span>
-        ),
-      },
-    ],
-    [],
-  );
-
-  // Filter data
-  const filteredData = useMemo(() => {
-    return equipment.filter((eq) =>
-      eq.EquipmentCode.toLowerCase().includes(filterText.toLowerCase()) ||
-      eq.EquipmentName.toLowerCase().includes(filterText.toLowerCase()) ||
-      eq.LocalEquipmentCode
-        ?.toLowerCase()
-        .includes(filterText.toLowerCase()),
-    );
-  }, [equipment, filterText]);
-
-  // Create table instance
-  const table = useReactTable({
-    data: filteredData,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    initialState: {
-      pagination: {
-        pageSize: 10,
-      },
-    },
+  const [selected, setSelected] = useState<string | null>(null);
+  const [tree, setTree] = useState(false);
+  const [expanded, setExpanded] = useState<string[]>([]);
+  useEffect(() => { setSelected(null); setExpanded([]); }, [activeSiteId]);
+  const equipment = data.equipment.filter((item) => item.SiteId === activeSiteId);
+  const item = equipment.find((eq) => eq.EquipmentCode === selected);
+  const shown = tree ? equipment.filter((eq) => {
+    if (!eq.ParentEquipmentCode) return true;
+    const parent = equipment.find((candidate) => candidate.EquipmentCode === eq.ParentEquipmentCode);
+    return expanded.includes(eq.ParentEquipmentCode) && (!parent?.ParentEquipmentCode || expanded.includes(parent.ParentEquipmentCode));
+  }) : equipment;
+  const treeColumns = columns.map((column) => column.id !== "code" ? column : {
+    ...column, render: (eq: Equipment) => <span className="whitespace-nowrap" style={{ paddingLeft: eq.HierarchyLevel === "Component" ? 32 : eq.HierarchyLevel === "SubEquipment" ? 16 : 0 }}>
+      {equipment.some((child) => child.ParentEquipmentCode === eq.EquipmentCode) && <button aria-expanded={expanded.includes(eq.EquipmentCode)}
+        onClick={(event) => { event.stopPropagation(); setExpanded((current) => current.includes(eq.EquipmentCode) ? current.filter((code) => code !== eq.EquipmentCode) : [...current, eq.EquipmentCode]); }}>{expanded.includes(eq.EquipmentCode) ? "▼" : "▶"}</button>} {eq.EquipmentCode}</span>,
   });
-
-  const handleRowSelect = (equipmentCode: string, checked: boolean) => {
-    const newSelection = new Set(selectedRows);
-    if (checked) {
-      newSelection.add(equipmentCode);
-    } else {
-      newSelection.delete(equipmentCode);
-    }
-    setSelectedRows(newSelection);
-  };
-
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      const allCodes = new Set(
-        table.getRowModel().rows.map((row) => row.original.EquipmentCode),
-      );
-      setSelectedRows(allCodes);
-    } else {
-      setSelectedRows(new Set());
-    }
-  };
-
-  const handleGenerateQrPdf = () => {
-    alert(
-      `Generating QR PDF with ${selectedRows.size} equipment items...\n\nIn production: Creates multi-label sheet with EquipmentCode, LocalEquipmentCode, RoomCode + QR SVG using jsPDF + QR library.`,
-    );
-  };
-
-  return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Equipment Registry & Asset Management
-        </h1>
-        <p className="text-sm text-gray-600 mt-1">
-          High-density filterable equipment table with batch QR code generator
-        </p>
+  return <div className="space-y-3 p-6">
+    <h1 className="text-xl font-semibold">Equipment Registry</h1>
+    <button className="rounded border bg-white px-2 py-1 text-xs" aria-pressed={tree} onClick={() => setTree((current) => !current)}>{tree ? "Tree view" : "Flat view"}</button>
+    <div className="flex flex-col gap-4 lg:flex-row">
+      <div className={`min-w-0 transition-all ${item ? "lg:w-1/2" : "w-full"}`}>
+        <OverviewTable preferenceKey="equipment" columns={tree ? treeColumns : columns} rows={shown} rowKey={(eq) => eq.EquipmentCode} onRow={(eq) => setSelected(eq.EquipmentCode)} />
       </div>
-
-      {/* Toolbar */}
-      <div className="max-w-7xl mx-auto bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 flex-1">
-          <Filter size={18} className="text-gray-600" />
-          <input
-            type="text"
-            placeholder="Search equipment code, name, or local code..."
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          {selectedRows.size > 0 && (
-            <>
-              <span className="font-semibold">{selectedRows.size} selected</span>
-              <button
-                onClick={handleGenerateQrPdf}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-              >
-                <QrCode size={18} />
-                Generate QR PDF
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="max-w-7xl mx-auto bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-100 border-b border-gray-300">
-              <tr>
-                <th className="px-4 py-3 text-left">
-                  <input
-                    type="checkbox"
-                    checked={
-                      selectedRows.size === table.getRowModel().rows.length &&
-                      table.getRowModel().rows.length > 0
-                    }
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                </th>
-                {table.getHeaderGroups().map((headerGroup) =>
-                  headerGroup.headers.map((header) => (
-                    <th
-                      key={header.id}
-                      className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide"
-                    >
-                      {flexRender(
-                        header.column.columnDef.header,
-                        header.getContext(),
-                      )}
-                    </th>
-                  )),
-                )}
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {table.getRowModel().rows.map((row) => (
-                <tr
-                  key={row.original.EquipmentCode}
-                  className="hover:bg-gray-50 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedRows.has(row.original.EquipmentCode)}
-                      onChange={(e) =>
-                        handleRowSelect(
-                          row.original.EquipmentCode,
-                          e.target.checked,
-                        )
-                      }
-                      className="rounded border-gray-300"
-                    />
-                  </td>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-sm">
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </td>
-                  ))}
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() =>
-                        setDetailsOpen(
-                          detailsOpen === row.original.EquipmentCode
-                            ? null
-                            : row.original.EquipmentCode,
-                        )
-                      }
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className="bg-gray-50 border-t border-gray-200 px-4 py-3 flex items-center justify-between">
-          <div className="text-sm text-gray-600">
-            Page {table.getState().pagination.pageIndex + 1} of{" "}
-            {table.getPageCount()}
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              className="px-3 py-1 border border-gray-300 rounded-lg text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ← Previous
-            </button>
-            <button
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              className="px-3 py-1 border border-gray-300 rounded-lg text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Equipment Details Modal */}
-      {detailsOpen && (
-        <div className="max-w-7xl mx-auto bg-blue-50 rounded-lg border border-blue-200 p-6">
-          {(() => {
-            const equipment = data.equipment.find(
-              (e) => e.EquipmentCode === detailsOpen,
-            );
-            return equipment ? (
-              <div className="space-y-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="text-lg font-bold text-blue-900">
-                      {equipment.EquipmentName}
-                    </h3>
-                    <p className="text-sm text-blue-600 mt-1">
-                      Code: {equipment.EquipmentCode}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setDetailsOpen(null)}
-                    className="text-blue-400 hover:text-blue-600"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">
-                      Manufacturer
-                    </p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.Manufacturer}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">Model</p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.Model}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">
-                      Serial Number
-                    </p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.SerialNumber}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">
-                      Criticality
-                    </p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.Criticality}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">
-                      Installation Date
-                    </p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.InstallationDate}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">
-                      Warranty Expiry
-                    </p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.WarrantyExpiryDate}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">Location</p>
-                    <p className="font-semibold text-blue-900">
-                      {equipment.RoomCode}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium">
-                      BIM Global ID
-                    </p>
-                    <p className="font-mono text-xs font-semibold text-blue-900">
-                      {equipment.BIM_GlobalId || "—"}
-                    </p>
-                  </div>
-                </div>
-
-                {Object.keys(equipment.TechnicalSpecifications).length > 0 && (
-                  <div>
-                    <p className="text-xs text-blue-600 font-medium mb-2">
-                      Technical Specifications
-                    </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {Object.entries(equipment.TechnicalSpecifications).map(
-                        ([key, value]) => (
-                          <div key={key} className="bg-white p-2 rounded">
-                            <p className="text-xs text-blue-600 font-medium">
-                              {key}
-                            </p>
-                            <p className="text-sm font-semibold text-blue-900">
-                              {String(value)}
-                            </p>
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => {
-                    setShowQrPreview(true);
-                    setDetailsOpen(null);
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <QrCode size={18} />
-                  Show QR Scan Preview
-                </button>
-              </div>
-            ) : null;
-          })()}
-        </div>
-      )}
-
-      {/* QR Scan Preview Modal */}
-      {showQrPreview && (
-        <div className="max-w-7xl mx-auto fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full">
-            <div className="text-center">
-              <QrCode size={128} className="mx-auto mb-4 text-blue-600" />
-              <h3 className="text-lg font-bold text-gray-900 mb-2">
-                QR Code Scanner Preview
-              </h3>
-              <p className="text-sm text-gray-600 mb-4">
-                In production: This simulates the mobile ScanEquipmentQR workflow.
-                Scanning opens equipment inspection, work requests, and maintenance history.
-              </p>
-              <button
-                onClick={() => setShowQrPreview(false)}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {item && <EquipmentDetails key={`${activeSiteId}:${item.EquipmentCode}`} item={item} onClose={() => setSelected(null)} />}
     </div>
-  );
+  </div>;
+}
+
+function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => void }) {
+  const { data, setData } = useCafmStore();
+  const [tab, setTab] = useState<"General" | "Details" | "WRs" | "Attached Documents" | "KPIs">("General");
+  const [draft, setDraft] = useState(item);
+  const [baseline, setBaseline] = useState(item);
+  const [specifications, setSpecifications] = useState(JSON.stringify(item.TechnicalSpecifications, null, 2));
+  const [error, setError] = useState("");
+  const [type, setType] = useState<"All" | "PM" | "FJ" | "LJ">("All");
+  const [openWR, setOpenWR] = useState<BaseWorkRequest | null>(null);
+  const siteEquipment = data.equipment.filter((eq) => eq.SiteId === item.SiteId);
+  const buildings = data.buildings.filter((entry) => entry.SiteId === item.SiteId);
+  const floors = data.floors.filter((entry) => entry.SiteId === item.SiteId);
+  const rooms = data.rooms.filter((entry) => entry.SiteId === item.SiteId);
+  const [location, setLocation] = useState({
+    building: buildings.find((entry) => entry.bl_id === item.bl_id) ?? null,
+    floor: floors.find((entry) => entry.bl_id === item.bl_id && entry.LevelName === item.LevelName) ?? null,
+    room: rooms.find((entry) => entry.bl_id === item.bl_id && entry.LevelName === item.LevelName && entry.RoomCode === item.RoomCode) ?? null,
+  });
+  const requests = data.workRequests.filter((wr) => wr.SiteId === item.SiteId && wr.EquipmentCodes.includes(item.EquipmentCode));
+  const actual = openWR && data.workRequests.find((wr) => wr.SiteId === openWR.SiteId && wr.WR_ID === openWR.WR_ID);
+  const save = () => {
+    if (!draft.EquipmentName.trim()) { setError("Equipment name is required."); return; }
+    if (!location.building || !location.floor || !location.room) { setError("Select a building, floor and room."); return; }
+    if (!draft.Category || !draft.HierarchyLevel) { setError("Select a category and hierarchy level."); return; }
+    const parent = siteEquipment.find((eq) => eq.EquipmentCode === draft.ParentEquipmentCode);
+    if ((draft.HierarchyLevel === "Installation" && draft.ParentEquipmentCode) ||
+      (draft.HierarchyLevel === "SubEquipment" && parent?.HierarchyLevel !== "Installation") ||
+      (draft.HierarchyLevel === "Component" && parent?.HierarchyLevel !== "SubEquipment") || parent?.EquipmentCode === item.EquipmentCode) {
+      setError("Select an appropriate parent: Installation → SubEquipment → Component."); return;
+    }
+    const children = siteEquipment.filter((eq) => eq.ParentEquipmentCode === item.EquipmentCode);
+    if (children.some((eq) => (draft.HierarchyLevel === "Installation" ? eq.HierarchyLevel !== "SubEquipment" :
+      draft.HierarchyLevel === "SubEquipment" ? eq.HierarchyLevel !== "Component" : true))) {
+      setError("This level is incompatible with existing children."); return;
+    }
+    let specs: unknown;
+    try { specs = JSON.parse(specifications); } catch { setError("Technical specifications must be valid JSON."); return; }
+    const validatedSpecs = TechnicalSpecificationsSchema.safeParse(specs);
+    if (!validatedSpecs.success) { setError("Technical specifications must be an object with string, number, boolean or string-array values."); return; }
+    const parsed = EquipmentSchema.safeParse({ ...draft, TechnicalSpecifications: validatedSpecs.data, bl_id: location.building.bl_id, LevelName: location.floor.LevelName,
+      RoomCode: location.room.RoomCode, IsInstallation: draft.HierarchyLevel === "Installation" });
+    if (!parsed.success) { setError(parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")); return; }
+    if (JSON.stringify(baseline) !== JSON.stringify(data.equipment.find((eq) => eq.SiteId === item.SiteId && eq.EquipmentCode === item.EquipmentCode))) {
+      setError("Equipment changed; reopen the details panel."); return;
+    }
+    setData((state) => {
+      const current = state.equipment.find((eq) => eq.SiteId === item.SiteId && eq.EquipmentCode === item.EquipmentCode);
+      if (JSON.stringify(current) !== JSON.stringify(baseline)) { queueMicrotask(() => setError("Equipment changed; reopen the details panel.")); return state; }
+      const currentParent = state.equipment.find((eq) => eq.SiteId === item.SiteId && eq.EquipmentCode === parsed.data.ParentEquipmentCode);
+      if ((parsed.data.HierarchyLevel === "SubEquipment" && currentParent?.HierarchyLevel !== "Installation") ||
+          (parsed.data.HierarchyLevel === "Component" && currentParent?.HierarchyLevel !== "SubEquipment") ||
+          state.equipment.some((eq) => eq.SiteId === item.SiteId && eq.ParentEquipmentCode === item.EquipmentCode &&
+            (parsed.data.HierarchyLevel === "Installation" ? eq.HierarchyLevel !== "SubEquipment" : parsed.data.HierarchyLevel === "SubEquipment" ? eq.HierarchyLevel !== "Component" : true))) {
+        queueMicrotask(() => setError("Equipment hierarchy changed; reload before saving.")); return state;
+      }
+      queueMicrotask(() => setBaseline(parsed.data));
+      return { ...state, equipment: state.equipment.map((eq) => eq.SiteId === item.SiteId && eq.EquipmentCode === item.EquipmentCode ? parsed.data : eq) };
+    });
+    setError("");
+  };
+  const text = (label: string, value: string | undefined, change: (value: string) => void, inputType = "text") =>
+    <label className="text-xs">{label}<input type={inputType} value={value ?? ""} onChange={(event) => change(event.target.value)} className="mt-1 block w-full rounded border p-1 text-sm" /></label>;
+  const number = (label: string, key: "LengthCm" | "WidthCm" | "HeightCm" | "WeightKg" | "ReplacementCostEur") =>
+    <label className="text-xs">{label}<input type="number" min="0" value={draft[key] ?? ""} onChange={(event) => {
+      const raw = event.target.value; setDraft((current) => ({ ...current, [key]: raw === "" ? undefined : Number(raw) }));
+    }} className="mt-1 block w-full rounded border p-1 text-sm" /></label>;
+  return <aside className="min-w-0 space-y-3 rounded border bg-white p-3 lg:w-1/2">
+    <div className="flex justify-between"><strong>{item.EquipmentCode} · {item.EquipmentName}</strong><button aria-label="Close equipment details" onClick={onClose}>✕</button></div>
+    <nav className="flex flex-wrap gap-1">{(["General", "Details", "WRs", "Attached Documents", "KPIs"] as const).map((name) =>
+      <button key={name} onClick={() => setTab(name)} aria-pressed={tab === name} className={`rounded border px-2 py-1 text-xs ${tab === name ? "bg-blue-100" : ""}`}>{name}</button>)}</nav>
+    {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+    {tab === "General" && <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {text("EQ Name (English)", draft.EquipmentName, (value) => setDraft({ ...draft, EquipmentName: value }))}
+        {text("EQ Name (Local Language)", draft.EquipmentNameLocal, (value) => setDraft({ ...draft, EquipmentNameLocal: value }))}
+        <label className="text-xs">Category<select value={draft.Category ?? ""} onChange={(e) => {
+          const value = e.target.value; const category = Object.keys(EQUIPMENT_CATEGORIES).find((key) => key === value);
+          if (category && category in EQUIPMENT_CATEGORIES) setDraft({ ...draft, Category: category as keyof typeof EQUIPMENT_CATEGORIES });
+        }} className="block w-full rounded border p-1"><option value="">Select</option>{Object.entries(EQUIPMENT_CATEGORIES).map(([code, name]) => <option key={code} value={code}>{code} · {name}</option>)}</select></label>
+        <label className="text-xs">Hierarchy Level<select value={draft.HierarchyLevel ?? ""} onChange={(e) => {
+          const value = e.target.value;
+          if (value === "Installation" || value === "SubEquipment" || value === "Component") setDraft({ ...draft, HierarchyLevel: value, ParentEquipmentCode: undefined });
+        }} className="block w-full rounded border p-1"><option value="">Select</option><option>Installation</option><option>SubEquipment</option><option>Component</option></select></label>
+        <label className="text-xs">Subcomponent of<select value={draft.ParentEquipmentCode ?? ""} onChange={(e) => setDraft({ ...draft, ParentEquipmentCode: e.target.value || undefined })} className="block w-full rounded border p-1"><option value="">None</option>{siteEquipment.filter((eq) => eq.EquipmentCode !== item.EquipmentCode && eq.HierarchyLevel === (draft.HierarchyLevel === "SubEquipment" ? "Installation" : draft.HierarchyLevel === "Component" ? "SubEquipment" : "")).map((eq) => <option key={eq.EquipmentCode} value={eq.EquipmentCode}>{eq.EquipmentCode} · {eq.EquipmentName}</option>)}</select></label>
+        {text("Installation date", draft.InstallationDate?.slice(0, 10), (value) => setDraft({ ...draft, InstallationDate: value || undefined }), "date")}
+        <label className="text-xs">Operational status<select value={draft.Status} onChange={(e) => { const value = e.target.value; if (value === "Active" || value === "Decommissioned" || value === "Under Repair") setDraft({ ...draft, Status: value }); }} className="block w-full rounded border p-1"><option>Active</option><option>Under Repair</option><option>Decommissioned</option></select></label>
+        <label className="text-xs">Criticality<select value={draft.Criticality ?? ""} onChange={(e) => { const value = e.target.value; if (value === "") setDraft({ ...draft, Criticality: undefined }); else if (value === "Low" || value === "Medium" || value === "High" || value === "Critical") setDraft({ ...draft, Criticality: value }); }} className="block w-full rounded border p-1"><option value="">None</option><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></label>
+      </div>
+      <p className="text-xs">Direct children: {siteEquipment.filter((eq) => eq.ParentEquipmentCode === item.EquipmentCode).map((eq) => `${eq.EquipmentCode} ${eq.EquipmentName}`).join(", ") || "None"}</p>
+      <LocationEquipmentPickerGroup buildings={buildings} floors={floors} rooms={rooms} showEquipment={false}
+        selectedBuilding={location.building} selectedFloor={location.floor} selectedRoom={location.room}
+        onLocationChange={(next) => { setError(""); setLocation(next); }} />
+      <button onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white">Save</button>
+    </div>}
+    {tab === "Details" && <div className="space-y-3"><div className="grid grid-cols-2 gap-2">
+      {number("Length (cm)", "LengthCm")}{number("Width (cm)", "WidthCm")}{number("Height (cm)", "HeightCm")}{number("Weight (kg)", "WeightKg")}
+      {number("Replacement cost (EUR)", "ReplacementCostEur")}
+      {text("Manufacturer", draft.Manufacturer, (value) => setDraft({ ...draft, Manufacturer: value }))}
+      {text("Manufacturer article ID", draft.ManufacturerArticleId, (value) => setDraft({ ...draft, ManufacturerArticleId: value }))}
+      {text("Model", draft.Model, (value) => setDraft({ ...draft, Model: value }))}
+      {text("Serial number", draft.SerialNumber, (value) => setDraft({ ...draft, SerialNumber: value }))}
+      {text("Documentation URL", draft.DocumentationUrl, (value) => setDraft({ ...draft, DocumentationUrl: value || undefined }), "url")}
+    </div>
+      {draft.DocumentationUrl && /^https?:\/\//i.test(draft.DocumentationUrl) && <a className="text-blue-700 underline" href={draft.DocumentationUrl} target="_blank" rel="noreferrer">Open documentation</a>}
+      <label className="block text-xs">Power / Technical Specs (JSON)<textarea value={specifications} onChange={(event) => setSpecifications(event.target.value)} rows={5} className="block w-full rounded border p-2 font-mono" /></label>
+      <button onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white">Save</button></div>}
+    {tab === "WRs" && <div className="space-y-2"><div className="flex gap-2">{(["All", "PM", "FJ", "LJ"] as const).map((value) => <button key={value} aria-pressed={type === value} onClick={() => setType(value)} className="rounded border px-2">{value}</button>)}</div>
+      {requests.filter((wr) => type === "All" || wr.WR_Type === type).map((wr) => <div key={wr.WR_ID} className="border-b py-1 text-xs">{wr.WR_ID} · {wr.WR_Type} · {wr.WorkRequestStatus} {wr.Percentage}% · {wr.DueDate ?? "—"} · {wr.EstimatedCostEur ?? "—"} EUR <button className="text-blue-700 underline" onClick={() => setOpenWR(wr)}>Open</button></div>)}</div>}
+    {tab === "Attached Documents" && <div className="space-y-2">
+      <label className="text-sm">Upload document<input type="file" className="block" onChange={(event) => {
+        const file = event.target.files?.[0]; if (!file) return;
+        if (file.size > 5 * 1024 * 1024) { setError("Document must be 5 MB or less."); return; }
+        const reader = new FileReader();
+        reader.onerror = () => setError("Could not read the selected document.");
+        reader.onload = () => { if (typeof reader.result === "string") setDraft((current) => ({ ...current, Documents: [...(current.Documents ?? []), { id: crypto.randomUUID(), name: file.name, type: file.type, dataUrl: reader.result as string }] })); };
+        reader.readAsDataURL(file);
+      }} /></label>
+      {(draft.Documents ?? []).map((document) => <div key={document.id} className="flex gap-3 text-xs"><a className="text-blue-700 underline" href={document.dataUrl} download={document.name}>{document.name}</a><button onClick={() => setDraft({ ...draft, Documents: draft.Documents?.filter((entry) => entry.id !== document.id) })}>Delete</button></div>)}
+      <button onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white">Save documents</button>
+    </div>}
+    {tab === "KPIs" && <dl className="space-y-1 text-sm">
+      <div>Total Maintenance Cost: {requests.some((wr) => wr.ActualCostEur !== undefined) ? `${requests.reduce((sum, wr) => sum + (wr.ActualCostEur ?? 0), 0).toFixed(2)} EUR (recorded costs)` : "Not recorded"}</div>
+      <div>PM Compliance: {requests.some((wr) => wr.WR_Type === "PM") ? `${Math.round(requests.filter((wr) => wr.WR_Type === "PM" && wr.Percentage === 100).length / requests.filter((wr) => wr.WR_Type === "PM").length * 100)}% (closed PMs)` : "Not available"}</div>
+      <div>Reactive work requests: {requests.filter((wr) => wr.WR_Type !== "PM").length}</div>
+      <div>MTBF / MTTR / Availability / Health score: Not available (insufficient reliable operating and breakdown data).</div>
+    </dl>}
+    {actual?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={actual} onClose={() => setOpenWR(null)} onNavigate={(id) => setOpenWR(data.workRequests.find((wr) => wr.SiteId === item.SiteId && wr.WR_ID === id) ?? null)} onEscalateToLJ={() => { setOpenWR(null); setError("Create the Long Job from the work request overview."); }} />}
+    {actual?.WR_Type === "FJ" && <FJWorkRequestPopup workRequest={actual} onClose={() => setOpenWR(null)} onNavigate={(id) => setOpenWR(data.workRequests.find((wr) => wr.SiteId === item.SiteId && wr.WR_ID === id) ?? null)} onEscalateToLJ={() => { setOpenWR(null); setError("Create the Long Job from the work request overview."); }} />}
+    {actual?.WR_Type === "LJ" && <LJWorkRequestPopup workRequest={actual} onClose={() => setOpenWR(null)} onNavigate={(id) => setOpenWR(data.workRequests.find((wr) => wr.SiteId === item.SiteId && wr.WR_ID === id) ?? null)} />}
+  </aside>;
 }

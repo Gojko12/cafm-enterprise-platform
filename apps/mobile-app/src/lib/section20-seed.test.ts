@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema, PM_ChecklistStandardSchema, PM_ScheduleSchema, CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema, PM_ChecklistStandardSchema, PM_ScheduleSchema, CLASSICAL_TRADES, EQUIPMENT_CATEGORIES } from "@cafm/shared-schema";
 import { section20Seed } from "../../../web-portal/lib/section20-seed";
 import { groupLongJobs } from "../../../web-portal/lib/wr-overview";
 
@@ -21,6 +21,7 @@ describe("Section 20 demo seed", () => {
       for (const building of bySite(data.buildings)) expect(bySite(data.floors).filter((floor) => floor.bl_id === building.bl_id).length).toBeGreaterThanOrEqual(3);
       expect(bySite(data.rooms).length).toBeGreaterThanOrEqual(15);
       expect(bySite(data.equipment).length).toBeGreaterThanOrEqual(25);
+      expect(new Set(bySite(data.equipment).map((eq) => eq.Category))).toEqual(new Set(Object.keys(EQUIPMENT_CATEGORIES)));
       expect(bySite(data.craftspeople).length).toBeGreaterThanOrEqual(10);
       expect(new Set(bySite(data.craftspeople).map((person) => person.Trade))).toEqual(new Set(CLASSICAL_TRADES));
       expect(bySite(data.blueprints).length).toBeGreaterThanOrEqual(10);
@@ -50,9 +51,14 @@ describe("Section 20 demo seed", () => {
     }
   });
   it("resolves all hierarchy and schedule references and groups filtered jobs", () => {
+    expect(new Set(data.equipment.map((item) => item.EquipmentCode)).size).toBe(data.equipment.length);
+    expect(data.equipment.every((item) => /^\d{10}$/.test(item.EquipmentCode))).toBe(true);
+    expect(new Set(data.workRequests.map((item) => item.WR_ID)).size).toBe(data.workRequests.length);
+    expect(data.workRequests.every((item) => /^2026\d{6}$/.test(item.WR_ID))).toBe(true);
     for (const item of data.equipment) {
       expect(data.rooms.some((room) => room.SiteId === item.SiteId && room.bl_id === item.bl_id && room.LevelName === item.LevelName && room.RoomCode === item.RoomCode)).toBe(true);
-      if (item.ParentEquipmentCode) expect(data.equipment.some((parent) => parent.SiteId === item.SiteId && parent.EquipmentCode === item.ParentEquipmentCode)).toBe(true);
+      if (item.ParentEquipmentCode) expect(data.equipment.some((parent) => parent.SiteId === item.SiteId && parent.EquipmentCode === item.ParentEquipmentCode &&
+        parent.HierarchyLevel === (item.HierarchyLevel === "Component" ? "SubEquipment" : "Installation"))).toBe(true);
     }
     for (const schedule of data.schedules) {
       const blueprint = data.blueprints.find((item) => item.SiteId === schedule.SiteId && item.ChecklistCode === schedule.ChecklistCode);

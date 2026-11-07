@@ -17,8 +17,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v2";
-const LEGACY_STORAGE_KEY = "cafm-demo-data-v1";
+const STORAGE_KEY = "cafm-demo-data-v3";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
@@ -173,7 +173,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     let active = true;
     async function initialize() {
       try {
-      const saved = localStorage.getItem(storageKey) ?? localStorage.getItem(`${LEGACY_STORAGE_KEY}:${site}`) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+      const saved = localStorage.getItem(storageKey) ?? LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(`${key}:${site}`) ?? localStorage.getItem(key)).find(Boolean);
       let initial = scopeData(seedData(), site);
       const baseText = localStorage.getItem(baseKey);
       if (baseText) {
@@ -370,7 +370,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const reset = () => {
-    if (!window.confirm(`Replace saved demo data for ${site} with the Section 20 seed? This cannot be undone.`)) return;
+    if (!window.confirm(`Replace saved demo data for ${site} with the Section 21 seed? This cannot be undone.`)) return;
     const previous = current.current;
     const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
     void commitSnapshot(previous, next).catch((error: unknown) => {

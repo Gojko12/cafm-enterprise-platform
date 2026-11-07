@@ -649,3 +649,11 @@ Include a toggle in the `Actions` header:
 - LJ grid and card views group filtered requests by percentage by default. Each collapsible group reports descriptions, process tracks, visible count and total estimated cost; Flat List disables grouping.
 - Each site's deterministic demo seed includes four buildings, twelve floors, 24 rooms, 36 equipment records in three-level trees, ten craftspeople, twelve checklists, eighteen schedules, and 77 PM/FJ/LJ requests with comments and audit entries. The seeded checklist examples cover all input types and both Boolean favourable values.
 - The browser cache seed key is versioned, but older local or disk data is not automatically replaced. Reset Demo Data explicitly replaces only the active site's data using revision-checked disk persistence, updates local storage on success, and reports synchronization conflicts or failures. Reset each site separately when a new demonstration dataset is desired.
+
+## 21. Column Controls and Equipment Overview (Partial Implementation)
+
+- Work-request, equipment, building, floor and room overview tables support sortable column headers and persistent column ordering and visibility, with drag-and-drop and keyboard-accessible move buttons. Work-request selection and bulk actions remain available.
+- The work-request toolbar replaces the duplicate top header and type navigation. Dedicated sidebar links select PM, FJ or LJ.
+- The Section 21 demo seed uses globally distinct ten-digit equipment IDs and 2026-prefixed sequential work-request IDs across the three seeded sites. It includes the official 14 equipment categories and three-level parent chains. Reset remains scoped to the current site; existing saved data is not automatically rewritten.
+- The equipment overview opens a site-scoped split detail panel with general and technical details, linked work-request popups, document attachments and recorded-data KPIs. Hierarchy edits validate the selected parent and existing children. Metrics that cannot be derived reliably are explicitly shown as unavailable.
+- Global sequential ID allocation for newly created or offline-synchronized records, a server-enforced cross-record equipment hierarchy, equipment creation and full equipment-linked FJ/LJ creation, and calculated MTBF/MTTR/availability/health scores remain outstanding.

@@ -360,76 +360,11 @@ export default function WorkRequestsPage() {
 
   return (
     <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Work Requests</h1>
-          <p className="text-gray-600 mt-1">
-            Manage Long Jobs (LJ), Fast Jobs (FJ), and PM Work Requests
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {requestType === "LJ" && (
-            <button
-              onClick={handleCreateLJ}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-            >
-              <Plus size={20} />
-              Create LJ
-            </button>
-          )}
-          {requestType === "FJ" && (
-            <button
-              onClick={() => setFastJobOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-            >
-              <Plus size={20} />
-              Create FJ
-            </button>
-          )}
-          {requestType === "PM" && (
-            <Link
-              href="/smart-pm"
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-            >
-              <Plus size={20} />
-              Create PM Schedule
-            </Link>
-          )}
-        </div>
-      </div>
-
-      {/* Site Filter Badge */}
-      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-        Viewing: {activeSiteId}
-      </div>
-
-      <div className="flex flex-wrap gap-2" aria-label="Work request type">
-        {(["PM", "FJ", "LJ"] as const).map((type) => (
-          <button key={type} onClick={() => setRequestType(type)} aria-pressed={requestType === type}
-            className={`px-4 py-2 rounded ${requestType === type ? "bg-blue-600 text-white" : "bg-white border"}`}>
-            {type === "PM" ? "Preventive Maintenance" : type === "FJ" ? "Fast Jobs" : "Long Jobs"} ({type})
-          </button>
-        ))}
-      </div>
-      {currentRole === "TeamLeader" && requestType !== "LJ" && (
-        <button type="button" className="block w-full text-left bg-blue-50 border border-blue-200 rounded p-4"
-          onClick={() => { if (requestType === "PM") setBucket("inspection"); else setTeamQueue((value) => !value); }}>
-          <strong>Team Leader Checklist &amp; WR Overview</strong>
-          <span className="block text-sm">Review {siteRequests.filter((wr) => wr.Percentage === 78).length} technically completed {requestType} work requests.</span>
-        </button>
-      )}
-      {requestType === "PM" && <div className="flex flex-wrap gap-2">
-        {buckets.map((item) => <button key={item.id} onClick={() => setBucket(item.id)}
-          aria-pressed={bucket === item.id}
-          className={`px-3 py-2 rounded text-sm ${bucket === item.id ? "bg-blue-100 text-blue-900" : "bg-white border"}`}>
-          {item.label} ({siteRequests.filter((wr) => isInPmQueue(wr, item.id)).length})
-        </button>)}
-      </div>}
-
       <section className="bg-white border rounded-lg">
         <div className="min-h-10 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
+          {requestType === "LJ" && <button onClick={handleCreateLJ} className="rounded bg-blue-600 px-2 py-1 text-white">+ Create LJ</button>}
+          {requestType === "FJ" && <button onClick={() => setFastJobOpen(true)} className="rounded bg-blue-600 px-2 py-1 text-white">+ Create FJ</button>}
           <button type="button" aria-expanded={isFilterExpanded} onClick={() => setFilterExpanded((value) => !value)} className="font-semibold whitespace-nowrap">
             {isFilterExpanded ? "▼" : "▶"} Filter Work Requests <span className="rounded-full bg-blue-100 px-2">{columnFilterCount + [!!locationFilter.building, !!locationFilter.floor, !!locationFilter.room, selectedEquipmentCodes.length > 0, !!textFilter.trim(), !!dueDateFrom, !!dueDateTo].filter(Boolean).length}</span>
           </button>
@@ -492,8 +427,22 @@ export default function WorkRequestsPage() {
         </div></div>}
       </section>
 
+      {currentRole === "TeamLeader" && requestType !== "LJ" && (
+        <button type="button" className="block w-full text-left bg-blue-50 border border-blue-200 rounded p-4"
+          onClick={() => { if (requestType === "PM") setBucket("inspection"); else setTeamQueue((value) => !value); }}>
+          <strong>Team Leader Checklist &amp; WR Overview</strong>
+          <span className="block text-sm">Review {siteRequests.filter((wr) => wr.Percentage === 78).length} technically completed {requestType} work requests.</span>
+        </button>
+      )}
+      {requestType === "PM" && <div className="flex flex-wrap gap-2">
+        {buckets.map((item) => <button key={item.id} onClick={() => setBucket(item.id)}
+          aria-pressed={bucket === item.id}
+          className={`px-3 py-2 rounded text-sm ${bucket === item.id ? "bg-blue-100 text-blue-900" : "bg-white border"}`}>
+          {item.label} ({siteRequests.filter((wr) => isInPmQueue(wr, item.id)).length})
+        </button>)}
+      </div>}
       {requestType === "LJ" && <div className="flex gap-2 text-xs"><button aria-pressed={groupLJ} onClick={() => setGroupLJ(true)} className="rounded border px-2 py-1">Group by Substatus</button><button aria-pressed={!groupLJ} onClick={() => setGroupLJ(false)} className="rounded border px-2 py-1">Flat List</button></div>}
-      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}-${filterVersion}`} requests={filteredRequests} onOpen={handleViewWR} grouped={requestType === "LJ" && groupLJ} onFilterCount={setColumnFilterCount} /> :
+      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}-${filterVersion}`} requestType={requestType} requests={filteredRequests} onOpen={handleViewWR} grouped={requestType === "LJ" && groupLJ} onFilterCount={setColumnFilterCount} /> :
       <div className="grid gap-4">
         {filteredRequests.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg border border-gray-200">

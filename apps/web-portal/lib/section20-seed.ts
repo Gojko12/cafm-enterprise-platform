@@ -9,6 +9,14 @@ const systems = [
   ["Heavy Crane", "HeavyGang", "kN", 1, 50], ["Kitchen Extraction", "Catering", "Pa", 100, 400],
   ["Lift Controller", "MultiTechnic", "s", 1, 15], ["Domestic Water Pump", "Mechanical", "bar", 2, 6],
   ["Cleaning Equipment", "Cleaning", "hours", 0, 100], ["Emergency Lighting", "Electrical", "minutes", 90, 180],
+  ["Compressed Air Compressor", "Mechanical", "bar", 5, 9], ["Site Installation", "MultiTechnic", "V", 220, 240],
+  ["Heating Boiler", "Mechanical", "°C", 50, 80], ["Fuel Oil System", "Mechanical", "bar", 1, 5],
+] as const;
+const categories = ["A", "E", "E", "F", "B", "D", "M", "K", "L", "C", "G", "E", "P", "Q", "H", "O"] as const;
+const localNames = [
+  ["Kältemaschine", "Dieselgenerator", "USV-Anlage", "Brandschutzklappe", "Reinraum-Lüftungsanlage", "Dachablauf", "Kran", "Küchenabzug", "Aufzugssteuerung", "Wasserpumpe", "Reinigungsgerät", "Notbeleuchtung", "Druckluftkompressor", "Standortanlage", "Heizkessel", "Heizölanlage"],
+  ["Koelmachine", "Dieselgenerator", "UPS-systeem", "Brandklep", "Cleanroom luchtbehandeling", "Dakafvoer", "Kraan", "Keukenafzuiging", "Liftbesturing", "Waterpomp", "Reinigingsapparaat", "Noodverlichting", "Persluchtcompressor", "Terreininstallatie", "Verwarmingsketel", "Stookoliesysteem"],
+  ["Refrigeratore", "Generatore diesel", "Sistema UPS", "Serranda tagliafuoco", "Unità trattamento aria", "Scarico tetto", "Gru", "Aspirazione cucina", "Controllo ascensore", "Pompa acqua", "Attrezzatura pulizia", "Illuminazione emergenza", "Compressore aria", "Impianto sito", "Caldaia", "Impianto gasolio"],
 ] as const;
 const stages: Array<[number, string]> = [
   [0, "New Request for Quotation"], [10, "Work Request from Fast Job - On Hold"], [20, "Quotation Preparation Offer by Contractor"],
@@ -63,10 +71,12 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
       const system = systems[i % systems.length];
-      const root = `S${tag}-EQ-${i + 1}-I`, child = `S${tag}-EQ-${i + 1}-S`;
-      for (const [level, code, parent] of [["Installation", root, undefined], ["Subequipment", child, root], ["SubSubequipment", `S${tag}-EQ-${i + 1}-P`, child]] as const) {
+      const base = (Number(tag) - 1) * systems.length * 3 + i * 3;
+      const codeFor = (number: number) => String(number).padStart(10, "0");
+      const root = codeFor(base + 1), child = codeFor(base + 2);
+      for (const [level, code, parent] of [["Installation", root, undefined], ["SubEquipment", child, root], ["Component", codeFor(base + 3), child]] as const) {
         equipment.push({ SiteId: site, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, EquipmentCode: code,
-          EquipmentName: `${system[0]} ${level}`, IsInstallation: level === "Installation", Status: "Active",
+          EquipmentName: `${system[0]} ${level}`, EquipmentNameLocal: `${localNames[Number(tag) - 1][i]} · ${level}`, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation", Status: "Active",
           ParentEquipmentCode: parent, PrimaryTradeId: system[1], Manufacturer: "Campus Systems", Model: `CS-${100 + i}`,
           TechnicalSpecifications: { service: system[0], location: room.RoomCode }, Criticality: i % 3 === 0 ? "High" : "Medium" });
       }
@@ -99,7 +109,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     const siteCraft = craftspeople.filter((item) => item.SiteId === site);
     const make = (type: "PM" | "FJ" | "LJ", i: number, percentage: number, description: string): BaseWorkRequest => {
       const eq = siteEquipment[i % siteEquipment.length], trade = eq.PrimaryTradeId ?? "MultiTechnic";
-      const id = `S${tag}-${type}-${String(i + 1).padStart(3, "0")}`;
+      const id = `2026${String((Number(tag) - 1) * 77 + (type === "PM" ? i + 1 : type === "FJ" ? i + 31 : i + 51)).padStart(6, "0")}`;
       return { WR_ID: id, WR_Type: type, ESAWorkType: type === "PM" ? "Preventive Maintenance" : "Corrective Maintenance",
         Description: `${type === "PM" ? "Scheduled inspection" : type === "FJ" ? "Repair and make safe" : "Upgrade and refurbishment"}: ${eq.EquipmentName}`,
         ProblemLocation: `${eq.bl_id} / ${eq.LevelName} / ${eq.RoomCode}`, SiteId: site, bl_id: eq.bl_id, LevelName: eq.LevelName, RoomCode: eq.RoomCode,
@@ -133,7 +143,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     for (let i = 0; i < 20; i++) {
       const pct = [50, 55, 78, 100, 27][i % 5];
       workRequests.push({ ...make("FJ", i, pct, ["Issued", "On Hold", "Technically Completed", "Approved", "Cancelled"][i % 5]),
-        ParentPM_WR_ID: `S${tag}-PM-${String(i + 1).padStart(3, "0")}`, ...(i === 0 ? { EscalatedToLJ_WR_ID: `S${tag}-LJ-002` } : {}) });
+        ParentPM_WR_ID: `2026${String((Number(tag) - 1) * 77 + i + 1).padStart(6, "0")}`, ...(i === 0 ? { EscalatedToLJ_WR_ID: `2026${String((Number(tag) - 1) * 77 + 52).padStart(6, "0")}` } : {}) });
     }
     stages.forEach(([pct, description], i) => {
       const wr = make("LJ", i, pct, description);
@@ -148,7 +158,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       }
       workRequests.push({ ...wr, RequiresSAT: requiresSAT, RequiresDrawingUpdate: requiresDrawing, AcceptanceGates: gates,
         ...(requiresSAT && pct >= 79 ? { PreSATApproved: true } : {}),
-        ...(pct === 10 ? { OriginatingFJ_WR_ID: `S${tag}-FJ-001` } : {}) });
+        ...(pct === 10 ? { OriginatingFJ_WR_ID: `2026${String((Number(tag) - 1) * 77 + 31).padStart(6, "0")}` } : {}) });
     });
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };
