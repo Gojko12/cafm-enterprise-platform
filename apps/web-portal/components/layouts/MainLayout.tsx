@@ -3,7 +3,7 @@
 import React from "react";
 import { 
   Building, Home, Settings, Wrench, Zap, Clipboard, 
-  Calendar, Upload, BarChart3, Lock, Globe, AlertCircle, Snowflake
+  Calendar, Upload, BarChart3, Lock, Globe, AlertCircle
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -30,7 +30,6 @@ const NAV_ITEMS = [
     { href: "/smart-pm", label: "SmartPM", icon: Zap },
     { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
     { href: "/scheduler", label: "Scheduler", icon: Calendar },
-    { href: "/freezes", label: "Location Freezes", icon: Snowflake },
   ]},
   { section: "Administration", items: [
     { href: "/import-export", label: "Import/Export", icon: Upload },

@@ -27,6 +27,9 @@ describe("hourly dispatch timeline", () => {
     expect(screen.getByText("06")).toBeTruthy();
     expect(screen.getByText("19")).toBeTruthy();
     expect(screen.queryByText("20")).toBeNull();
+    expect(screen.getByText("Craftsperson").className).toContain("sticky");
+    expect(screen.getByText(/📁 Mechanical/).closest("th")?.className).toContain("sticky");
+    expect(screen.getByText(/Gregor GOJKOŠEK/).closest("th")?.className).toContain("sticky");
     expect(screen.getByText(/3\.5 \/ 7\.5 h/)).toBeTruthy();
     fireEvent.mouseDown(screen.getByRole("separator", { name: "Resize end" }), { clientX: 100 });
     fireEvent.mouseMove(window, { clientX: 118 });
@@ -38,7 +41,7 @@ describe("hourly dispatch timeline", () => {
   it("drops onto an exact hour and preserves the dragged assignment duration", () => {
     const onMove = vi.fn();
     const view = render(<HourlyTimeline {...props} onMove={onMove} />);
-    const cell = view.container.querySelector("tbody td");
+    const cell = view.container.querySelector("tbody tr:nth-child(2) td");
     expect(cell).toBeTruthy();
     const drop = createEvent.drop(cell!, { dataTransfer: { getData: () => JSON.stringify({ id: wr.WR_ID, from: person.id }) } });
     Object.defineProperty(drop, "clientX", { value: 4 * 36 + 1 });

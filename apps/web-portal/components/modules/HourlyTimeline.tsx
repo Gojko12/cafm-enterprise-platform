@@ -6,6 +6,7 @@ import type { BaseWorkRequest, CraftpersonAbsence, LocationFreeze } from "@cafm/
 import type { DemoData } from "../../lib/cafm-data";
 import { absenceInterval, dailyCapacity, fromWallMinutes, intervalFor, wallMinutes } from "../../lib/dispatch";
 import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "../../lib/location-freezes";
+import { tradeColor } from "../../lib/trade-colors";
 
 type Person = DemoData["craftspeople"][number];
 type Preview = { wr: BaseWorkRequest; person: string; start: string; end: string };
@@ -71,12 +72,12 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
     window.addEventListener("mouseup", up);
   };
   return <div className="min-w-0 flex-1 overflow-auto rounded border bg-white">
-    <table className="border-collapse text-xs"><thead><tr><th rowSpan={2} className="min-w-48 p-2 text-left">Craftsperson</th>{weeks.map((week, index) => <th key={`${week.label}-${index}`} colSpan={week.count} className="border-l">{week.label}</th>)}</tr><tr>
+    <table className="border-separate border-spacing-0 text-xs"><thead><tr><th rowSpan={2} className="sticky left-0 z-20 min-w-48 border-r bg-white p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900">Craftsperson</th>{weeks.map((week, index) => <th key={`${week.label}-${index}`} colSpan={week.count} className="border-l">{week.label}</th>)}</tr><tr>
       {dates.map((day) => <th key={day} className="border-l" style={{ minWidth: width }}><div>{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][new Date(`${day}T00:00:00Z`).getUTCDay()]} {day.slice(8)}</div><div className="flex font-normal">{Array.from({ length: lastHour - firstHour }, (_, i) => <span key={i} style={{ width: HOUR_WIDTH }} className="shrink-0 border-l">{String(firstHour + i).padStart(2, "0")}</span>)}</div></th>)}</tr></thead>
       <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => <React.Fragment key={trade}>
-        <tr className="bg-slate-100"><th colSpan={dates.length + 1} className="p-2 text-left"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th></tr>
+        <tr className="bg-slate-100"><th className="sticky left-0 z-20 border-r bg-slate-100 p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th>{dates.length > 0 && <td colSpan={dates.length} />}</tr>
         {!collapsed.includes(trade) && people.filter((person) => person.Trade === trade).map((person) => <tr key={person.id}>
-          <th className="border-t p-2 text-left align-top">{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal">{person.Trade} · {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
+          <th className="sticky left-0 z-20 border-r border-t bg-white p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900">{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
           {dates.map((day) => {
             const start = wallMinutes(`${day}T00:00`) + firstHour * 60, end = start + (lastHour - firstHour) * 60;
             const cap = dailyCapacity(displayed, absences, site, person.id, day, person.ShiftHours, person.shiftStart, person.shiftEnd);
@@ -116,7 +117,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
                 const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}`;
                 const editable = ![27, 78, 100].includes(wr.Percentage);
-                return <div key={wr.WR_ID} title={title} draggable={editable} onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID, from: person.id }))} className={`absolute flex h-6 items-center overflow-hidden rounded text-white ${wr.WR_Type === "FJ" ? "bg-amber-500" : wr.WR_Type === "LJ" ? "bg-purple-700" : "bg-blue-500"}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
+                return <div key={wr.WR_ID} title={title} draggable={editable} onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID, from: person.id }))} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
                   {editable && left === wallMinutes(interval.assignedStartDateTime) && <span role="separator" aria-label="Resize start" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "start")} />}
                   <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_ID}{conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
                   {editable && <><button aria-label={`Edit time for ${wr.WR_ID}`} onClick={() => onEdit(wr, person.id)}>✎</button><button aria-label={`Shorten ${wr.WR_ID}`} onClick={() => onMove(wr.WR_ID, person.id, interval.assignedStartDateTime, fromWallMinutes(Math.max(wallMinutes(interval.assignedStartDateTime) + 30, wallMinutes(interval.assignedEndDateTime) - 30)), person.id)}>−</button><button aria-label={`Extend ${wr.WR_ID}`} onClick={() => onMove(wr.WR_ID, person.id, interval.assignedStartDateTime, fromWallMinutes(wallMinutes(interval.assignedEndDateTime) + 30), person.id)}>+</button></>}

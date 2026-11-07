@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm --prefix ..\\..\\packages\\shared-schema run build",
     "dev": "next dev --port 3000 --hostname localhost",
+    "prebuild": "npm --prefix ..\\..\\packages\\shared-schema run build",
     "build": "next build",
     "start": "next start --hostname localhost",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",

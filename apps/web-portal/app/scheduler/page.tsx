@@ -1,23 +1,32 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { CLASSICAL_TRADES, CraftpersonAbsenceSchema } from "@cafm/shared-schema";
+import { useSearchParams } from "next/navigation";
+import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest, CraftpersonAbsence } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, resolveLeaveConflicts, wallMinutes } from "@/lib/dispatch";
 import { HourlyTimeline } from "@/components/modules/HourlyTimeline";
+import { LocationFreezes } from "@/components/modules/LocationFreezes";
+import { WRSourcePanel } from "@/components/modules/WRSourcePanel";
+import { AbsenceForm } from "@/components/modules/AbsenceForm";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
-import { describeLocationFreeze, getActiveFreezeConflictsForWR, getCurrentLocationFreezes } from "@/lib/location-freezes";
+import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
 
 type Person = ReturnType<typeof useCafmStore>["data"]["craftspeople"][number];
 type Move = { id: string; from?: string; person: string; date: string; start?: string; end?: string };
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
 
 export default function SchedulerPage() {
+  return <React.Suspense fallback={<div className="p-3">Loading scheduler…</div>}><SchedulerContent /></React.Suspense>;
+}
+
+function SchedulerContent() {
+  const searchParams = useSearchParams();
   const { data, setData } = useCafmStore();
   const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
@@ -25,18 +34,14 @@ export default function SchedulerPage() {
   const [view, setView] = useState<"day" | "week" | "two" | "month">("week");
   const [trade, setTrade] = useState("");
   const [building, setBuilding] = useState("");
-  const [search, setSearch] = useState("");
+  const [personSearch, setPersonSearch] = useState("");
+  const [selectedPeople, setSelectedPeople] = useState<string[] | null>(null);
   const [availability, setAvailability] = useState("All");
   const [types, setTypes] = useState(["PM", "FJ", "LJ", "Frozen", "Completed"]);
-  const [pool, setPool] = useState(true);
-  const [poolSearch, setPoolSearch] = useState("");
-  const [showScheduled, setShowScheduled] = useState(false);
-  const [poolMode, setPoolMode] = useState("Detailed");
-  const [poolSort, setPoolSort] = useState("Urgency");
   const [quickAssign, setQuickAssign] = useState<string | null>(null);
   const [quickPerson, setQuickPerson] = useState("");
   const [quickDate, setQuickDate] = useState(date);
-  const [tab, setTab] = useState<"dispatch" | "availability">("dispatch");
+  const [tab, setTab] = useState<"dispatch" | "availability" | "freezes">("dispatch");
   const [firstHour, setFirstHour] = useState(6);
   const [lastHour, setLastHour] = useState(20);
   const [weekends, setWeekends] = useState(true);
@@ -55,6 +60,17 @@ export default function SchedulerPage() {
     const timer = window.setInterval(() => setNow(new Date()), 60000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const value = searchParams.get("tab");
+    setTab(value === "freezes" || value === "availability" ? value : "dispatch");
+  }, [searchParams]);
+  useEffect(() => setSelectedPeople(null), [activeSiteId]);
+  const changeTab = (next: typeof tab) => {
+    const url = new URL(window.location.href);
+    if (next === "dispatch") url.searchParams.delete("tab"); else url.searchParams.set("tab", next);
+    window.history.pushState(null, "", url);
+    setTab(next);
+  };
   const localNow = now ? `${calendarDate(now)}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}` : "";
   const people = data.craftspeople.filter((person) => person.SiteId === activeSiteId);
   const days = view === "day" ? 1 : view === "week" ? 7 : view === "two" ? 14 : new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
@@ -62,7 +78,7 @@ export default function SchedulerPage() {
   const dates = Array.from({ length: days }, (_, index) => addDays(start, index)).filter((day) => weekends || (view !== "week" && view !== "two") || ![0, 6].includes(new Date(`${day}T12:00:00`).getDay()));
   const visible = (wr: BaseWorkRequest) => types.includes(wr.WR_Type) && (types.includes("Frozen") || !wr.IsFrozen) && (types.includes("Completed") || ![78, 100].includes(wr.Percentage));
   const filteredPeople = people.filter((person) => (!trade || person.Trade === trade) &&
-    `${person.Name} ${person.LastName}`.toLowerCase().includes(search.toLowerCase()) &&
+    (selectedPeople === null || selectedPeople.includes(person.id)) &&
     (!building || siteRequests.some((wr) => wr.bl_id === building && wr.AssignedCraftpersonIds.includes(person.id))) &&
     (availability === "All" || dates.some((day) => (activeAbsences(data.craftpersonAbsences, activeSiteId, person.id, day).length > 0) === (availability === "On leave"))));
   const request = siteRequests.find((wr) => wr.WR_ID === open);
@@ -135,7 +151,7 @@ export default function SchedulerPage() {
     });
   };
   return <div className="space-y-2 p-3 text-xs">
-    <div className="flex gap-2"><button className={button} onClick={() => setTab("dispatch")}>WR Dispatch Calendar</button><button className={button} onClick={() => setTab("availability")}>Shifts, Vacations &amp; Trainings</button></div>
+    <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button></div>
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
@@ -146,21 +162,17 @@ export default function SchedulerPage() {
       <select aria-label="Trade" className={button} value={trade} onChange={(e) => setTrade(e.target.value)}><option value="">All trades</option>{CLASSICAL_TRADES.map((item) => <option key={item}>{item}</option>)}</select>
       <select aria-label="Building" className={button} value={building} onChange={(e) => setBuilding(e.target.value)}><option value="">All buildings</option>{data.buildings.map((item) => <option key={item.bl_id} value={item.bl_id}>{item.bl_id}</option>)}</select>
       <select aria-label="Availability" className={button} value={availability} onChange={(e) => setAvailability(e.target.value)}><option>All</option><option>Only available</option><option>On leave</option></select>
-      <input className="rounded border p-1" placeholder="Craftsperson name" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <details className="relative"><summary className={`${button} cursor-pointer`}>Craftpeople {selectedPeople === null ? "(All)" : `(${selectedPeople.length} selected)`}</summary><div className="absolute left-0 z-30 w-64 rounded border bg-white p-2 shadow-lg"><input aria-label="Search craftspeople" className="w-full border p-1" placeholder="Search craftspeople" value={personSearch} onChange={(event) => setPersonSearch(event.target.value)} /><div className="flex gap-1"><button className={button} onClick={() => setSelectedPeople(null)}>Select All</button><button className={button} onClick={() => setSelectedPeople([])}>Clear</button></div><div className="max-h-60 overflow-auto">{people.filter((person) => `${person.Name} ${person.LastName} ${person.Trade}`.toLowerCase().includes(personSearch.toLowerCase())).map((person) => <label key={person.id} className="block"><input type="checkbox" checked={selectedPeople === null || selectedPeople.includes(person.id)} onChange={(event) => { const checked = event.target.checked; setSelectedPeople((current) => { const ids = current ?? people.map((item) => item.id); return checked ? [...ids, person.id] : ids.filter((id) => id !== person.id); }); }} /> {person.Name} {person.LastName} · {person.Trade}</label>)}</div></div></details>
       {["PM", "FJ", "LJ", "Frozen", "Completed"].map((item) => <label key={item}><input type="checkbox" checked={types.includes(item)} onChange={(e) => setTypes((current) => e.target.checked ? [...current, item] : current.filter((entry) => entry !== item))} /> {item}</label>)}
       <label>Hours: <select value={firstHour} onChange={(event) => setFirstHour(Number(event.target.value))}>{Array.from({ length: lastHour }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, "0")}:00</option>)}</select></label>
       <label>to <select value={lastHour} onChange={(event) => setLastHour(Number(event.target.value))}>{Array.from({ length: 24 - firstHour }, (_, i) => <option key={i} value={firstHour + i + 1}>{String(firstHour + i + 1).padStart(2, "0")}:00</option>)}</select></label>
-      <button className={button} onClick={() => { setFirstHour(0); setLastHour(24); }}>0–24h</button>
       <label><input type="checkbox" checked={weekends} onChange={(event) => setWeekends(event.target.checked)} /> Show Weekends</label>
-      <a className={button} href="/freezes">❄ Location Freezes</a>
     </div>
     <p>Shift Hours · <span className="bg-slate-100">Off-Shift</span> · <span className="bg-amber-100">🏖 Vacation</span> · <span className="bg-indigo-100">🎓 Training</span> · <span className="bg-rose-100">🤒 Sick Leave</span> · ❄ Location Freeze</p>
-    <div className="flex items-start gap-2"><aside className={`order-2 shrink-0 rounded border bg-white p-2 ${pool ? "w-80" : "w-12"}`}><button className={button} onClick={() => setPool(!pool)}>{pool ? "▶ Pool" : "◀"}</button>
-      {pool && <div className="max-h-[75vh] space-y-2 overflow-auto"><details open><summary className="cursor-pointer font-bold">Filter</summary><input aria-label="Filter pool" className="w-full rounded border p-1" placeholder="ID, trade, location or urgency" value={poolSearch} onChange={(event) => setPoolSearch(event.target.value)} /><label className="block"><input type="checkbox" checked={showScheduled} onChange={(event) => setShowScheduled(event.target.checked)} /> Show scheduled WRs</label><label>Display mode <select value={poolMode} onChange={(event) => setPoolMode(event.target.value)}><option>Detailed</option><option>Compact</option></select></label><label className="ml-2">Sort by <select value={poolSort} onChange={(event) => setPoolSort(event.target.value)}><option>Urgency</option><option>WR ID</option><option>Due Date</option><option>Margin Date</option></select></label></details>{siteRequests.filter((wr) => visible(wr) && (showScheduled || !wr.AssignedCraftpersonIds.length || !wr.StartDate_DateToPerform) && (!trade || wr.TradeName === trade) && (!building || wr.bl_id === building) && [wr.WR_ID, wr.TradeName, wr.bl_id, wr.LevelName, wr.RoomCode, wr.Helper_SortUrgency].some((value) => String(value ?? "").toLowerCase().includes(poolSearch.toLowerCase()))).sort((a, b) => poolSort === "Urgency" ? (a.Helper_SortUrgency ?? 4) - (b.Helper_SortUrgency ?? 4) : String(poolSort === "WR ID" ? a.WR_ID : poolSort === "Due Date" ? a.DueDate ?? "" : a.MarginDate ?? "").localeCompare(String(poolSort === "WR ID" ? b.WR_ID : poolSort === "Due Date" ? b.DueDate ?? "" : b.MarginDate ?? ""))).map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID }))} className="rounded border p-2">
-        <strong>{wr.WR_Type} · {wr.WR_ID}</strong>{getCurrentLocationFreezes(wr, data.locationFreezes, localNow).length > 0 && <span className="ml-2 text-cyan-800" title={getCurrentLocationFreezes(wr, data.locationFreezes, localNow).map(describeLocationFreeze).join("; ")}>❄ Freeze Active at Location</span>}{poolMode === "Detailed" && <><p>{wr.Description} · {wr.EquipmentCodes.join(", ")}</p><p>{wr.TradeName} · {wr.bl_id} / {wr.RoomCode} · urgency {wr.Helper_SortUrgency ?? "—"}</p><p>Due {wr.DueDate ?? "—"} · Margin {wr.MarginDate ?? "—"}</p></>}
-        <button className={button} onClick={() => { setQuickPerson(""); setQuickDate(date); setQuickAssign(wr.WR_ID); }}>Assign...</button> <button className={button} onClick={() => setOpen(wr.WR_ID)}>👁 Open</button></article>)}</div>}</aside>
+    <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} onOpen={setOpen} onAssign={(id) => { setQuickPerson(""); setQuickDate(date); setQuickAssign(id); }} />
       <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} onOpen={setOpen} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
+    {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
     {tab === "availability" && <div className="space-y-4 rounded border bg-white p-3">
       <h2 className="text-base font-bold">Craftsperson Working Shifts</h2>
       <div className="overflow-auto"><table className="w-full text-left"><thead><tr><th>Craftsperson</th><th>Shift start</th><th>Shift end</th><th>Daily capacity</th><th>Primary trade</th><th>Secondary trades</th><th /></tr></thead><tbody>
@@ -211,34 +223,4 @@ function ShiftRow({ person, onSave }: { person: Person; onSave: (person: Person)
     <td><select aria-label="Primary trade" value={trade} onChange={(event) => setTrade(event.target.value)}>{CLASSICAL_TRADES.map((item) => <option key={item}>{item}</option>)}</select></td>
     <td><select aria-label="Secondary trades" multiple value={secondary} onChange={(event) => setSecondary(Array.from(event.target.selectedOptions, (option) => option.value))}>{CLASSICAL_TRADES.filter((item) => item !== trade).map((item) => <option key={item}>{item}</option>)}</select></td>
     <td><button className={button} onClick={() => { if (!start || !end || start >= end || !Number.isFinite(hours) || hours < 0 || hours > 24) { setError("Enter a valid same-day shift and capacity."); return; } onSave({ ...person, shiftStart: start, shiftEnd: end, ShiftHours: hours, Trade: trade, secondaryTradeIds: secondary.filter((item) => item !== trade) }); setError(""); }}>Save</button>{error && <span role="alert" className="text-red-700">{error}</span>}</td></tr>;
-}
-
-function AbsenceForm({ people, initial, existing, site, date, onClose, onSave }: {
-  people: Person[]; initial: string; existing: CraftpersonAbsence | null; site: CraftpersonAbsence["siteId"]; date: string;
-  onClose: () => void; onSave: (absence: CraftpersonAbsence) => void;
-}) {
-  const [person, setPerson] = useState(initial);
-  const [type, setType] = useState<CraftpersonAbsence["absenceType"]>(existing?.absenceType ?? "Vacation");
-  const [start, setStart] = useState(existing?.startDate ?? date);
-  const [end, setEnd] = useState(existing?.endDate ?? date);
-  const [full, setFull] = useState(existing?.isFullDay ?? true);
-  const [startTime, setStartTime] = useState(existing && !existing.isFullDay ? existing.startTime ?? "" : "09:00");
-  const [endTime, setEndTime] = useState(existing && !existing.isFullDay ? existing.endTime ?? "" : "13:00");
-  const [notes, setNotes] = useState(existing?.notes ?? "");
-  const [error, setError] = useState("");
-  return <div role="dialog" aria-modal="true" aria-label="Add absence" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="w-96 space-y-3 rounded bg-white p-5" onSubmit={(event) => {
-    event.preventDefault();
-    const hours = full ? 8 : (wallMinutes(`${start}T${endTime}`) - wallMinutes(`${start}T${startTime}`)) / 60;
-    const parsed = CraftpersonAbsenceSchema.safeParse({ id: existing?.id ?? crypto.randomUUID(), siteId: site, craftpersonId: person, absenceType: type, startDate: start, endDate: end, isFullDay: full, ...(!full ? { startTime, endTime } : {}), unavailableHoursPerDay: hours, status: existing?.status ?? "Approved", notes });
-    if (!parsed.success || !people.some((item) => item.id === person)) { setError(parsed.success ? "Select a craftsperson." : parsed.error.issues.map((issue) => issue.message).join("; ")); return; }
-    onSave(parsed.data);
-  }}><h2 className="font-bold">Add absence / vacation</h2>{error && <p role="alert" className="text-red-700">{error}</p>}
-    <label className="block">Craftsperson <select className="block w-full border p-1" value={person} onChange={(e) => setPerson(e.target.value)}><option value="">Select</option>{people.map((item) => <option value={item.id} key={item.id}>{item.Name} {item.LastName} · {item.Trade}</option>)}</select></label>
-    <label className="block">Type <select className="block w-full border p-1" value={type} onChange={(e) => setType(e.target.value as CraftpersonAbsence["absenceType"])}>{["Vacation", "SickLeave", "Training", "PublicHoliday", "OtherAbsence"].map((item) => <option key={item}>{item}</option>)}</select></label>
-    <label className="block">From <input required type="date" className="block w-full border p-1" value={start} onChange={(e) => setStart(e.target.value)} /></label>
-    <label className="block">To <input required type="date" className="block w-full border p-1" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
-    <label><input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} /> Full day</label>
-    {!full && <div className="flex gap-2"><label>Start time <input required type="time" className="block border p-1" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></label><label>End time <input required type="time" className="block border p-1" value={endTime} onChange={(e) => setEndTime(e.target.value)} /></label></div>}
-    <label className="block">Notes <textarea className="block w-full border p-1" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
-    <button className={button} type="submit">Save absence</button> <button className={button} type="button" onClick={onClose}>Cancel</button></form></div>;
 }
