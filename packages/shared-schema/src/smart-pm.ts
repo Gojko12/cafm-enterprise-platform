@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SiteIdSchema } from "./locations.js";
 
 export const PM_Frequency = z.enum([
   "Daily",
@@ -98,6 +99,7 @@ export const PM_ScheduleSchema = z
   .object({
     ScheduleId: z.string().min(1),
     ChecklistCode: z.string().min(1),
+    SiteId: SiteIdSchema,
     EquipmentCodes: z.array(z.string().min(1)).default([]),
     bl_id: z.string().min(1).optional(),
     LevelName: z.string().min(1).optional(),

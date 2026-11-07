@@ -3,11 +3,13 @@
 import React from "react";
 import { 
   Building, Home, Settings, Wrench, Zap, Clipboard, 
-  Calendar, Upload, BarChart3, Lock 
+  Calendar, Upload, BarChart3, Lock, Globe, AlertCircle
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { LJRole, SiteId } from "@cafm/shared-schema";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -30,6 +32,21 @@ const NAV_ITEMS = [
     { href: "/admin/rbac", label: "RBAC Settings", icon: Lock },
   ]},
 ];
+
+const LJ_ROLES: LJRole[] = [
+  "ESA_TO",
+  "ESA_TM",
+  "ESA_LJM",
+  "ESA_CCM",
+  "ESA_DO",
+  "ESA_IM",
+  "TRADE_CM",
+  "TRADE_TM",
+  "ESA_LONG_JOB",
+  "TRADE_LONG_JOB",
+];
+
+const SITE_IDS: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -97,6 +114,7 @@ export function Sidebar() {
 
 export function TopBar() {
   const { currentRole, setCurrentRole } = useApp();
+  const { activeSiteId, setActiveSiteId, availableSites, canSwitchSites, activeLJRole, setActiveLJRole } = useSiteContext();
   const roles = ["SiteAdministrator", "ESA_LongJobManager", "PM_Planner", "QA_Inspector", "MobileTechnician", "StandardEmployee"];
 
   const getRoleBadgeColor = (role: string) => {
@@ -105,11 +123,72 @@ export function TopBar() {
     return "bg-emerald-100 text-emerald-800";
   };
 
+  const getSiteName = (siteId: SiteId): string => {
+    const siteNames: Record<SiteId, string> = {
+      "SITE-01": "ESOC Darmstadt",
+      "SITE-02": "ESTEC Noordwijk",
+      "SITE-03": "ESRIN Frascati",
+    };
+    return siteNames[siteId];
+  };
+
   return (
-    <div className="h-16 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
-      <div className="flex-1" />
+    <div className="h-20 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
+      <div className="flex items-center gap-4">
+        {/* Site Context Switcher */}
+        <div className="flex items-center gap-2">
+          <Globe size={18} className="text-gray-600" />
+          <select
+            value={activeSiteId}
+            onChange={(e) => {
+              if (canSwitchSites()) {
+                setActiveSiteId(e.target.value as SiteId);
+              }
+            }}
+            disabled={!canSwitchSites() && availableSites.length === 1}
+            className="px-3 py-2 rounded border border-gray-300 text-sm font-medium bg-gray-50 hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
+          >
+            {availableSites.map((site) => (
+              <option key={site} value={site}>
+                {getSiteName(site)}
+              </option>
+            ))}
+          </select>
+          {availableSites.length > 1 && (
+            <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded">
+              Multi-Site Active
+            </span>
+          )}
+        </div>
+
+        {/* Isolation Banner */}
+        {availableSites.length === 1 && (
+          <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
+            <AlertCircle size={14} />
+            <span>Site Isolation Active</span>
+          </div>
+        )}
+      </div>
       
       <div className="flex items-center gap-4">
+        {/* LJ Role Selector */}
+        <div className="text-right">
+          <p className="text-xs font-medium text-gray-600">LJ Role</p>
+          <select
+            value={activeLJRole || ""}
+            onChange={(e) => setActiveLJRole((e.target.value || null) as LJRole | null)}
+            className="px-2 py-1 rounded text-xs border border-gray-300 bg-white"
+          >
+            <option value="">None</option>
+            {LJ_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* System Role Selector */}
         <div className="text-right">
           <p className="text-sm font-medium text-gray-900">Current Role</p>
           <div className="flex gap-2 mt-1">

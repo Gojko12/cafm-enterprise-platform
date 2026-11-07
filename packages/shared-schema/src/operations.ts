@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SiteIdSchema } from "./locations.js";
 
 export const WorkSessionSchema = z
   .object({
@@ -81,6 +82,7 @@ export const EmployeeProfileSchema = z.object({
   Email: z.string().email(),
   Department: z.string().optional(),
   CostCenter: z.string().optional(),
+  AssignedSiteIds: z.array(SiteIdSchema).min(1),
   CraftpersonId: z.string().optional(),
   IsActive: z.boolean().default(true),
 });
@@ -89,6 +91,7 @@ export const DeskReservationSchema = z
   .object({
     ReservationId: z.string().min(1),
     DeskId: z.string().min(1),
+    SiteId: SiteIdSchema,
     bl_id: z.string().min(1),
     LevelName: z.string().min(1),
     RoomCode: z.string().min(1),

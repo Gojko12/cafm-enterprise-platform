@@ -29,8 +29,12 @@ export const GPSCoordinatesSchema = z.object({
   elevationMeters: z.number().optional(),
 });
 
+export const SiteIdSchema = z.enum(["SITE-01", "SITE-02", "SITE-03"]);
+export type SiteId = z.infer<typeof SiteIdSchema>;
+
 export const BuildingSchema = z.object({
   bl_id: z.string().min(1),
+  SiteId: SiteIdSchema,
   Name: z.string().min(1),
   Address: z.string().min(1),
   GPSCoordinates: GPSCoordinatesSchema.optional(),
@@ -41,6 +45,7 @@ export const BuildingSchema = z.object({
 
 export const FloorSchema = z.object({
   bl_id: z.string().min(1),
+  SiteId: SiteIdSchema,
   LevelName: z.string().min(1),
   FloorNumber: z.number().int(),
   GrossAreaM2: z.number().nonnegative().optional(),
@@ -51,6 +56,7 @@ export const FloorSchema = z.object({
 
 export const RoomSchema = z.object({
   bl_id: z.string().min(1),
+  SiteId: SiteIdSchema,
   LevelName: z.string().min(1),
   RoomCode: z.string().min(1),
   Name: z.string().min(1),

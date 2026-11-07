@@ -1,7 +1,20 @@
 import { z } from "zod";
+import { SiteIdSchema, SiteId } from "./locations.js";
+import { LJRole } from "./work-requests.js";
 
 export const UserRole = z.enum([
   "SiteAdministrator",
+  "ESA_TO",
+  "ESA_TM",
+  "ESA_LJM",
+  "ESA_CCM",
+  "ESA_DO",
+  "ESA_IM",
+  "TRADE_CM",
+  "TRADE_TM",
+  "ESA_LONG_JOB",
+  "TRADE_LONG_JOB",
+  // Legacy roles for backward compatibility
   "ESA_LongJobManager",
   "PM_Planner",
   "QA_Inspector",
@@ -10,6 +23,32 @@ export const UserRole = z.enum([
 ]);
 
 export type UserRole = z.infer<typeof UserRole>;
+
+export type { LJRole };
+
+// User Access Schema - track assigned sites and roles per user
+export const UserAccessSchema = z.object({
+  UserId: z.string().min(1),
+  DisplayName: z.string().min(1),
+  SystemRole: UserRole,
+  AssignedSiteIds: z.array(SiteIdSchema).default([]),
+  LJRoles: z.array(z.union([
+    z.literal("ESA_TO"),
+    z.literal("ESA_TM"),
+    z.literal("ESA_LJM"),
+    z.literal("ESA_CCM"),
+    z.literal("ESA_DO"),
+    z.literal("ESA_IM"),
+    z.literal("TRADE_CM"),
+    z.literal("TRADE_TM"),
+    z.literal("ESA_LONG_JOB"),
+    z.literal("TRADE_LONG_JOB"),
+  ])).default([]),
+  Trades: z.array(z.string()).default([]),
+  CanAccessAll: z.boolean().default(false),
+});
+
+export type UserAccess = z.infer<typeof UserAccessSchema>;
 
 export const Permission = z.enum([
   "system.configure",
@@ -39,6 +78,10 @@ export const Permission = z.enum([
   "deskReservations.manageOwn",
   "deskReservations.manageAll",
   "analytics.read",
+  "longJobs.manageRFQ",
+  "longJobs.manageRFW",
+  "longJobs.approveAcceptanceGates",
+  "longJobs.manageSiteContext",
 ]);
 
 export type Permission = z.infer<typeof Permission>;
@@ -70,7 +113,128 @@ export const ROLE_PERMISSIONS = {
     "deskReservations.manageOwn",
     "deskReservations.manageAll",
     "analytics.read",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+    "longJobs.approveAcceptanceGates",
+    "longJobs.manageSiteContext",
   ],
+  ESA_TO: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "workRequests.approve",
+    "pmSchedules.read",
+    "technicalAudits.read",
+    "analytics.read",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+    "longJobs.approveAcceptanceGates",
+  ],
+  ESA_TM: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "workRequests.approve",
+    "pmSchedules.read",
+    "pmSchedules.write",
+    "technicalAudits.read",
+    "analytics.read",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+    "longJobs.approveAcceptanceGates",
+  ],
+  ESA_LJM: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "pmSchedules.read",
+    "pmSchedules.write",
+    "pmSchedules.generate",
+    "technicalAudits.read",
+    "analytics.read",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+  ],
+  ESA_CCM: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.update",
+    "workRequests.approve",
+    "analytics.read",
+    "longJobs.manageRFW",
+    "longJobs.approveAcceptanceGates",
+  ],
+  ESA_DO: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "analytics.read",
+    "longJobs.approveAcceptanceGates",
+  ],
+  ESA_IM: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "analytics.read",
+    "longJobs.approveAcceptanceGates",
+  ],
+  TRADE_CM: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAssigned",
+    "workRequests.update",
+    "workRequests.updateAssigned",
+    "technicalAudits.read",
+    "longJobs.manageRFW",
+  ],
+  TRADE_TM: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAssigned",
+    "workRequests.update",
+    "workRequests.updateAssigned",
+    "checklists.execute",
+    "technicalAudits.write",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+  ],
+  ESA_LONG_JOB: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "workRequests.update",
+    "workRequests.assign",
+    "workRequests.approve",
+    "pmSchedules.read",
+    "technicalAudits.read",
+    "analytics.read",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+    "longJobs.approveAcceptanceGates",
+  ],
+  TRADE_LONG_JOB: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAssigned",
+    "workRequests.update",
+    "workRequests.updateAssigned",
+    "checklists.execute",
+    "technicalAudits.write",
+    "longJobs.manageRFQ",
+    "longJobs.manageRFW",
+  ],
+  // Legacy roles for backward compatibility
   ESA_LongJobManager: [
     "locations.read",
     "equipment.read",

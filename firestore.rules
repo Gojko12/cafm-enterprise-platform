@@ -18,7 +18,7 @@ service cloud.firestore {
     }
 
     function isMaintenanceManager() {
-      return hasAnyRole(['SiteAdministrator', 'ESA_LongJobManager', 'PM_Planner']);
+      return hasAnyRole(['SiteAdministrator', 'ESA_LongJobManager', 'PM_Planner', 'ESA_TO', 'ESA_TM', 'ESA_LJM', 'ESA_CCM', 'ESA_DO', 'ESA_IM', 'TRADE_CM', 'TRADE_TM', 'ESA_LONG_JOB', 'TRADE_LONG_JOB']);
     }
 
     function canReadAllWorkRequests() {
@@ -26,39 +26,60 @@ service cloud.firestore {
         'SiteAdministrator',
         'ESA_LongJobManager',
         'PM_Planner',
-        'QA_Inspector'
+        'QA_Inspector',
+        'ESA_TO',
+        'ESA_TM',
+        'ESA_LJM',
+        'ESA_CCM',
+        'ESA_DO',
+        'ESA_IM',
+        'TRADE_CM',
+        'TRADE_TM',
+        'ESA_LONG_JOB',
+        'TRADE_LONG_JOB'
       ]);
     }
 
     function ownsResource() {
       return signedIn() &&
         (resource.data.ReservedBy == request.auth.uid ||
-         resource.data.UserId == request.auth.uid);
+         resource.data.UserId == request.auth.uid ||
+         resource.data.CreatedBy == request.auth.uid);
     }
 
     function createsOwnResource() {
       return signedIn() &&
         (request.resource.data.ReservedBy == request.auth.uid ||
-         request.resource.data.UserId == request.auth.uid);
+         request.resource.data.UserId == request.auth.uid ||
+         request.resource.data.CreatedBy == request.auth.uid);
+    }
+
+    function userHasSiteAccess(siteId) {
+      return isAdmin() || 
+        (signedIn() && request.auth.token.siteIds != null && siteId in request.auth.token.siteIds);
+    }
+
+    function userAllowedAllSites() {
+      return isAdmin();
     }
 
     match /buildings/{buildingId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && userHasSiteAccess(resource.data.SiteId);
       allow write: if isAdmin();
     }
 
     match /floors/{floorId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && userHasSiteAccess(resource.data.SiteId);
       allow write: if isAdmin();
     }
 
     match /rooms/{roomId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && userHasSiteAccess(resource.data.SiteId);
       allow write: if isAdmin();
     }
 
     match /equipment/{equipmentCode} {
-      allow read: if signedIn();
+      allow read: if signedIn() && userHasSiteAccess(resource.data.SiteId);
       allow write: if isAdmin();
     }
 
@@ -68,11 +89,13 @@ service cloud.firestore {
     }
 
     match /workRequests/{workRequestId} {
-      allow read: if canReadAllWorkRequests() ||
+      allow read: if userHasSiteAccess(resource.data.SiteId) && 
+        (canReadAllWorkRequests() ||
         (signedIn() && resource.data.CreatedBy == request.auth.uid) ||
         (hasRole('MobileTechnician') &&
-         request.auth.uid in resource.data.AssignedUserIds);
+         request.auth.uid in resource.data.AssignedUserIds));
       allow create: if
+        userHasSiteAccess(request.resource.data.SiteId) && (
         (isMaintenanceManager() &&
          request.resource.data.WR_Type in ['PM', 'LJ', 'FJ']) ||
         (hasRole('MobileTechnician') &&
@@ -80,9 +103,10 @@ service cloud.firestore {
          request.resource.data.CreatedBy == request.auth.uid) ||
         (hasRole('StandardEmployee') &&
          request.resource.data.WR_Type == 'FJ' &&
-         request.resource.data.CreatedBy == request.auth.uid);
-      allow update: if isAdmin() ||
-        (hasAnyRole(['ESA_LongJobManager', 'PM_Planner']) &&
+         request.resource.data.CreatedBy == request.auth.uid));
+      allow update: if userHasSiteAccess(resource.data.SiteId) && (
+        isAdmin() ||
+        (hasAnyRole(['ESA_LongJobManager', 'PM_Planner', 'ESA_TO', 'ESA_TM', 'ESA_LJM', 'ESA_LONG_JOB']) &&
          request.resource.data.WR_ID == resource.data.WR_ID) ||
         (hasRole('MobileTechnician') &&
          request.auth.uid in resource.data.AssignedUserIds &&
@@ -93,22 +117,24 @@ service cloud.firestore {
            'Percentage',
            'UpdatedAt'
          ]) &&
-         request.resource.data.Percentage == 78 &&
-         request.resource.data.WorkRequestStatus == 'Technically Completed' &&
-         request.resource.data.WorkRequestSubstatus == 'Technically Completed' &&
-         request.resource.data.Percentage > resource.data.Percentage);
+         request.resource.data.Percentage > resource.data.Percentage));
       allow delete: if isAdmin();
     }
 
     match /pmSchedules/{scheduleId} {
-      allow read: if hasAnyRole([
+      allow read: if signedIn() && userHasSiteAccess(resource.data.SiteId) && hasAnyRole([
         'SiteAdministrator',
         'ESA_LongJobManager',
         'PM_Planner',
         'QA_Inspector',
-        'MobileTechnician'
+        'MobileTechnician',
+        'ESA_TO',
+        'ESA_TM',
+        'ESA_LJM',
+        'TRADE_TM',
+        'TRADE_LONG_JOB'
       ]);
-      allow write: if isMaintenanceManager();
+      allow write: if isAdmin() || isMaintenanceManager();
     }
 
     match /pmChecklistStandards/{checklistCode} {
@@ -122,7 +148,9 @@ service cloud.firestore {
         'SiteAdministrator',
         'ESA_LongJobManager',
         'PM_Planner',
-        'MobileTechnician'
+        'MobileTechnician',
+        'TRADE_TM',
+        'TRADE_LONG_JOB'
       ]);
       allow delete: if isAdmin();
     }
@@ -176,7 +204,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /craftpeople/{craftpersonId} {
+    match /craftspeople/{craftpersonId} {
       allow read: if isAdmin() || isMaintenanceManager() ||
         (signedIn() && resource.data.UserId == request.auth.uid);
       allow write: if isAdmin();
@@ -189,14 +217,17 @@ service cloud.firestore {
     }
 
     match /deskReservations/{reservationId} {
-      allow read: if isAdmin() || ownsResource() ||
-        hasAnyRole(['ESA_LongJobManager', 'PM_Planner']);
-      allow create: if hasAnyRole(['SiteAdministrator', 'MobileTechnician', 'StandardEmployee']) &&
+      allow read: if isAdmin() || (userHasSiteAccess(resource.data.SiteId) && (
+        ownsResource() ||
+        hasAnyRole(['ESA_LongJobManager', 'PM_Planner'])));
+      allow create: if userHasSiteAccess(request.resource.data.SiteId) && 
+        hasAnyRole(['SiteAdministrator', 'MobileTechnician', 'StandardEmployee']) &&
         createsOwnResource();
-      allow update: if isAdmin() ||
+      allow update: if userHasSiteAccess(resource.data.SiteId) && (
+        isAdmin() ||
         (signedIn() && resource.data.ReservedBy == request.auth.uid &&
          request.resource.data.ReservedBy == resource.data.ReservedBy &&
-         request.resource.data.DeskId == resource.data.DeskId);
+         request.resource.data.DeskId == resource.data.DeskId));
       allow delete: if isAdmin() ||
         (signedIn() && resource.data.ReservedBy == request.auth.uid);
     }
@@ -205,10 +236,10 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
       allow create: if isAdmin() ||
         (signedIn() && request.auth.uid == userId &&
-         !request.resource.data.keys().hasAny(['role', 'roles']));
+         !request.resource.data.keys().hasAny(['role', 'roles', 'siteIds']));
       allow update: if isAdmin() ||
         (signedIn() && request.auth.uid == userId &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles']));
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles', 'siteIds']));
       allow delete: if isAdmin();
     }
 

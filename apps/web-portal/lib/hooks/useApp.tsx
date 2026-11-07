@@ -2,6 +2,7 @@
 
 import React, { createContext, ReactNode, useState, useCallback } from "react";
 import { UserRole, ROLE_PERMISSIONS } from "@cafm/shared-schema";
+import { SiteContextProvider } from "@/lib/contexts/SiteContext";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 
 export interface AppContextType {
@@ -51,7 +52,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useSampleData,
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      <SiteContextProvider>
+        {children}
+      </SiteContextProvider>
+    </AppContext.Provider>
+  );
 }
 
 export function useApp() {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SiteIdSchema } from "./locations.js";
 
 export const TradeSchema = z.object({
   TradeId: z.string().min(1),
@@ -30,6 +31,7 @@ export const EquipmentSchema = z.object({
   Criticality: z.enum(["Low", "Medium", "High", "Critical"]).optional(),
   TechnicalSpecifications: TechnicalSpecificationsSchema.default({}),
   bl_id: z.string().min(1),
+  SiteId: SiteIdSchema,
   LevelName: z.string().min(1),
   RoomCode: z.string().min(1),
   PrimaryTradeId: z.string().min(1).optional(),
