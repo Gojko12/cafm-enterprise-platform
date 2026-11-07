@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
@@ -107,6 +108,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === "Work request details" && <div className="space-y-4">
+          <WRDetailsEditor workRequest={workRequest} />
           {group("Fast Job Details", <>
             {field("WR ID", workRequest.WR_ID)}{field("Job ID", workRequest.JobID)}
             {field("Work request status", workRequest.WorkRequestStatus)}{field("Work request substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}

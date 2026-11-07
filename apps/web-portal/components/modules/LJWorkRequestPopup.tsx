@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import type { BaseWorkRequest, LJRole } from "@cafm/shared-schema";
 import { useCafmStore, ASSIGNMENT_ROLES } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -334,6 +335,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === TABS[0] && <div className="space-y-4">
+          <WRDetailsEditor workRequest={workRequest} />
           <section className="rounded border border-blue-200 bg-white shadow-sm">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 px-4 py-3">
               <button type="button" aria-expanded={actionsOpen} onClick={() => setActionsOpen((open) => !open)} className="font-semibold text-blue-800">

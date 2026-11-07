@@ -11,6 +11,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { useCafmStore } from "@/lib/cafm-store";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
+import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 
 const TABS = [
   "Work request details",
@@ -592,6 +593,7 @@ export function PMWorkRequestPopup({
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
           {activeTab === "Work request details" && <div className="space-y-4">
+            <WRDetailsEditor workRequest={workRequest} />
             {renderGroup("Work Request",
               <>
                 {renderField("WR ID", workRequest.WR_ID)}

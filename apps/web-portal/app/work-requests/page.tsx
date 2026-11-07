@@ -13,6 +13,7 @@ import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
 import { WRDataGrid } from "@/components/modules/WRDataGrid";
+import { groupLongJobs } from "@/lib/wr-overview";
 import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
 
@@ -111,6 +112,12 @@ export default function WorkRequestsPage() {
   const workRequests = data.workRequests;
   const [requestType, setRequestType] = useState<WR_Type>("PM");
   const [view, setView] = useState<"grid" | "card">("grid");
+  const [isFilterExpanded, setFilterExpanded] = useState(false);
+  const [filterVersion, setFilterVersion] = useState(0);
+  const [columnFilterCount, setColumnFilterCount] = useState(0);
+  const [groupLJ, setGroupLJ] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  useEffect(() => { setColumnFilterCount(0); }, [activeSiteId, requestType, view]);
   const [bucket, setBucket] = useState<"issued" | "inspection" | "passed" | "corrected" | "completed" | "cancelled">("issued");
   const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
   const [teamQueue, setTeamQueue] = useState(false);
@@ -192,8 +199,8 @@ export default function WorkRequestsPage() {
     ) {
       return false;
     }
-    if (dueDateFrom && wr.DueDate && wr.DueDate < dueDateFrom) return false;
-    if (dueDateTo && wr.DueDate && wr.DueDate > dueDateTo) return false;
+    if (dueDateFrom && (!wr.DueDate || wr.DueDate.slice(0, 10) < dueDateFrom)) return false;
+    if (dueDateTo && (!wr.DueDate || wr.DueDate.slice(0, 10) > dueDateTo)) return false;
     const query = textFilter.trim().toLowerCase();
     return (
       !query ||
@@ -420,9 +427,17 @@ export default function WorkRequestsPage() {
         </button>)}
       </div>}
 
-      <section className="bg-white border rounded-lg p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold">Filter Work Requests</h2>
+      <section className="bg-white border rounded-lg">
+        <div className="min-h-10 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+          <button type="button" aria-expanded={isFilterExpanded} onClick={() => setFilterExpanded((value) => !value)} className="font-semibold whitespace-nowrap">
+            {isFilterExpanded ? "▼" : "▶"} Filter Work Requests <span className="rounded-full bg-blue-100 px-2">{columnFilterCount + [!!locationFilter.building, !!locationFilter.floor, !!locationFilter.room, selectedEquipmentCodes.length > 0, !!textFilter.trim(), !!dueDateFrom, !!dueDateTo].filter(Boolean).length}</span>
+          </button>
+          <input value={textFilter} onChange={(event) => setTextFilter(event.target.value)} placeholder="Quick search" aria-label="Search work requests" className="min-w-0 w-40 rounded border px-2 py-1" />
+          </div>
+          <div className="flex items-center gap-2">
+          <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")} className={`rounded px-2 py-1 ${view === "grid" ? "bg-blue-600 text-white" : "border"}`}>Data Grid</button>
+          <button type="button" aria-pressed={view === "card"} onClick={() => setView("card")} className={`rounded px-2 py-1 ${view === "card" ? "bg-blue-600 text-white" : "border"}`}>Card View</button>
           <button
             type="button"
             onClick={() => {
@@ -432,13 +447,18 @@ export default function WorkRequestsPage() {
               setDueDateFrom("");
               setDueDateTo("");
               setBucket("issued");
+              setFilterVersion((version) => version + 1);
+              setColumnFilterCount(0);
             }}
-            className="px-3 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+            className="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
           >
             Reset Filter
           </button>
+          </div>
         </div>
+        {isFilterExpanded && <div className="space-y-2 border-t p-3 text-xs">
         <LocationEquipmentPickerGroup
+          compact
           buildings={siteBuildings}
           floors={siteFloors}
           rooms={siteRooms}
@@ -450,14 +470,7 @@ export default function WorkRequestsPage() {
           onLocationChange={setLocationFilter}
           onEquipmentChange={setSelectedEquipmentCodes}
         />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input
-            value={textFilter}
-            onChange={(event) => setTextFilter(event.target.value)}
-            placeholder="Search WR ID, trade, description..."
-            aria-label="Search work requests"
-            className="px-3 py-2 border rounded"
-          />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <label className="text-sm text-gray-600">
             Due From
             <input
@@ -476,14 +489,11 @@ export default function WorkRequestsPage() {
               className="mt-1 block w-full px-3 py-2 border rounded"
             />
           </label>
-        </div>
+        </div></div>}
       </section>
 
-      <div className="flex gap-2" aria-label="Work request view">
-        <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")} className={`rounded px-3 py-2 ${view === "grid" ? "bg-blue-600 text-white" : "border bg-white"}`}>Data Grid</button>
-        <button type="button" aria-pressed={view === "card"} onClick={() => setView("card")} className={`rounded px-3 py-2 ${view === "card" ? "bg-blue-600 text-white" : "border bg-white"}`}>Card View</button>
-      </div>
-      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}`} requests={filteredRequests} onOpen={handleViewWR} /> :
+      {requestType === "LJ" && <div className="flex gap-2 text-xs"><button aria-pressed={groupLJ} onClick={() => setGroupLJ(true)} className="rounded border px-2 py-1">Group by Substatus</button><button aria-pressed={!groupLJ} onClick={() => setGroupLJ(false)} className="rounded border px-2 py-1">Flat List</button></div>}
+      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}-${filterVersion}`} requests={filteredRequests} onOpen={handleViewWR} grouped={requestType === "LJ" && groupLJ} onFilterCount={setColumnFilterCount} /> :
       <div className="grid gap-4">
         {filteredRequests.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
@@ -492,7 +502,12 @@ export default function WorkRequestsPage() {
             </p>
           </div>
         ) : (
-          filteredRequests.map((wr) => (
+          (requestType === "LJ" && groupLJ ? groupLongJobs(filteredRequests) : [{ key: "all", requests: filteredRequests, percentage: 0, description: "", track: "", cost: 0 }]).map((group) => (
+            <React.Fragment key={group.key}>
+            {requestType === "LJ" && groupLJ && <button className="rounded border bg-slate-100 p-2 text-left text-sm font-semibold" aria-expanded={!collapsedGroups.includes(group.key)} onClick={() => setCollapsedGroups((current) => current.includes(group.key) ? current.filter((key) => key !== group.key) : [...current, group.key])}>
+              {collapsedGroups.includes(group.key) ? "▶" : "▼"} {group.percentage}% · {group.description} · {group.track} · {group.requests.length} LJs · {group.cost.toLocaleString("en-IE", { style: "currency", currency: "EUR" })}
+            </button>}
+            {(!groupLJ || requestType !== "LJ" || !collapsedGroups.includes(group.key)) && group.requests.map((wr) => (
             <div
               key={wr.WR_ID}
               className="bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
@@ -636,7 +651,7 @@ export default function WorkRequestsPage() {
               </div>
 
             </div>
-          ))
+          ))}</React.Fragment>))
         )}
       </div>}
       {/* Drawer */}

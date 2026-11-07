@@ -13,6 +13,7 @@ interface LocationEquipmentPickerGroupProps {
   selectedRoom: Room | null;
   selectedEquipmentCodes?: string[];
   showEquipment?: boolean;
+  compact?: boolean;
   onLocationChange: (selection: {
     building: Building | null;
     floor: Floor | null;
@@ -33,6 +34,7 @@ export function LocationEquipmentPickerGroup({
   selectedRoom,
   selectedEquipmentCodes = [],
   showEquipment = true,
+  compact = false,
   onLocationChange,
   onEquipmentChange,
 }: LocationEquipmentPickerGroupProps) {
@@ -82,8 +84,9 @@ export function LocationEquipmentPickerGroup({
   };
 
   return (
-    <div className="space-y-3">
+    <div className={compact ? "grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4" : "space-y-3"}>
       <PickerRow
+        compact={compact}
         label="Building"
         value={
           selectedBuilding
@@ -95,6 +98,7 @@ export function LocationEquipmentPickerGroup({
         onClear={() => onLocationChange({ building: null, floor: null, room: null })}
       />
       <PickerRow
+        compact={compact}
         label="Floor"
         value={selectedFloor?.LevelName ?? "All Floors"}
         selected={Boolean(selectedFloor)}
@@ -104,6 +108,7 @@ export function LocationEquipmentPickerGroup({
         }
       />
       <PickerRow
+        compact={compact}
         label="Room"
         value={
           selectedRoom
@@ -122,6 +127,7 @@ export function LocationEquipmentPickerGroup({
       />
       {showEquipment && (
         <PickerRow
+          compact={compact}
           label="Equipment"
           value={
             selectedEquipment.length
@@ -179,12 +185,14 @@ export function LocationEquipmentPickerGroup({
 }
 
 function PickerRow({
+  compact,
   label,
   value,
   selected,
   onSelect,
   onClear,
 }: {
+  compact?: boolean;
   label: string;
   value: string;
   selected: boolean;
@@ -192,18 +200,18 @@ function PickerRow({
   onClear: () => void;
 }) {
   return (
-    <div className="grid grid-cols-[6rem_minmax(0,1fr)_auto_auto] items-center gap-2">
-      <span className="text-sm font-medium text-gray-700">{label}</span>
+    <div className={compact ? "min-w-0 flex items-center gap-1" : "grid grid-cols-[6rem_minmax(0,1fr)_auto_auto] items-center gap-2"}>
+      <span className={compact ? "text-xs font-medium text-gray-700" : "text-sm font-medium text-gray-700"}>{label}</span>
       <input
         readOnly
         value={value}
         aria-label={`Selected ${label}`}
-        className="min-w-0 w-full px-3 py-2 border border-gray-300 rounded bg-gray-50 text-sm"
+        className={compact ? "min-w-0 w-full px-1 py-1 border rounded bg-gray-50 text-xs" : "min-w-0 w-full px-3 py-2 border border-gray-300 rounded bg-gray-50 text-sm"}
       />
       <button
         type="button"
         onClick={onSelect}
-        className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+        className={compact ? "px-1 py-1 bg-blue-600 text-white rounded text-xs" : "px-3 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"}
       >
         Select...
       </button>
@@ -212,12 +220,12 @@ function PickerRow({
           type="button"
           onClick={onClear}
           aria-label={`Clear ${label}`}
-          className="px-2 py-2 bg-red-100 text-red-700 rounded font-bold hover:bg-red-200"
+          className={compact ? "px-1 bg-red-100 text-red-700 rounded font-bold" : "px-2 py-2 bg-red-100 text-red-700 rounded font-bold hover:bg-red-200"}
         >
           ✕
         </button>
       ) : (
-        <span className="w-8" />
+        compact ? null : <span className="w-8" />
       )}
     </div>
   );

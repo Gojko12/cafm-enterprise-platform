@@ -5,13 +5,8 @@ import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
+import { section20Seed } from "./section20-seed";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
-import {
-  ESOC_BUILDINGS, ESOC_EQUIPMENT, ESOC_FLOORS, ESOC_ROOMS,
-  ESTEC_BUILDINGS, ESTEC_EQUIPMENT, ESTEC_FLOORS, ESTEC_ROOMS,
-  ESRIN_BUILDINGS, ESRIN_EQUIPMENT, ESRIN_FLOORS, ESRIN_ROOMS,
-  SAMPLE_WORK_REQUESTS,
-} from "@/lib/seed-data";
 
 export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
 export type AssignmentRole = typeof ASSIGNMENT_ROLES[number];
@@ -22,7 +17,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v1";
+const STORAGE_KEY = "cafm-demo-data-v2";
+const LEGACY_STORAGE_KEY = "cafm-demo-data-v1";
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
@@ -127,16 +123,9 @@ function seedData(): DemoData {
     sites,
     mobileMutationIds: [],
     deletedWorkRequests: [],
-    buildings: [...ESOC_BUILDINGS, ...ESTEC_BUILDINGS, ...ESRIN_BUILDINGS],
-    floors: [...ESOC_FLOORS, ...ESTEC_FLOORS, ...ESRIN_FLOORS],
-    rooms: [...ESOC_ROOMS, ...ESTEC_ROOMS, ...ESRIN_ROOMS],
     desks: [],
-    equipment: [...ESOC_EQUIPMENT, ...ESTEC_EQUIPMENT, ...ESRIN_EQUIPMENT],
-    blueprints: [],
-    schedules: [],
-    workRequests: [...SAMPLE_WORK_REQUESTS],
+    ...section20Seed(sites),
     users,
-    craftspeople: [],
     tradeRoleMappings: sites.flatMap((site) => CLASSICAL_TRADES.map((trade) => ({
       SiteId: site, Trade: trade,
       assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
@@ -184,7 +173,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     let active = true;
     async function initialize() {
       try {
-      const saved = localStorage.getItem(storageKey) ?? localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(storageKey) ?? localStorage.getItem(`${LEGACY_STORAGE_KEY}:${site}`) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
       let initial = scopeData(seedData(), site);
       const baseText = localStorage.getItem(baseKey);
       if (baseText) {
@@ -349,12 +338,6 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     return () => { active = false; window.clearInterval(interval); };
   }, [ready, site, pendingKey, baseKey]);
 
-  const reset = () => {
-    if (!window.confirm("Reset all saved demo data? This cannot be undone.")) return;
-    setData((previous) => ({ ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds }));
-    setReady(true);
-  };
-
   const commitSnapshot = async (expected: DemoData, next: DemoData) => {
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
     if (busy.current) throw new Error("Synchronization is in progress. Try again.");
@@ -384,6 +367,17 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     } finally {
       busy.current = false;
     }
+  };
+
+  const reset = () => {
+    if (!window.confirm(`Replace saved demo data for ${site} with the Section 20 seed? This cannot be undone.`)) return;
+    const previous = current.current;
+    const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
+    void commitSnapshot(previous, next).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Reset failed.";
+      console.error("Could not reset demo data", error);
+      setSyncError(`Reset failed: ${message}`);
+    });
   };
 
   return <StoreContext.Provider value={{ data, setData, reset, commitSnapshot }}>
