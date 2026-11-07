@@ -2,6 +2,9 @@
 
 import React, { useState } from "react";
 import { X, Camera, Clock } from "lucide-react";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { useCafmStore } from "@/lib/cafm-store";
+import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 
 interface FastJobModalProps {
   isOpen: boolean;
@@ -22,13 +25,35 @@ export interface FastJobData {
 
 export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
   const [step, setStep] = useState<"select-location" | "create-job">("select-location");
-  const [selectedEquipment, setSelectedEquipment] = useState("");
-  const [selectedBuildingLevel, setSelectedBuildingLevel] = useState("");
-  const [selectedRoom, setSelectedRoom] = useState("");
+  const [selectedEquipmentCodes, setSelectedEquipmentCodes] = useState<string[]>([]);
+  const [selectedBuildingId, setSelectedBuildingId] = useState("");
+  const [selectedLevelName, setSelectedLevelName] = useState("");
+  const [selectedRoomCode, setSelectedRoomCode] = useState("");
   const [description, setDescription] = useState("");
   const [timeSpent, setTimeSpent] = useState(30);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>();
+  const { activeSiteId } = useSiteContext();
+  const { data } = useCafmStore();
+  const buildings = data.buildings.filter((item) => item.SiteId === activeSiteId);
+  const floors = data.floors.filter((item) => item.SiteId === activeSiteId);
+  const rooms = data.rooms.filter((item) => item.SiteId === activeSiteId);
+  const equipment = data.equipment.filter((item) => item.SiteId === activeSiteId);
+  const selectedBuilding =
+    buildings.find((item) => item.bl_id === selectedBuildingId) ?? null;
+  const selectedFloor =
+    floors.find(
+      (item) =>
+        item.bl_id === selectedBuildingId && item.LevelName === selectedLevelName,
+    ) ?? null;
+  const selectedRoom =
+    rooms.find(
+      (item) =>
+        item.bl_id === selectedBuildingId &&
+        item.LevelName === selectedLevelName &&
+        item.RoomCode === selectedRoomCode,
+    ) ?? null;
+  const selectedEquipment = selectedEquipmentCodes[0] || "";
 
   if (!isOpen) return null;
 
@@ -46,16 +71,16 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
 
   const handleSubmit = () => {
     if (step === "select-location") {
-      if (selectedEquipment && selectedBuildingLevel && selectedRoom) {
+      if (selectedEquipmentCodes.length === 1 && selectedBuildingId && selectedLevelName && selectedRoomCode) {
         setStep("create-job");
       }
     } else {
-      if (description && selectedEquipment && selectedBuildingLevel && selectedRoom) {
+      if (description && selectedEquipmentCodes.length === 1 && selectedBuildingId && selectedLevelName && selectedRoomCode) {
         onSubmit?.({
           equipmentCode: selectedEquipment,
-          bl_id: selectedBuildingLevel.split("/")[0] || "",
-          levelName: selectedBuildingLevel.split("/")[1] || "",
-          roomCode: selectedRoom,
+          bl_id: selectedBuildingId,
+          levelName: selectedLevelName,
+          roomCode: selectedRoomCode,
           description,
           photoUrl: photoPreview,
           timeSpentMinutes: timeSpent,
@@ -69,9 +94,10 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
 
   const handleReset = () => {
     setStep("select-location");
-    setSelectedEquipment("");
-    setSelectedBuildingLevel("");
-    setSelectedRoom("");
+    setSelectedEquipmentCodes([]);
+    setSelectedBuildingId("");
+    setSelectedLevelName("");
+    setSelectedRoomCode("");
     setDescription("");
     setTimeSpent(30);
     setPhotoFile(null);
@@ -101,65 +127,32 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
           {step === "select-location" ? (
             // Step 1: Select Location & Equipment
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Equipment *
-                </label>
-                <select
-                  value={selectedEquipment}
-                  onChange={(e) => setSelectedEquipment(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Choose Equipment...</option>
-                  <option value="0000000001">
-                    0000000001 - HVAC Unit (Building A)
-                  </option>
-                  <option value="0000000002">
-                    0000000002 - Electrical Panel (Building B)
-                  </option>
-                  <option value="0000000003">
-                    0000000003 - Water Pump (Building C)
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Building / Floor *
-                </label>
-                <select
-                  value={selectedBuildingLevel}
-                  onChange={(e) => setSelectedBuildingLevel(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Choose Location...</option>
-                  <option value="BL001/Floor1">
-                    BL001 / Floor 1
-                  </option>
-                  <option value="BL001/Floor2">
-                    BL001 / Floor 2
-                  </option>
-                  <option value="BL002/Floor1">
-                    BL002 / Floor 1
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Room *
-                </label>
-                <select
-                  value={selectedRoom}
-                  onChange={(e) => setSelectedRoom(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Choose Room...</option>
-                  <option value="R101">R101 - Server Room</option>
-                  <option value="R102">R102 - Office</option>
-                  <option value="R103">R103 - Storage</option>
-                </select>
-              </div>
+              <LocationEquipmentPickerGroup
+                buildings={buildings}
+                floors={floors}
+                rooms={rooms}
+                equipment={equipment}
+                selectedBuilding={selectedBuilding}
+                selectedFloor={selectedFloor}
+                selectedRoom={selectedRoom}
+                selectedEquipmentCodes={selectedEquipmentCodes}
+                onLocationChange={({ building, floor, room }) => {
+                  setSelectedBuildingId(building?.bl_id || "");
+                  setSelectedLevelName(floor?.LevelName || "");
+                  setSelectedRoomCode(room?.RoomCode || "");
+                }}
+                onEquipmentChange={(codes) => {
+                  setSelectedEquipmentCodes(codes);
+                  if (codes.length === 1) {
+                    const item = equipment.find((candidate) => candidate.EquipmentCode === codes[0]);
+                    if (item) {
+                      setSelectedBuildingId(item.bl_id);
+                      setSelectedLevelName(item.LevelName);
+                      setSelectedRoomCode(item.RoomCode);
+                    }
+                  }
+                }}
+              />
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-900">
@@ -253,7 +246,7 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
                     • Equipment: <strong>{selectedEquipment}</strong>
                   </li>
                   <li>
-                    • Location: <strong>{selectedBuildingLevel} / {selectedRoom}</strong>
+                    • Location: <strong>{selectedBuildingId} / {selectedLevelName} / {selectedRoomCode}</strong>
                   </li>
                   <li>
                     • Time: <strong>{timeSpent} minutes</strong>
@@ -286,8 +279,8 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
             onClick={handleSubmit}
             disabled={
               step === "select-location"
-                ? !selectedEquipment || !selectedBuildingLevel || !selectedRoom
-                : !description || !selectedEquipment
+                ? selectedEquipmentCodes.length !== 1 || !selectedBuildingId || !selectedLevelName || !selectedRoomCode
+                : !description || selectedEquipmentCodes.length !== 1
             }
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >

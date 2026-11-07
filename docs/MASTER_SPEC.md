@@ -253,3 +253,121 @@ Each LJ has 3 configurable boolean flags set during project planning/execution: 
 - Every Location (`Building`, `Floor`, `Room`), `Equipment`, `BaseWorkRequest`, `PM_Schedule`, and `Desk` belongs to a `SiteId` (e.g., `SITE-01`, `SITE-02`, `SITE-03`).
 - Users assigned to `SITE-02` must NEVER see WRs, Locations, Equipment, or Schedules from `SITE-01` or `SITE-03`. Only global `SiteAdministrator` or users explicitly granted multi-site access can switch across sites.
 - The RBAC & User Access Monitor (`/admin/rbac`) must provide a complete governance dashboard to inspect and configure: (a) User -> Assigned Site(s), System Role, LJ Role (`ESA_TO`, `ESA_DO`, `ESA_IM`, `TRADE_TM`, etc.), and Trades, (b) Site Isolation Matrix, and (c) Interactive LJ Substatus Role Permission Matrix (`0%` to `100%`).
+
+## 12. Operational Refinements: Separated PM/FJ/LJ Views, 3-Tier Equipment Tree, Favourable Checklist Logic & Trade-Role Auto-Resolution
+
+### 12.1 Global Persistent State & Unlocked Site Switcher
+- All Web Portal entities (Sites, Buildings, Floors, Rooms, Equipment, Checklist Blueprints, PM Schedules, Work Requests [PM, FJ, LJ], Users, and Trade-Role Mappings) MUST be stored in a unified client-side store backed by `localStorage` (with a "Reset Demo Data" button) so creating or editing any record persists across page navigation and browser reloads.
+- The top-bar **Site Dropdown** (`SITE-01 ESOC Darmstadt`, `SITE-02 ESTEC Noordwijk`, `SITE-03 ESRIN Frascati`) must ALWAYS be enabled and interactive so the tester can switch sites freely and see strict site filtering in real time.
+
+### 12.2 Classical Trades & Trade-to-Role Governance Matrix
+- The 7 standard Classical Trades across the entire platform are:
+  1. `Mechanical`
+  2. `Civil`
+  3. `Electrical`
+  4. `MultiTechnic`
+  5. `Cleaning`
+  6. `HeavyGang`
+  7. `Catering`
+- In `/admin/rbac`, administrators must be able to configure and monitor **Role Assignments in Relation to Trades & Sites**, specifically mapping which personnel hold the following roles for each of the 7 Classical Trades:
+  - `ESA_TM` (ESA Trade Manager)
+  - `ESA_CCM` (ESA Cost Centre Manager)
+  - `TRADE_TM` (Trade Manager)
+  - `TRADE_CM` (Trade Contract Manager)
+  - Plus cross-cutting/site roles: `ESA_TO` (Technical Officer), `ESA_LJM` (Long Job Manager), `ESA_DO` (Draftsman / Drawing Office), `ESA_IM` (CIFM Inventory Admin), `QA_Inspector`, and `MobileTechnician`.
+
+### 12.3 Long Job (LJ) Creation Form Rules
+When creating a new Long Job (`LJ`), the user must define:
+1. **Trade**: Chosen from the 7 Classical Trades (`Mechanical`, `Civil`, `Electrical`, `MultiTechnic`, `Cleaning`, `HeavyGang`, `Catering`).
+2. **Equipment (Optional)**:
+   - If an Equipment item is selected, its **Location (`RoomCode` / `LevelName` / `bl_id`) is automatically retrieved and populated** from the Equipment record.
+   - If no Equipment is selected (e.g., painting a room or replacing floor tiles on a whole floor of Building P), the user can manually select **Building only**, **Building + Floor**, or **Building + Floor + Room**.
+3. **Trade-Linked Roles (Auto-Retrieved from Trade)**:
+   - Selecting the **Trade** automatically retrieves and populates the default assigned personnel for that Trade (with dropdowns allowing manual override if multiple users hold that role for the trade):
+     * **ESA Trade Manager (`ESA_TM`)**
+     * **ESA Cost Centre Manager (`ESA_CCM`)**
+     * **Trade Manager (`TRADE_TM`)**
+     * **Trade Contract Manager (`TRADE_CM`)**
+
+### 12.4 Separated Work Request Views (PM, FJ, LJ) & PM Status Buckets
+Work Requests must NOT be mixed in a single undifferentiated table. Provide 3 clearly separated workspaces/tabs (and sidebar links):
+1. **Preventive Maintenance (`PM`) View**:
+   Organized into 4 explicit status sub-tabs/buckets:
+   - **Issued (`50%`) + On Hold for Labour/Parts/Access (`55%`)**
+   - **Technically Completed (`78%`)**
+   - **Cancelled (`27%`)**
+   - **Completed (`100%`)**
+2. **Fast Jobs (`FJ`) View**: Dedicated reactive maintenance (< 750 EUR) workspace with one-click escalation to `LJ` (at `10%`).
+3. **Long Jobs (`LJ`) View**: Dedicated complex maintenance/project (>= 750 EUR) workspace with full `0% -> 100%` RFQ/RFW workflow and `78%–94%` acceptance gates.
+
+### 12.5 Checklist Blueprints (Favourable Answer Definition & Select Options) & PM Schedules CRUD
+- **Checklist Blueprints**:
+  - Creating or editing a Blueprint must persist in the global store.
+  - When a step's `InputType` is `SingleSelect` or `MultiSelect`, the UI must provide an interactive **Options List Builder** to add/edit/remove options (`Label`, `Value`, and `IsFavourable: boolean`).
+  - **Favourable vs. Unfavourable Step Logic**: Every checklist step must define what answer is **Favourable (Pass)**.
+    * For `Boolean` steps (`Yes` / `No`): Default Favourable answer is `"Yes"` (`FavourableBoolean: true`), but the creator can set `"No"` as Favourable (`FavourableBoolean: false`, e.g., "Any abnormal vibration or leak?"). During execution, if the technician selects the **unfavourable** answer, the step is flagged as Failed and requires a mandatory photo + comment (and enables opening a follow-up FJ).
+    * For `SingleSelect` / `MultiSelect`: Selecting any option marked `IsFavourable: false` flags the step as Unfavourable/Failed.
+    * For `Numeric`: Values within `[MinThreshold, MaxThreshold]` are Favourable; out-of-range values are Unfavourable/Failed.
+- **PM Schedules**:
+  - Users must be able to **Add New PM Schedule** and **Edit Existing PM Schedule** via a full modal (selecting Blueprint, Equipment/Location, Trade, Frequency, Next Due Date, Lead-Time Days, Margin Days, Active status) and save persistently.
+
+### 12.6 Three-Level Equipment Hierarchy ("Subcomponent of")
+- Equipment records must support at least 3 explicit hierarchy levels via `HierarchyLevel` (`'Installation' | 'Subequipment' | 'SubSubEquipment'`) and `ParentEquipmentCode` ("Subcomponent of"):
+  1. **Level 1 — `Installation`** (root system, e.g., `EQ-001` Main HVAC Chiller Plant)
+  2. **Level 2 — `Subequipment`** (subcomponent of an Installation, e.g., `EQ-001-A` Primary Chilled Water Pump)
+  3. **Level 3 — `SubSubEquipment`** (subcomponent of a Subequipment, e.g., `EQ-001-A-1` Mechanical Shaft Seal / Differential Pressure Sensor)
+- The `/equipment` registry must display a clear expandable 3-level tree / hierarchy badge and allow setting "Subcomponent of" (`ParentEquipmentCode`) when adding or editing equipment.
+
+## 13. Pop-Up Location Pickers (Building <-> Floor <-> Room) & Multi-Select Equipment Modal Specification
+
+### 13.1 Main Screen UI Pattern (No Native `<select>` Dropdowns)
+Do NOT use native `<select>` dropdowns for Building, Floor, Room, or Equipment on Technician Home, Filter Panels, Select Equipment, or Work Request Creation/Edit screens. Render each selector as a horizontal picker row:
+- **Building Row**: Read-only display box showing `{bl_id} - {buildingName}` or placeholder `All Buildings` | Right side: `Select...` button (opens Building Popup) + `✕` button (visible ONLY when a Building is selected).
+- **Floor Row**: Read-only display box showing `{levelName}` or placeholder `All Floors` | Right side: `Select...` button (opens Floor Popup) + `✕` button (visible ONLY when a Floor is selected).
+- **Room Row**: Read-only display box showing `{roomCode} - {roomName}` or placeholder `All Rooms` | Right side: `Select...` button (opens Room Popup) + `✕` button (visible ONLY when a Room is selected).
+- **Equipment Row**: Read-only display box showing comma-separated selected `EquipmentCode`s (e.g., `0000000006, 0000000007`) or placeholder `All Equipment` | Right side: `Select...` button (opens Multi-Select Equipment Modal) + `✕` button (visible ONLY when >=1 Equipment is selected).
+
+### 13.2 Bidirectional Cascading Logic (Top-Down & Bottom-Up)
+1. **Bottom-Up Auto-Resolution (Child Automatically Fills Parents)**:
+   - Picking a **Room** directly from the Room Pop-Up automatically resolves and populates its parent **Floor (`levelName`)** and grandparent **Building (`bl_id`)** into the Floor and Building fields.
+   - Picking a **Floor** directly from the Floor Pop-Up automatically resolves and populates its parent **Building (`bl_id`)** into the Building field.
+   - Picking an **Equipment** item (in single-equipment WR creation) automatically resolves and populates its `Room`, `Floor`, and `Building`.
+2. **Top-Down Filtering (Parents Filter Child Pop-Ups)**:
+   - **Floor Pop-Up**: If `selectedBuilding` is set, only display Floors where `floor.buildingId == selectedBuilding.id`. If empty, display all Floors across the active Site sorted by Building Code, then Floor Name.
+   - **Room Pop-Up**: If `selectedFloor` is set, only display Rooms where `room.floorId == selectedFloor.id`. Else if `selectedBuilding` is set, display all Rooms where `room.buildingId == selectedBuilding.id`. Else display all Rooms across the active Site.
+3. **Parent Change Conflict Check**:
+   - If the user opens the Building Pop-Up and selects a different Building than the currently selected Floor/Room's parent, automatically clear `selectedFloor` and `selectedRoom`.
+   - If the user changes Floor to a different Floor, automatically clear `selectedRoom` if it does not belong to the newly chosen Floor.
+4. **Cascading Clear (`✕` Button) Rules**:
+   - Clicking `✕` on **Building**: Clears `selectedBuilding`, `selectedFloor`, and `selectedRoom`.
+   - Clicking `✕` on **Floor**: Clears `selectedFloor` and `selectedRoom`, keeping `selectedBuilding` intact.
+   - Clicking `✕` on **Room**: Clears ONLY `selectedRoom`, keeping `selectedBuilding` and `selectedFloor` intact.
+
+### 13.3 Pop-Up Picker Modal Design (`PickBuilding`, `PickFloor`, `PickRoom`)
+- **Modal Header**: Title (`Select Building`, `Select Floor`, or `Select Room`) + Close (`✕`) button.
+- **Instant Live Search Bar**:
+  - In `Select Room`: searches by `roomCode`, `roomName`, `levelName`, or `bl_id`.
+  - In `Select Floor`: searches by `levelName` or `bl_id`.
+  - In `Select Building`: searches by `bl_id` or `buildingName`.
+- **Scrollable Item List**:
+  - **Room Row**: Primary text: `{roomCode} - {roomName}` | Subtitle: `Floor: {levelName} • Building: {bl_id} ({areaM2} m²)` | Right side: blue `Select` button.
+  - **Floor Row**: Primary text: `{levelName}` | Subtitle: `Building: {bl_id}` | Right side: blue `Select` button.
+  - **Building Row**: Primary text: `{bl_id} - {buildingName}` | Right side: blue `Select` button.
+- **Selection Action**: Clicking `Select` updates state (running Bottom-Up Auto-Resolution and Parent Conflict Check), closes ONLY the active picker modal, and immediately updates the underlying screen.
+
+### 13.4 Multi-Select Equipment Pop-Up (`Select Equipment`)
+1. **Collapsible Location & Text Filter Header (`Filter ▼`)**:
+   - Contains the exact same 3 horizontal pop-up picker rows (`Building`, `Floor`, `Room` with their `Select...` and `✕` buttons), pre-populated from the parent screen's active location state, plus live text search inputs for `Equipment Code` and `Equipment Name`.
+   - Changing Building, Floor, or Room inside this header immediately filters the Equipment list below.
+2. **Equipment List & In-Place Toggle (`Select` <-> `Unselect`)**:
+   - Sorted strictly by `equipmentCode` ascending so rows never jump around.
+   - Each card displays:
+     * Line 1: `EQ: {equipmentCode}` (e.g., `EQ: 0000000006`)
+     * Line 2: `{equipmentName}` (e.g., `VRF Indoor AC Unit - Open Office West`) + location subtitle
+     * Line 3: Full-width **Blue `Select`** button (if not selected) OR full-width **Orange/Green `Unselect`** button (if selected).
+   - **Strict In-Place Rule**: Clicking `Select` or `Unselect` toggles the button state in-place immediately without hiding the row or losing scroll position.
+3. **Sticky Bottom Action Bar**:
+   - **Confirm Selection (Primary Blue)**: Commits the staged equipment IDs into the main screen's Equipment display box (comma-separated `EquipmentCode`s) and closes the modal.
+   - **Cancel (Secondary Gray/Blue)**: Closes the modal and discards any selection changes made during that modal session.
+   - **Unselect All (Warning Orange)**: Clears all staged equipment IDs and flips all visible buttons back to `Select` in-place.
+   - **Reset Filter (on Technician Home / Filter Panel)**: Clears `selectedBuilding`, `selectedFloor`, `selectedRoom`, all date/text filters, AND empties `selectedEquipmentIds[]`.

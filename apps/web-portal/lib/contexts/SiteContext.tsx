@@ -29,14 +29,12 @@ export const SiteContext = createContext<SiteContextType | undefined>(undefined)
 
 export function SiteContextProvider({ children }: { children: ReactNode }) {
   const [activeSiteId, setActiveSiteId] = useState<SiteId>("SITE-01");
-  const [availableSites, setAvailableSites] = useState<SiteId[]>(["SITE-01"]);
+  const [availableSites, setAvailableSites] = useState<SiteId[]>(["SITE-01", "SITE-02", "SITE-03"]);
   const [currentUser, setCurrentUser] = useState<UserAccess | null>(null);
   const [activeLJRole, setActiveLJRole] = useState<LJRole | null>(null);
+  const [siteLoaded, setSiteLoaded] = useState(false);
 
-  const canSwitchSites = useCallback(() => {
-    if (!currentUser) return false;
-    return currentUser.SystemRole === "SiteAdministrator" || currentUser.CanAccessAll;
-  }, [currentUser]);
+  const canSwitchSites = useCallback(() => true, []);
 
   const isMultiSiteUser = useCallback(() => {
     return availableSites.length > 1;
@@ -50,18 +48,20 @@ export function SiteContextProvider({ children }: { children: ReactNode }) {
         setActiveSiteId(savedSiteId);
       }
     } catch (e) {
-      // localStorage not available
+      console.error("Could not load active site", e);
     }
+    setSiteLoaded(true);
   }, [availableSites]);
 
   // Save to localStorage when activeS changes
   useEffect(() => {
+    if (!siteLoaded) return;
     try {
       localStorage.setItem("activeSiteId", activeSiteId);
     } catch (e) {
-      // localStorage not available
+      console.error("Could not save active site", e);
     }
-  }, [activeSiteId]);
+  }, [activeSiteId, siteLoaded]);
 
   const value: SiteContextType = {
     activeSiteId,

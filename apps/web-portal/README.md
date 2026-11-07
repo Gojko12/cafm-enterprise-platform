@@ -4,6 +4,20 @@ Production-grade Next.js (App Router) web application for the Enterprise CAFM & 
 
 ## Features
 
+### Demo state
+
+The site switcher is available for all three demo sites. Locations, equipment,
+work requests, and checklist blueprints in the connected views use the
+browser's `cafm-demo-data-v1` localStorage entry. Reset Demo Data replaces that
+entry after confirmation. This is browser-local demo data, not shared or
+access-controlled persistence.
+
+The Section 12 migration is incomplete: other pages still use their own sample
+data, and the role matrix, PM schedule CRUD and generation, checklist
+favourable-answer execution, and equipment hierarchy editor are not yet wired
+to this store. The existing SmartPM generator screen does not generate work
+requests.
+
 ### ✓ Application Shell & Navigation
 - Role-aware sidebar navigation (6 role types: SiteAdministrator, ESA_LongJobManager, PM_Planner, QA_Inspector, MobileTechnician, StandardEmployee)
 - Active user role switcher dropdown (for testing)

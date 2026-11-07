@@ -2,8 +2,10 @@
 
 import React, { useState } from "react";
 import { X, Plus, ArrowUp, Download } from "lucide-react";
-import { BaseWorkRequest, LJRole, WR_Type } from "@cafm/shared-schema";
+import { BaseWorkRequest, CLASSICAL_TRADES, LJRole, WR_Type } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { useCafmStore } from "@/lib/cafm-store";
+import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 
 interface LJDrawerProps {
   isOpen: boolean;
@@ -97,6 +99,7 @@ export function LongJobDrawer({
   mode,
 }: LJDrawerProps) {
   const { activeSiteId, activeLJRole } = useSiteContext();
+  const { data } = useCafmStore();
   const [formData, setFormData] = useState<Partial<BaseWorkRequest>>({
     SiteId: activeSiteId,
     EstimatedCostEur: 0,
@@ -107,6 +110,59 @@ export function LongJobDrawer({
   });
 
   const [escalationCost, setEscalationCost] = useState<number>(750);
+  const siteBuildings = data.buildings.filter((item) => item.SiteId === activeSiteId);
+  const siteFloors = data.floors.filter((item) => item.SiteId === activeSiteId);
+  const siteRooms = data.rooms.filter((item) => item.SiteId === activeSiteId);
+  const siteEquipment = data.equipment.filter((item) => item.SiteId === activeSiteId);
+  const selectedBuilding =
+    siteBuildings.find((item) => item.bl_id === formData.bl_id) ?? null;
+  const selectedFloor =
+    siteFloors.find(
+      (item) =>
+        item.bl_id === formData.bl_id && item.LevelName === formData.LevelName,
+    ) ?? null;
+  const selectedRoom =
+    siteRooms.find(
+      (item) =>
+        item.bl_id === formData.bl_id &&
+        item.LevelName === formData.LevelName &&
+        item.RoomCode === formData.RoomCode,
+    ) ?? null;
+
+  const handleLocationChange = ({
+    building,
+    floor,
+    room,
+  }: {
+    building: (typeof siteBuildings)[number] | null;
+    floor: (typeof siteFloors)[number] | null;
+    room: (typeof siteRooms)[number] | null;
+  }) => {
+    setFormData({
+      ...formData,
+      bl_id: building?.bl_id,
+      LevelName: floor?.LevelName,
+      RoomCode: room?.RoomCode,
+    });
+  };
+
+  const handleEquipmentChange = (equipmentCodes: string[]) => {
+    const equipment =
+      equipmentCodes.length === 1
+        ? siteEquipment.find((item) => item.EquipmentCode === equipmentCodes[0])
+        : undefined;
+    setFormData({
+      ...formData,
+      EquipmentCodes: equipmentCodes,
+      ...(equipment
+        ? {
+            bl_id: equipment.bl_id,
+            LevelName: equipment.LevelName,
+            RoomCode: equipment.RoomCode,
+          }
+        : {}),
+    });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,12 +226,36 @@ export function LongJobDrawer({
                   </label>
                   <input
                     type="text"
+                    required
                     value={formData.Description || ""}
                     onChange={(e) =>
                       setFormData({ ...formData, Description: e.target.value })
                     }
                     className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
                     placeholder="Work request description"
+                  />
+                </div>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Trade *
+                  <select required value={formData.TradeId || ""} onChange={(e) => setFormData({ ...formData, TradeId: e.target.value, TradeName: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg">
+                    <option value="">Select trade</option>
+                    {CLASSICAL_TRADES.map((trade) => <option key={trade} value={trade}>{trade}</option>)}
+                  </select>
+                </label>
+                <div className="col-span-2 space-y-3">
+                  <LocationEquipmentPickerGroup
+                    buildings={siteBuildings}
+                    floors={siteFloors}
+                    rooms={siteRooms}
+                    equipment={siteEquipment}
+                    selectedBuilding={selectedBuilding}
+                    selectedFloor={selectedFloor}
+                    selectedRoom={selectedRoom}
+                    selectedEquipmentCodes={formData.EquipmentCodes || []}
+                    onLocationChange={handleLocationChange}
+                    onEquipmentChange={handleEquipmentChange}
                   />
                 </div>
 

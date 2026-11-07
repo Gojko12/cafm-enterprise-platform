@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Equipment } from "@cafm/shared-schema";
 
 interface MultiSelectEquipmentPickerProps {
@@ -19,10 +19,21 @@ export const MultiSelectEquipmentPicker: React.FC<MultiSelectEquipmentPickerProp
   const [searchText, setSearchText] = useState("");
   const [localSelection, setLocalSelection] = useState(new Set(selectedCodes));
 
-  const filteredEquipment = equipment.filter((e) =>
-    e.EquipmentName.toLowerCase().includes(searchText.toLowerCase()) ||
-    e.EquipmentCode.toLowerCase().includes(searchText.toLowerCase()) ||
-    (e.TradeName || "").toLowerCase().includes(searchText.toLowerCase())
+  useEffect(() => {
+    setLocalSelection(new Set(selectedCodes));
+  }, [selectedCodes]);
+
+  const filteredEquipment = useMemo(
+    () =>
+      equipment
+        .filter(
+          (item) =>
+            item.EquipmentName.toLowerCase().includes(searchText.toLowerCase()) ||
+            item.EquipmentCode.toLowerCase().includes(searchText.toLowerCase()) ||
+            (item.PrimaryTradeId || "").toLowerCase().includes(searchText.toLowerCase()),
+        )
+        .sort((a, b) => a.EquipmentCode.localeCompare(b.EquipmentCode)),
+    [equipment, searchText],
   );
 
   const handleToggleEquipment = (code: string) => {
@@ -33,20 +44,14 @@ export const MultiSelectEquipmentPicker: React.FC<MultiSelectEquipmentPickerProp
       newSelection.add(code);
     }
     setLocalSelection(newSelection);
-    if (onSelectionChange) {
-      onSelectionChange(newSelection);
-    }
   };
 
   const handleUnselectAll = () => {
-    const newSelection = new Set<string>();
-    setLocalSelection(newSelection);
-    if (onSelectionChange) {
-      onSelectionChange(newSelection);
-    }
+    setLocalSelection(new Set<string>());
   };
 
   const handleConfirm = () => {
+    onSelectionChange?.(new Set(localSelection));
     if (onConfirm) {
       onConfirm();
     }
@@ -83,40 +88,36 @@ export const MultiSelectEquipmentPicker: React.FC<MultiSelectEquipmentPickerProp
             </div>
           ) : (
             <div className="space-y-2">
-              {filteredEquipment.map((eq) => (
-                <button
+              {filteredEquipment.map((eq) => {
+                const isSelected = localSelection.has(eq.EquipmentCode);
+                return (
+                <article
                   key={eq.EquipmentCode}
-                  onClick={() => handleToggleEquipment(eq.EquipmentCode)}
                   className={`w-full text-left px-3 py-3 rounded-lg border transition-colors ${
-                    localSelection.has(eq.EquipmentCode)
+                    isSelected
                       ? "bg-blue-50 border-blue-300"
                       : "bg-gray-50 border-gray-200 hover:border-gray-300"
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
-                        localSelection.has(eq.EquipmentCode)
-                          ? "bg-blue-500 border-blue-500"
-                          : "border-gray-400"
-                      }`}
-                    >
-                      {localSelection.has(eq.EquipmentCode) && (
-                        <span className="text-white text-xs">✓</span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-gray-900 truncate">
-                        {eq.EquipmentName}
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {eq.EquipmentCode}
-                        {eq.TradeName && ` · ${eq.TradeName}`}
-                      </div>
-                    </div>
+                  <div className="font-semibold text-sm text-gray-900">
+                    EQ: {eq.EquipmentCode}
                   </div>
-                </button>
-              ))}
+                  <div className="text-sm text-gray-700 mt-1">{eq.EquipmentName}</div>
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => handleToggleEquipment(eq.EquipmentCode)}
+                    className={`w-full mt-2 px-3 py-2 text-sm font-medium rounded text-white ${
+                      isSelected
+                        ? "bg-orange-500 hover:bg-orange-600"
+                        : "bg-blue-500 hover:bg-blue-600"
+                    }`}
+                  >
+                    {isSelected ? "Unselect" : "Select"}
+                  </button>
+                </article>
+                );
+              })}
             </div>
           )}
         </div>
@@ -139,7 +140,7 @@ export const MultiSelectEquipmentPicker: React.FC<MultiSelectEquipmentPickerProp
             onClick={handleConfirm}
             className="flex-1 px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded hover:bg-blue-600 transition-colors"
           >
-            Apply
+            Confirm Selection
           </button>
         </div>
       </div>

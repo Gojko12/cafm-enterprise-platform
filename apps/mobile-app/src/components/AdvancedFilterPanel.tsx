@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from "react";
-import { Building, Floor, Room } from "@cafm/shared-schema";
+import React, { useMemo, useState } from "react";
+import { Building, Equipment, Floor, Room } from "@cafm/shared-schema";
 import { FilterCriteria } from "@/lib/store";
+import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
 
 interface AdvancedFilterPanelProps {
   buildings: Building[];
   floors: Floor[];
   rooms: Room[];
+  equipment: Equipment[];
   currentFilters: FilterCriteria;
   onFiltersChange: (filters: FilterCriteria) => void;
   onApplyFilters: () => void;
@@ -15,81 +17,41 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   buildings,
   floors,
   rooms,
+  equipment,
   currentFilters,
   onFiltersChange,
   onApplyFilters,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [searchBuildingText, setSearchBuildingText] = useState("");
-  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
-  const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
-
-  useEffect(() => {
-    if (currentFilters.bl_id) {
-      const building = buildings.find((b) => b.bl_id === currentFilters.bl_id);
-      setSelectedBuilding(building || null);
-    }
-  }, [currentFilters.bl_id, buildings]);
-
-  useEffect(() => {
-    if (currentFilters.levelName && selectedBuilding) {
-      const floor = floors.find(
-        (f) => f.bl_id === selectedBuilding.bl_id && f.LevelName === currentFilters.levelName
-      );
-      setSelectedFloor(floor || null);
-    }
-  }, [currentFilters.levelName, floors, selectedBuilding]);
-
-  useEffect(() => {
-    if (currentFilters.roomCode && selectedFloor) {
-      const room = rooms.find(
-        (r) =>
-          r.bl_id === selectedBuilding?.bl_id &&
-          r.LevelName === selectedFloor.LevelName &&
-          r.RoomCode === currentFilters.roomCode
-      );
-      setSelectedRoom(room || null);
-    }
-  }, [currentFilters.roomCode, rooms, selectedBuilding, selectedFloor]);
-
-  const handleBuildingSelect = (building: Building) => {
-    setSelectedBuilding(building);
-    setSelectedFloor(null);
-    setSelectedRoom(null);
-    setSearchBuildingText("");
-    onFiltersChange({
-      ...currentFilters,
-      bl_id: building.bl_id,
-      levelName: undefined,
-      roomCode: undefined,
-    });
-  };
-
-  const handleFloorSelect = (floor: Floor) => {
-    setSelectedFloor(floor);
-    setSelectedRoom(null);
-    onFiltersChange({
-      ...currentFilters,
-      levelName: floor.LevelName,
-      roomCode: undefined,
-    });
-  };
-
-  const handleRoomSelect = (room: Room) => {
-    setSelectedRoom(room);
-    onFiltersChange({
-      ...currentFilters,
-      roomCode: room.RoomCode,
-    });
-  };
+  const selectedBuilding = useMemo(
+    () => buildings.find((building) => building.bl_id === currentFilters.bl_id) ?? null,
+    [buildings, currentFilters.bl_id],
+  );
+  const selectedFloor = useMemo(
+    () =>
+      floors.find(
+        (floor) =>
+          floor.bl_id === currentFilters.bl_id &&
+          floor.LevelName === currentFilters.levelName,
+      ) ?? null,
+    [floors, currentFilters.bl_id, currentFilters.levelName],
+  );
+  const selectedRoom = useMemo(
+    () =>
+      rooms.find(
+        (room) =>
+          room.bl_id === currentFilters.bl_id &&
+          room.LevelName === currentFilters.levelName &&
+          room.RoomCode === currentFilters.roomCode,
+      ) ?? null,
+    [rooms, currentFilters.bl_id, currentFilters.levelName, currentFilters.roomCode],
+  );
 
   const handleResetFilters = () => {
-    setSelectedBuilding(null);
-    setSelectedFloor(null);
-    setSelectedRoom(null);
-    setSearchBuildingText("");
     onFiltersChange({
+      bl_id: undefined,
+      levelName: undefined,
+      roomCode: undefined,
       wrId: undefined,
       trade: undefined,
       showOnlyWithChecklist: false,
@@ -97,23 +59,10 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
       dueDateTo: undefined,
       marginDateFrom: undefined,
       marginDateTo: undefined,
+      selectedEquipmentCodes: new Set(),
     });
+    onApplyFilters();
   };
-
-  const filteredBuildings = buildings.filter((b) =>
-    b.Name.toLowerCase().includes(searchBuildingText.toLowerCase())
-  );
-
-  const filteredFloors = selectedBuilding
-    ? floors.filter((f) => f.bl_id === selectedBuilding.bl_id)
-    : [];
-
-  const filteredRooms = selectedFloor
-    ? rooms.filter(
-        (r) =>
-          r.bl_id === selectedBuilding?.bl_id && r.LevelName === selectedFloor.LevelName
-      )
-    : [];
 
   return (
     <div className="bg-white border-b border-gray-200 mobile-filter-panel">
@@ -132,80 +81,27 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
         <div className="px-4 py-4 border-t border-gray-100 space-y-4 pb-4">
           {/* Location Pickers */}
           <div className="space-y-3">
-            {/* Building Picker */}
-            <div>
-              <label className="text-xs font-medium text-gray-700 block mb-2">Building</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search building..."
-                  value={searchBuildingText}
-                  onChange={(e) => setSearchBuildingText(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-                  aria-label="Search buildings"
-                />
-                {searchBuildingText && filteredBuildings.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-40 max-h-40 overflow-y-auto">
-                    {filteredBuildings.map((b) => (
-                      <button
-                        key={b.bl_id}
-                        onClick={() => handleBuildingSelect(b)}
-                        className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm"
-                      >
-                        {b.Name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {selectedBuilding && (
-                <div className="text-xs text-blue-600 mt-1">Selected: {selectedBuilding.Name}</div>
-              )}
-            </div>
-
-            {/* Floor Picker */}
-            {selectedBuilding && filteredFloors.length > 0 && (
-              <div>
-                <label className="text-xs font-medium text-gray-700 block mb-2">Floor</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {filteredFloors.map((f) => (
-                    <button
-                      key={f.LevelName}
-                      onClick={() => handleFloorSelect(f)}
-                      className={`px-3 py-2 text-xs font-medium rounded transition-colors ${
-                        selectedFloor?.LevelName === f.LevelName
-                          ? "bg-blue-500 text-white"
-                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
-                    >
-                      {f.LevelName}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Room Picker */}
-            {selectedFloor && filteredRooms.length > 0 && (
-              <div>
-                <label className="text-xs font-medium text-gray-700 block mb-2">Room</label>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {filteredRooms.map((r) => (
-                    <button
-                      key={r.RoomCode}
-                      onClick={() => handleRoomSelect(r)}
-                      className={`w-full text-left px-3 py-2 text-xs rounded transition-colors ${
-                        selectedRoom?.RoomCode === r.RoomCode
-                          ? "bg-blue-500 text-white"
-                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
-                    >
-                      {r.RoomCode}: {r.Name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <LocationEquipmentPickerGroup
+              buildings={buildings}
+              floors={floors}
+              rooms={rooms}
+              equipment={equipment}
+              selectedBuilding={selectedBuilding}
+              selectedFloor={selectedFloor}
+              selectedRoom={selectedRoom}
+              selectedEquipmentCodes={currentFilters.selectedEquipmentCodes}
+              onLocationChange={({ building, floor, room }) =>
+                onFiltersChange({
+                  ...currentFilters,
+                  bl_id: building?.bl_id,
+                  levelName: floor?.LevelName,
+                  roomCode: room?.RoomCode,
+                })
+              }
+              onEquipmentChange={(codes) =>
+                onFiltersChange({ ...currentFilters, selectedEquipmentCodes: codes })
+              }
+            />
           </div>
 
           {/* Filter Inputs */}

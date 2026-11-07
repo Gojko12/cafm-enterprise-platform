@@ -3,18 +3,20 @@
 import React, { useState } from "react";
 import { Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import type { PM_ChecklistStandard, PM_ScheduleStep } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, PM_ChecklistStandardSchema } from "@cafm/shared-schema";
 
 interface ChecklistBuilderProps {
   onSave?: (checklist: PM_ChecklistStandard) => void;
+  initialBlueprint?: PM_ChecklistStandard;
 }
 
-export function ChecklistBuilder({ onSave }: ChecklistBuilderProps) {
-  const [code, setCode] = useState("");
-  const [title, setTitle] = useState("");
-  const [maintenanceReason, setMaintenanceReason] = useState("");
-  const [trade, setTrade] = useState("");
-  const [expectedHours, setExpectedHours] = useState(0);
-  const [steps, setSteps] = useState<PM_ScheduleStep[]>([]);
+export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderProps) {
+  const [code, setCode] = useState(initialBlueprint?.ChecklistCode || "");
+  const [title, setTitle] = useState(initialBlueprint?.Title || "");
+  const [maintenanceReason, setMaintenanceReason] = useState(initialBlueprint?.MaintenanceReason || "");
+  const [trade, setTrade] = useState(initialBlueprint?.TradeId || "");
+  const [expectedHours, setExpectedHours] = useState(initialBlueprint?.ExpectedHours || 0);
+  const [steps, setSteps] = useState<PM_ScheduleStep[]>(initialBlueprint?.Steps || []);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
 
   const handleAddStep = () => {
@@ -73,21 +75,25 @@ export function ChecklistBuilder({ onSave }: ChecklistBuilderProps) {
       TradeName: trade,
       ExpectedHours: expectedHours,
       Steps: steps,
-      IsActive: true,
-      Version: 1,
-      CreatedAt: new Date().toISOString(),
+      IsActive: initialBlueprint?.IsActive ?? true,
+      Version: initialBlueprint ? initialBlueprint.Version + 1 : 1,
+      CreatedAt: initialBlueprint?.CreatedAt || new Date().toISOString(),
       UpdatedAt: new Date().toISOString(),
     };
 
-    onSave?.(checklist);
-    alert("Checklist saved successfully!");
+    const result = PM_ChecklistStandardSchema.safeParse(checklist);
+    if (!result.success) {
+      alert(result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("\n"));
+      return;
+    }
+    onSave?.(result.data);
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header Fields */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
-        <h2 className="text-2xl font-bold text-gray-900">Create Checklist Blueprint</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{initialBlueprint ? "Edit" : "Create"} Checklist Blueprint</h2>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -97,6 +103,7 @@ export function ChecklistBuilder({ onSave }: ChecklistBuilderProps) {
             <input
               type="text"
               value={code}
+              disabled={Boolean(initialBlueprint)}
               onChange={(e) => setCode(e.target.value)}
               placeholder="e.g., HVAC-MONTHLY-001"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -141,10 +148,7 @@ export function ChecklistBuilder({ onSave }: ChecklistBuilderProps) {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Select Trade...</option>
-              <option value="HVAC">HVAC</option>
-              <option value="Electrical">Electrical</option>
-              <option value="Plumbing">Plumbing</option>
-              <option value="General Maintenance">General Maintenance</option>
+              {CLASSICAL_TRADES.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </div>
 
@@ -288,10 +292,10 @@ export function ChecklistBuilder({ onSave }: ChecklistBuilderProps) {
                         </label>
                         <input
                           type="number"
-                          value={step.MinThreshold || ""}
+                          value={step.MinThreshold ?? ""}
                           onChange={(e) =>
                             handleUpdateStep(step.StepId, {
-                              MinThreshold: parseFloat(e.target.value) || undefined,
+                              MinThreshold: e.target.value === "" ? undefined : Number(e.target.value),
                             })
                           }
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
@@ -303,10 +307,10 @@ export function ChecklistBuilder({ onSave }: ChecklistBuilderProps) {
                         </label>
                         <input
                           type="number"
-                          value={step.MaxThreshold || ""}
+                          value={step.MaxThreshold ?? ""}
                           onChange={(e) =>
                             handleUpdateStep(step.StepId, {
-                              MaxThreshold: parseFloat(e.target.value) || undefined,
+                              MaxThreshold: e.target.value === "" ? undefined : Number(e.target.value),
                             })
                           }
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"

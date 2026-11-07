@@ -10,6 +10,7 @@ import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LJRole, SiteId } from "@cafm/shared-schema";
+import { useCafmStore } from "@/lib/cafm-store";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -22,6 +23,9 @@ const NAV_ITEMS = [
   ]},
   { section: "Operations", items: [
     { href: "/work-requests", label: "Work Requests", icon: Wrench },
+    { href: "/work-requests#PM", label: "Preventive Maintenance", icon: Wrench },
+    { href: "/work-requests#FJ", label: "Fast Jobs", icon: Wrench },
+    { href: "/work-requests#LJ", label: "Long Jobs", icon: Wrench },
     { href: "/smart-pm", label: "SmartPM", icon: Zap },
     { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
     { href: "/scheduler", label: "Scheduler", icon: Calendar },
@@ -83,6 +87,14 @@ export function Sidebar() {
                 <div className="space-y-1">
                   {item.items.map(({ href, label, icon: Icon }) => {
                     const isActive = pathname === href || pathname.startsWith(href + "/");
+                    if (href.includes("#")) {
+                      return (
+                        <a key={href} href={href} className="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm text-gray-300 hover:bg-gray-800">
+                          <Icon size={18} />
+                          <span className="font-medium">{label}</span>
+                        </a>
+                      );
+                    }
                     return (
                       <Link
                         key={href}
@@ -105,7 +117,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-800">
+      <div className="p-4 border-t border-gray-800">
         <p className="text-xs text-gray-400">© 2026 Enterprise CAFM</p>
       </div>
     </aside>
@@ -113,8 +125,9 @@ export function Sidebar() {
 }
 
 export function TopBar() {
-  const { currentRole, setCurrentRole } = useApp();
-  const { activeSiteId, setActiveSiteId, availableSites, canSwitchSites, activeLJRole, setActiveLJRole } = useSiteContext();
+  const { currentRole, setCurrentRole, setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
+  const { activeSiteId, setActiveSiteId, activeLJRole, setActiveLJRole } = useSiteContext();
+  const { reset } = useCafmStore();
   const roles = ["SiteAdministrator", "ESA_LongJobManager", "PM_Planner", "QA_Inspector", "MobileTechnician", "StandardEmployee"];
 
   const getRoleBadgeColor = (role: string) => {
@@ -141,33 +154,21 @@ export function TopBar() {
           <select
             value={activeSiteId}
             onChange={(e) => {
-              if (canSwitchSites()) {
-                setActiveSiteId(e.target.value as SiteId);
-              }
+              setSelectedBuilding(null);
+              setSelectedFloor(null);
+              setSelectedRoom(null);
+              setActiveSiteId(e.target.value as SiteId);
             }}
-            disabled={!canSwitchSites() && availableSites.length === 1}
             className="px-3 py-2 rounded border border-gray-300 text-sm font-medium bg-gray-50 hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
           >
-            {availableSites.map((site) => (
+            {SITE_IDS.map((site) => (
               <option key={site} value={site}>
-                {getSiteName(site)}
+                {getSiteName(site)} ({site})
               </option>
             ))}
           </select>
-          {availableSites.length > 1 && (
-            <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded">
-              Multi-Site Active
-            </span>
-          )}
         </div>
-
-        {/* Isolation Banner */}
-        {availableSites.length === 1 && (
-          <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
-            <AlertCircle size={14} />
-            <span>Site Isolation Active</span>
-          </div>
-        )}
+        <button onClick={reset} className="px-3 py-2 border rounded text-sm">Reset Demo Data</button>
       </div>
       
       <div className="flex items-center gap-4">

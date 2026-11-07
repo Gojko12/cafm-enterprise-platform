@@ -10,15 +10,23 @@ import {
   EquipmentInspectionView,
   PM_StepDefinition,
 } from "./components";
-import { BaseWorkRequest, Building, Floor, Room, Equipment } from "@cafm/shared-schema";
-import { useFilterStore } from "./lib/store";
+import {
+  BaseWorkRequest,
+  Building,
+  Floor,
+  Room,
+  Equipment,
+  SiteId,
+  WR_Statuses,
+} from "@cafm/shared-schema";
+import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
 
 type AppView = "home" | "checklist" | "scanner" | "inspection";
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
-  const [activeSiteId, setActiveSiteId] = useState<string>("SITE-01");
+  const [activeSiteId, setActiveSiteId] = useState<SiteId>("SITE-01");
   const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("TECH-001");
 
   // State
@@ -39,6 +47,7 @@ export default function App() {
   // Filters
   const filters = useFilterStore((state) => state.filters);
   const setFilter = useFilterStore((state) => state.setFilter);
+  const [appliedFilters, setAppliedFilters] = useState(filters);
 
   // Initialize engine and load data
   useEffect(() => {
@@ -51,25 +60,27 @@ export default function App() {
         const db = await getDB();
 
         // Load locations
-        const buildingsData = await offlineEngine.getBuildings();
+        const [storedBuildings, storedFloors, storedRooms, storedEquipment] =
+          await Promise.all([
+            db.getAll("buildings"),
+            db.getAll("floors"),
+            db.getAll("rooms"),
+            db.getAll("equipment"),
+          ]);
+        const buildingsData = storedBuildings.filter(
+          (building) => building.SiteId === activeSiteId,
+        );
         setBuildings(buildingsData);
-
-        let initialFloors: Floor[] = [];
-        if (buildingsData.length > 0) {
-          initialFloors = await offlineEngine.getFloors(buildingsData[0].bl_id);
-          setFloors(initialFloors);
-
-          if (initialFloors.length > 0) {
-            const roomsData = await offlineEngine.getRooms(
-              buildingsData[0].bl_id,
-              initialFloors[0].LevelName
-            );
-            setRooms(roomsData);
-          }
-        }
+        const initialFloors = storedFloors.filter(
+          (floor) => floor.SiteId === activeSiteId,
+        );
+        setFloors(initialFloors);
+        setRooms(storedRooms.filter((room) => room.SiteId === activeSiteId));
 
         // Load equipment
-        const equipmentData = await offlineEngine.getEquipment();
+        const equipmentData = storedEquipment.filter(
+          (item) => item.SiteId === activeSiteId,
+        );
         setEquipment(equipmentData);
 
         // Load WRs
@@ -166,23 +177,101 @@ export default function App() {
     }
   };
 
+  const persistCreatedRequest = async (request: BaseWorkRequest) => {
+    if (!engine) {
+      throw new Error("The offline work request store is not ready yet.");
+    }
+    await engine.saveWorkRequest(request);
+    setMyWRs((current) => [...current, request]);
+  };
+
+  const handleCreateMobileFJ = async (job: {
+    equipmentCode: string;
+    bl_id: string;
+    levelName: string;
+    roomCode: string;
+    description: string;
+    photoUrl?: string;
+  }) => {
+    const issued = WR_Statuses.find(
+      (status) =>
+        status.Percentage === 50 &&
+        status.ESAWorkType === "Corrective Maintenance",
+    );
+    if (!issued) throw new Error("Issued status configuration is missing.");
+    const now = new Date().toISOString();
+    const request: BaseWorkRequest = {
+      WR_ID: `FJ-${Date.now()}`,
+      JobID: `JOB-${Date.now()}`,
+      WR_Type: "FJ",
+      ESAWorkType: issued.ESAWorkType,
+      Description: job.description,
+      ProblemLocation: `${job.bl_id} / ${job.levelName} / ${job.roomCode}`,
+      EquipmentCodes: [job.equipmentCode],
+      TotalTimeMinutes: 0,
+      CreatedDate: now.slice(0, 10),
+      WorkRequestStatus: issued.WorkRequestStatus,
+      WorkRequestSubstatus: issued.WorkRequestSubstatus,
+      Percentage: issued.Percentage,
+      bl_id: job.bl_id,
+      LevelName: job.levelName,
+      RoomCode: job.roomCode,
+      SiteId: activeSiteId,
+      AssignedCraftpersonIds: [],
+      AssignedUserIds: [currentTechnicianId],
+      CreatedBy: currentTechnicianId,
+      IsFrozen: false,
+      StartDateTBD: false,
+      RequiresSAT: false,
+      RequiresDrawingUpdate: false,
+      RequiresInventoryUpdate: false,
+      AcceptanceGates: [],
+      UpdatedAt: now,
+    };
+    await persistCreatedRequest(request);
+  };
+
+  const handleCreateMobileLJ = async (job: {
+    equipmentCodes: string[];
+    bl_id: string;
+    levelName: string;
+    roomCode?: string;
+    description: string;
+  }) => {
+    const now = new Date().toISOString();
+    const request: BaseWorkRequest = {
+      WR_ID: `LJ-${Date.now()}`,
+      JobID: `JOB-${Date.now()}`,
+      WR_Type: "LJ",
+      ESAWorkType: "Corrective Maintenance",
+      Description: job.description,
+      ProblemLocation: `${job.bl_id} / ${job.levelName}${job.roomCode ? ` / ${job.roomCode}` : ""}`,
+      EquipmentCodes: job.equipmentCodes,
+      TotalTimeMinutes: 0,
+      CreatedDate: now.slice(0, 10),
+      WorkRequestStatus: "Requested",
+      WorkRequestSubstatus: "New Request for Quotation",
+      Percentage: 0,
+      bl_id: job.bl_id,
+      LevelName: job.levelName,
+      RoomCode: job.roomCode,
+      SiteId: activeSiteId,
+      AssignedCraftpersonIds: [],
+      AssignedUserIds: [currentTechnicianId],
+      CreatedBy: currentTechnicianId,
+      IsFrozen: false,
+      StartDateTBD: false,
+      RequiresSAT: false,
+      RequiresDrawingUpdate: false,
+      RequiresInventoryUpdate: false,
+      AcceptanceGates: [],
+      UpdatedAt: now,
+    };
+    await persistCreatedRequest(request);
+  };
+
   const handleApplyFilters = () => {
-    // Re-filter WRs based on current filters
-    let filtered = [...myWRs];
-
-    if (filters.wrId) {
-      filtered = filtered.filter((wr) => wr.WR_ID?.includes(filters.wrId));
-    }
-    if (filters.trade) {
-      filtered = filtered.filter((wr) =>
-        (wr.TradeName || "").toLowerCase().includes((filters.trade || "").toLowerCase())
-      );
-    }
-    if (filters.bl_id) {
-      filtered = filtered.filter((wr) => wr.bl_id === filters.bl_id);
-    }
-
-    setMyWRs(filtered);
+    setAppliedFilters(useFilterStore.getState().filters);
   };
 
   // Render based on current view
@@ -218,6 +307,12 @@ export default function App() {
             equipment={selectedEquipment}
             activeWRs={[]}
             historicalWRs={[]}
+            buildings={buildings}
+            floors={floors}
+            rooms={rooms}
+            equipmentList={equipment}
+            onCreateFJ={handleCreateMobileFJ}
+            onCreateLJ={handleCreateMobileLJ}
             onClose={() => {
               setCurrentView("home");
               setSelectedEquipment(null);
@@ -233,6 +328,7 @@ export default function App() {
               buildings={buildings}
               floors={floors}
               rooms={rooms}
+              equipment={equipment}
               currentFilters={filters}
               onFiltersChange={(newFilters) => {
                 Object.entries(newFilters).forEach(([key, value]) => {
@@ -243,8 +339,8 @@ export default function App() {
             />
 
             <TechnicianHome
-              myWRs={myWRs}
-              unassignedWRs={unassignedWRs}
+              myWRs={applyFilters(myWRs, appliedFilters)}
+              unassignedWRs={applyFilters(unassignedWRs, appliedFilters)}
               onClaimWR={handleClaimWR}
               onOpenWR={handleOpenWR}
             />

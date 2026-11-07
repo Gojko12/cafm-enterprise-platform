@@ -1,11 +1,16 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Plus, MoreVertical, ArrowUp, Eye } from "lucide-react";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LongJobDrawer } from "@/components/modules/long-jobs/LongJobDrawer";
 import { AcceptanceGatesPanel } from "@/components/modules/long-jobs/AcceptanceGatesPanel";
-import { BaseWorkRequest, WR_Type } from "@cafm/shared-schema";
+import { BaseWorkRequest, WR_Statuses, WR_Type } from "@cafm/shared-schema";
+import type { Building, Floor, Room } from "@cafm/shared-schema";
+import { useCafmStore } from "@/lib/cafm-store";
+import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
+import { FastJobModal, type FastJobData } from "@/components/modules/FastJobModal";
+import Link from "next/link";
 
 const mockWorkRequests: BaseWorkRequest[] = [
   {
@@ -97,18 +102,118 @@ const mockWorkRequests: BaseWorkRequest[] = [
 
 export default function WorkRequestsPage() {
   const { activeSiteId, activeLJRole } = useSiteContext();
-  const [workRequests, setWorkRequests] = useState<BaseWorkRequest[]>(
-    mockWorkRequests
-  );
+  const { data, setData } = useCafmStore();
+  const workRequests = data.workRequests;
+  const setWorkRequests = (requests: BaseWorkRequest[]) =>
+    setData((current) => ({ ...current, workRequests: requests }));
+  const [requestType, setRequestType] = useState<WR_Type>("PM");
+  const [bucket, setBucket] = useState<"issued" | "technical" | "cancelled" | "completed">("issued");
+  useEffect(() => {
+    const updateType = () => {
+      const type = window.location.hash.slice(1);
+      if (type === "PM" || type === "FJ" || type === "LJ") setRequestType(type);
+    };
+    updateType();
+    window.addEventListener("hashchange", updateType);
+    return () => window.removeEventListener("hashchange", updateType);
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [fastJobOpen, setFastJobOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<"create" | "view" | "escalate">(
     "create"
   );
   const [selectedWR, setSelectedWR] = useState<BaseWorkRequest | null>(null);
   const [selectedForGates, setSelectedForGates] = useState<BaseWorkRequest | null>(null);
+  const [locationFilter, setLocationFilter] = useState<{
+    building: Building | null;
+    floor: Floor | null;
+    room: Room | null;
+  }>({ building: null, floor: null, room: null });
+  const [selectedEquipmentCodes, setSelectedEquipmentCodes] = useState<string[]>([]);
+  const [textFilter, setTextFilter] = useState("");
+  const [dueDateFrom, setDueDateFrom] = useState("");
+  const [dueDateTo, setDueDateTo] = useState("");
+  const siteBuildings = data.buildings.filter((item) => item.SiteId === activeSiteId);
+  const siteFloors = data.floors.filter((item) => item.SiteId === activeSiteId);
+  const siteRooms = data.rooms.filter((item) => item.SiteId === activeSiteId);
+  const siteEquipment = data.equipment.filter((item) => item.SiteId === activeSiteId);
 
   // Filter by active site
-  const filteredRequests = workRequests.filter((wr) => wr.SiteId === activeSiteId);
+  const siteRequests = workRequests.filter((wr) => wr.SiteId === activeSiteId && wr.WR_Type === requestType);
+  const buckets = [
+    { id: "issued" as const, label: "Issued / On Hold (50–55%)", values: [50, 55] },
+    { id: "technical" as const, label: "Technically Completed (78%)", values: [78] },
+    { id: "cancelled" as const, label: "Cancelled (27%)", values: [27] },
+    { id: "completed" as const, label: "Completed (100%)", values: [100] },
+  ];
+  const filteredRequests = siteRequests.filter((wr) => {
+    if (
+      requestType === "PM" &&
+      !buckets.find((item) => item.id === bucket)?.values.includes(wr.Percentage)
+    ) {
+      return false;
+    }
+    if (locationFilter.building && wr.bl_id !== locationFilter.building.bl_id) return false;
+    if (locationFilter.floor && wr.LevelName !== locationFilter.floor.LevelName) return false;
+    if (locationFilter.room && wr.RoomCode !== locationFilter.room.RoomCode) return false;
+    if (
+      selectedEquipmentCodes.length > 0 &&
+      !wr.EquipmentCodes?.some((code) => selectedEquipmentCodes.includes(code))
+    ) {
+      return false;
+    }
+    if (dueDateFrom && wr.DueDate && wr.DueDate < dueDateFrom) return false;
+    if (dueDateTo && wr.DueDate && wr.DueDate > dueDateTo) return false;
+    const query = textFilter.trim().toLowerCase();
+    return (
+      !query ||
+      wr.WR_ID.toLowerCase().includes(query) ||
+      wr.Description.toLowerCase().includes(query) ||
+      wr.TradeName?.toLowerCase().includes(query)
+    );
+  });
+
+  const handleSubmitFJ = (job: FastJobData) => {
+    const createdAt = new Date().toISOString();
+    const issuedStatus = WR_Statuses.find(
+      (status) =>
+        status.Percentage === 50 &&
+        status.ESAWorkType === "Corrective Maintenance",
+    );
+    if (!issuedStatus) {
+      throw new Error("Issued status configuration is missing.");
+    }
+    const newWR: BaseWorkRequest = {
+      WR_ID: `FJ-${Date.now()}`,
+      JobID: `JOB-${Date.now()}`,
+      WR_Type: "FJ",
+      ESAWorkType: "Corrective Maintenance",
+      Description: job.description,
+      ProblemLocation: `${job.bl_id} / ${job.levelName} / ${job.roomCode}`,
+      CreatedDate: createdAt.slice(0, 10),
+      WorkRequestStatus: issuedStatus.WorkRequestStatus,
+      WorkRequestSubstatus: issuedStatus.WorkRequestSubstatus,
+      Percentage: issuedStatus.Percentage,
+      SiteId: activeSiteId,
+      bl_id: job.bl_id,
+      LevelName: job.levelName,
+      RoomCode: job.roomCode,
+      AssignedCraftpersonIds: [],
+      AssignedUserIds: [],
+      CreatedBy: "current-user",
+      IsFrozen: false,
+      EquipmentCodes: [job.equipmentCode],
+      TotalTimeMinutes: job.timeSpentMinutes,
+      StartDateTBD: false,
+      RequiresSAT: false,
+      RequiresDrawingUpdate: false,
+      RequiresInventoryUpdate: false,
+      AcceptanceGates: [],
+      UpdatedAt: createdAt,
+    };
+    setWorkRequests([...workRequests, newWR]);
+    setFastJobOpen(false);
+  };
 
   const handleCreateLJ = () => {
     setSelectedWR(null);
@@ -130,6 +235,10 @@ export default function WorkRequestsPage() {
 
   const handleSubmitWR = (wr: Partial<BaseWorkRequest>) => {
     if (drawerMode === "create") {
+      if (!wr.bl_id || !wr.LevelName || !wr.TradeId || !wr.Description?.trim()) {
+        alert("A description, trade, building and floor are required.");
+        return;
+      }
       const newWR: BaseWorkRequest = {
         WR_ID: wr.WR_ID || `LJ-${Math.random().toString(36).substring(7).toUpperCase()}-2026`,
         JobID: wr.JobID || `JOB-${Date.now()}`,
@@ -142,9 +251,11 @@ export default function WorkRequestsPage() {
         WorkRequestSubstatus: "New Request for Quotation",
         Percentage: 0,
         SiteId: activeSiteId,
-        bl_id: wr.bl_id || "BL-001",
-        LevelName: wr.LevelName || "Floor 1",
-        RoomCode: wr.RoomCode || "WR-001",
+        bl_id: wr.bl_id,
+        LevelName: wr.LevelName,
+        RoomCode: wr.RoomCode,
+        TradeId: wr.TradeId,
+        TradeName: wr.TradeName,
         AssignedCraftpersonIds: [],
         AssignedUserIds: [],
         CreatedBy: "current-user",
@@ -201,19 +312,116 @@ export default function WorkRequestsPage() {
             Manage Long Jobs (LJ), Fast Jobs (FJ), and PM Work Requests
           </p>
         </div>
-        <button
-          onClick={handleCreateLJ}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-        >
-          <Plus size={20} />
-          Create LJ
-        </button>
+        <div className="flex gap-2">
+          {requestType === "LJ" && (
+            <button
+              onClick={handleCreateLJ}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            >
+              <Plus size={20} />
+              Create LJ
+            </button>
+          )}
+          {requestType === "FJ" && (
+            <button
+              onClick={() => setFastJobOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            >
+              <Plus size={20} />
+              Create FJ
+            </button>
+          )}
+          {requestType === "PM" && (
+            <Link
+              href="/smart-pm"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            >
+              <Plus size={20} />
+              Create PM Schedule
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Site Filter Badge */}
       <div className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
         Viewing: {activeSiteId}
       </div>
+
+      <div className="flex flex-wrap gap-2" aria-label="Work request type">
+        {(["PM", "FJ", "LJ"] as const).map((type) => (
+          <button key={type} onClick={() => setRequestType(type)} aria-pressed={requestType === type}
+            className={`px-4 py-2 rounded ${requestType === type ? "bg-blue-600 text-white" : "bg-white border"}`}>
+            {type === "PM" ? "Preventive Maintenance" : type === "FJ" ? "Fast Jobs" : "Long Jobs"} ({type})
+          </button>
+        ))}
+      </div>
+      {requestType === "PM" && <div className="flex flex-wrap gap-2">
+        {buckets.map((item) => <button key={item.id} onClick={() => setBucket(item.id)}
+          aria-pressed={bucket === item.id}
+          className={`px-3 py-2 rounded text-sm ${bucket === item.id ? "bg-blue-100 text-blue-900" : "bg-white border"}`}>
+          {item.label} ({siteRequests.filter((wr) => item.values.includes(wr.Percentage)).length})
+        </button>)}
+      </div>}
+
+      <section className="bg-white border rounded-lg p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Filter Work Requests</h2>
+          <button
+            type="button"
+            onClick={() => {
+              setLocationFilter({ building: null, floor: null, room: null });
+              setSelectedEquipmentCodes([]);
+              setTextFilter("");
+              setDueDateFrom("");
+              setDueDateTo("");
+              setBucket("issued");
+            }}
+            className="px-3 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+          >
+            Reset Filter
+          </button>
+        </div>
+        <LocationEquipmentPickerGroup
+          buildings={siteBuildings}
+          floors={siteFloors}
+          rooms={siteRooms}
+          equipment={siteEquipment}
+          selectedBuilding={locationFilter.building}
+          selectedFloor={locationFilter.floor}
+          selectedRoom={locationFilter.room}
+          selectedEquipmentCodes={selectedEquipmentCodes}
+          onLocationChange={setLocationFilter}
+          onEquipmentChange={setSelectedEquipmentCodes}
+        />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input
+            value={textFilter}
+            onChange={(event) => setTextFilter(event.target.value)}
+            placeholder="Search WR ID, trade, description..."
+            aria-label="Search work requests"
+            className="px-3 py-2 border rounded"
+          />
+          <label className="text-sm text-gray-600">
+            Due From
+            <input
+              type="date"
+              value={dueDateFrom}
+              onChange={(event) => setDueDateFrom(event.target.value)}
+              className="mt-1 block w-full px-3 py-2 border rounded"
+            />
+          </label>
+          <label className="text-sm text-gray-600">
+            Due To
+            <input
+              type="date"
+              value={dueDateTo}
+              onChange={(event) => setDueDateTo(event.target.value)}
+              className="mt-1 block w-full px-3 py-2 border rounded"
+            />
+          </label>
+        </div>
+      </section>
 
       {/* Work Requests List */}
       <div className="grid gap-4">
@@ -357,11 +565,17 @@ export default function WorkRequestsPage() {
 
       {/* Drawer */}
       <LongJobDrawer
+        key={`${activeSiteId}-${drawerMode}-${selectedWR?.WR_ID || "new"}-${drawerOpen}`}
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onSubmit={handleSubmitWR}
         workRequest={selectedWR}
         mode={drawerMode}
+      />
+      <FastJobModal
+        isOpen={fastJobOpen}
+        onClose={() => setFastJobOpen(false)}
+        onSubmit={handleSubmitFJ}
       />
     </div>
   );

@@ -3,14 +3,21 @@
 import React, { useState, useMemo } from "react";
 import { Calendar, MapPin, CheckCircle, Clock, AlertCircle } from "lucide-react";
 import { useApp } from "@/lib/hooks/useApp";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { getSampleData } from "@/lib/utils/sampleData";
-import type { Room } from "@cafm/shared-schema";
+import type { Building, Floor, Room } from "@cafm/shared-schema";
+import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 
 export function DeskReservations() {
   const { useSampleData } = useApp();
-  const sampleData = useSampleData ? getSampleData() : { rooms: [], desks: [] };
+  const { activeSiteId } = useSiteContext();
+  const sampleData = useSampleData
+    ? getSampleData()
+    : { buildings: [], floors: [], rooms: [], desks: [] };
 
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
+  const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState(
     new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
@@ -19,8 +26,18 @@ export function DeskReservations() {
 
   // Filter desk-reservable rooms
   const reservableRooms = useMemo(() => {
-    return sampleData.rooms.filter((r) => r.IsDeskReservable);
-  }, [sampleData.rooms]);
+    return sampleData.rooms.filter(
+      (room) => room.SiteId === activeSiteId && room.IsDeskReservable,
+    );
+  }, [sampleData.rooms, activeSiteId]);
+  const siteBuildings = useMemo(
+    () => sampleData.buildings.filter((building) => building.SiteId === activeSiteId),
+    [sampleData.buildings, activeSiteId],
+  );
+  const siteFloors = useMemo(
+    () => sampleData.floors.filter((floor) => floor.SiteId === activeSiteId),
+    [sampleData.floors, activeSiteId],
+  );
 
   // Get available desks for selected room and date range
   const getDesksForRoom = (room: Room) => {
@@ -66,24 +83,22 @@ export function DeskReservations() {
 
       {/* Filters */}
       <div className="max-w-7xl mx-auto bg-white rounded-lg border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-gray-700">Room</label>
-          <select
-            value={selectedRoom?.RoomCode || ""}
-            onChange={(e) => {
-              const room = reservableRooms.find((r) => r.RoomCode === e.target.value);
-              setSelectedRoom(room || null);
+        <div className="md:col-span-4">
+          <LocationEquipmentPickerGroup
+            buildings={siteBuildings}
+            floors={siteFloors}
+            rooms={reservableRooms}
+            selectedBuilding={selectedBuilding}
+            selectedFloor={selectedFloor}
+            selectedRoom={selectedRoom}
+            showEquipment={false}
+            onLocationChange={({ building, floor, room }) => {
+              setSelectedBuilding(building);
+              setSelectedFloor(floor);
+              setSelectedRoom(room);
               setSelectedDesk(null);
             }}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">-- Select Room --</option>
-            {reservableRooms.map((r) => (
-              <option key={r.RoomCode} value={r.RoomCode}>
-                {r.RoomCode} - {r.Name}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
         <div className="flex flex-col gap-2">

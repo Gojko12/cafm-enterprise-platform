@@ -3,6 +3,7 @@
 import React, { createContext, ReactNode, useState, useCallback } from "react";
 import { UserRole, ROLE_PERMISSIONS } from "@cafm/shared-schema";
 import { SiteContextProvider } from "@/lib/contexts/SiteContext";
+import { CafmStoreProvider } from "@/lib/cafm-store";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 
 export interface AppContextType {
@@ -54,9 +55,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={value}>
-      <SiteContextProvider>
-        {children}
-      </SiteContextProvider>
+      <CafmStoreProvider>
+        <SiteContextProvider>{children}</SiteContextProvider>
+      </CafmStoreProvider>
     </AppContext.Provider>
   );
 }

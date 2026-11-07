@@ -1,8 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ChecklistBuilder } from "@/components/modules/ChecklistBuilder";
-import type { PM_ChecklistStandard } from "@cafm/shared-schema";
+import type {
+  Building,
+  Floor,
+  PM_ChecklistStandard,
+  PM_Schedule,
+  Room,
+} from "@cafm/shared-schema";
+import { useCafmStore } from "@/lib/cafm-store";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 
 const SAMPLE_SCHEDULES = [
   {
@@ -19,15 +28,125 @@ type TabType = "schedules" | "blueprints" | "generator";
 
 export default function SmartPMPage() {
   const [activeTab, setActiveTab] = useState<TabType>("schedules");
-  const [blueprints, setBlueprints] = useState<PM_ChecklistStandard[]>([]);
+  const { data, setData } = useCafmStore();
+  const { activeSiteId } = useSiteContext();
+  const [editing, setEditing] = useState<PM_ChecklistStandard | undefined>();
+  const [builderVersion, setBuilderVersion] = useState(0);
+  const blueprints = data.blueprints.filter((item) => item.SiteId === activeSiteId);
   const [generatorMode, setGeneratorMode] = useState<"single" | "selected" | "horizon">(
     "horizon"
   );
   const [horizonDays, setHorizonDays] = useState(30);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [scheduleChecklistCode, setScheduleChecklistCode] = useState("");
+  const [scheduleFrequency, setScheduleFrequency] =
+    useState<PM_Schedule["Frequency"]>("Monthly");
+  const [scheduleMeterType, setScheduleMeterType] = useState("");
+  const [scheduleMeterInterval, setScheduleMeterInterval] = useState(1);
+  const [scheduleDueDate, setScheduleDueDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [scheduleLeadTime, setScheduleLeadTime] = useState(3);
+  const [scheduleMarginWindow, setScheduleMarginWindow] = useState(5);
+  const [scheduleLocation, setScheduleLocation] = useState<{
+    building: Building | null;
+    floor: Floor | null;
+    room: Room | null;
+  }>({ building: null, floor: null, room: null });
+  const [scheduleEquipmentCodes, setScheduleEquipmentCodes] = useState<string[]>([]);
+  const siteBuildings = useMemo(
+    () => data.buildings.filter((item) => item.SiteId === activeSiteId),
+    [data.buildings, activeSiteId],
+  );
+  const siteFloors = useMemo(
+    () => data.floors.filter((item) => item.SiteId === activeSiteId),
+    [data.floors, activeSiteId],
+  );
+  const siteRooms = useMemo(
+    () => data.rooms.filter((item) => item.SiteId === activeSiteId),
+    [data.rooms, activeSiteId],
+  );
+  const siteEquipment = useMemo(
+    () => data.equipment.filter((item) => item.SiteId === activeSiteId),
+    [data.equipment, activeSiteId],
+  );
+  const visibleSchedules = [
+    ...SAMPLE_SCHEDULES,
+    ...data.schedules
+      .filter((schedule) => schedule.SiteId === activeSiteId)
+      .map((schedule) => ({
+        scheduleId: schedule.ScheduleId,
+        checklistCode: schedule.ChecklistCode,
+        equipmentCodes: schedule.EquipmentCodes,
+        frequency: schedule.Frequency,
+        leadTimeDays: schedule.LeadTimeDays,
+        marginDays: schedule.MarginWindowDays,
+      })),
+  ];
+
+  const handleCreateSchedule = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!scheduleChecklistCode.trim()) {
+      alert("Enter a checklist code.");
+      return;
+    }
+    if (scheduleEquipmentCodes.length === 0 && !scheduleLocation.building) {
+      alert("Select equipment or a building, floor, or room target.");
+      return;
+    }
+    if (
+      scheduleFrequency === "Meter-based" &&
+      (!scheduleMeterType.trim() || scheduleMeterInterval <= 0)
+    ) {
+      alert("Meter-based schedules require a meter type and a positive interval.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const schedule: PM_Schedule = {
+      ScheduleId: `PM-${Date.now()}`,
+      ChecklistCode: scheduleChecklistCode.trim(),
+      SiteId: activeSiteId,
+      EquipmentCodes: scheduleEquipmentCodes,
+      bl_id: scheduleLocation.building?.bl_id,
+      LevelName: scheduleLocation.floor?.LevelName,
+      RoomCode: scheduleLocation.room?.RoomCode,
+      Frequency: scheduleFrequency,
+      FrequencyInterval: 1,
+      ...(scheduleFrequency === "Meter-based"
+        ? {
+            MeterType: scheduleMeterType.trim(),
+            MeterInterval: scheduleMeterInterval,
+          }
+        : {}),
+      LeadTimeDays: scheduleLeadTime,
+      MarginWindowDays: scheduleMarginWindow,
+      NextDueDate: scheduleDueDate,
+      IsActive: true,
+      CreatedBy: "current-user",
+      CreatedAt: now,
+      UpdatedAt: now,
+    };
+    setData((current) => ({
+      ...current,
+      schedules: [...current.schedules, schedule],
+    }));
+    setScheduleModalOpen(false);
+    setScheduleChecklistCode("");
+    setScheduleEquipmentCodes([]);
+    setScheduleLocation({ building: null, floor: null, room: null });
+  };
 
   const handleBlueprintSave = (blueprint: PM_ChecklistStandard) => {
-    setBlueprints([...blueprints, blueprint]);
-    setActiveTab("schedules");
+    if (!editing && data.blueprints.some((item) => item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)) {
+      alert("A blueprint with this code already exists at this site.");
+      return;
+    }
+    setData((current) => ({
+      ...current,
+      blueprints: [...current.blueprints.filter((item) => !(item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)), { ...blueprint, SiteId: activeSiteId }],
+    }));
+    setEditing(undefined);
+    setBuilderVersion((version) => version + 1);
   };
 
   const handleGenerateWRs = () => {
@@ -87,7 +206,16 @@ export default function SmartPMPage() {
         <div className="bg-white rounded-b-lg p-6">
           {activeTab === "schedules" && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">PM Schedules</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-900">PM Schedules</h2>
+                <button
+                  type="button"
+                  onClick={() => setScheduleModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Create PM Schedule
+                </button>
+              </div>
               <div className="overflow-x-auto border border-gray-200 rounded-lg">
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b border-gray-200">
@@ -113,7 +241,7 @@ export default function SmartPMPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {SAMPLE_SCHEDULES.map((schedule) => (
+                    {visibleSchedules.map((schedule) => (
                       <tr key={schedule.scheduleId} className="hover:bg-gray-50">
                         <td className="px-6 py-4 text-sm font-medium text-blue-600">
                           {schedule.scheduleId}
@@ -150,7 +278,16 @@ export default function SmartPMPage() {
 
           {activeTab === "blueprints" && (
             <div className="space-y-6">
-              <ChecklistBuilder onSave={handleBlueprintSave} />
+              <h2 className="text-xl font-semibold">Saved Blueprints</h2>
+              {blueprints.length === 0 && <p>No blueprints for this site.</p>}
+              {blueprints.map((blueprint) => (
+                <div key={blueprint.ChecklistCode} className="flex items-center justify-between border rounded p-3">
+                  <span>{blueprint.ChecklistCode} — {blueprint.Title}</span>
+                  <button className="text-blue-600" onClick={() => { setEditing(blueprint); setBuilderVersion((version) => version + 1); }}>Edit</button>
+                </div>
+              ))}
+              <button className="text-blue-600" onClick={() => { setEditing(undefined); setBuilderVersion((version) => version + 1); }}>New Blueprint</button>
+              <ChecklistBuilder key={`${activeSiteId}-${builderVersion}`} initialBlueprint={editing} onSave={handleBlueprintSave} />
             </div>
           )}
 
@@ -258,6 +395,146 @@ export default function SmartPMPage() {
           )}
         </div>
       </div>
+      {scheduleModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleCreateSchedule}
+            className="w-full max-w-3xl max-h-[92vh] overflow-y-auto bg-white rounded-xl shadow-xl"
+          >
+            <header className="px-6 py-4 border-b flex items-center justify-between">
+              <h2 className="text-xl font-bold">Create PM Schedule</h2>
+              <button
+                type="button"
+                onClick={() => setScheduleModalOpen(false)}
+                aria-label="Close PM Schedule modal"
+                className="p-2"
+              >
+                ✕
+              </button>
+            </header>
+            <div className="p-6 space-y-4">
+              <label className="block text-sm font-medium">
+                Checklist Code
+                <input
+                  required
+                  value={scheduleChecklistCode}
+                  onChange={(event) => setScheduleChecklistCode(event.target.value)}
+                  className="mt-1 w-full px-3 py-2 border rounded"
+                  placeholder="e.g. HVAC-MONTHLY-001"
+                />
+              </label>
+              <LocationEquipmentPickerGroup
+                buildings={siteBuildings}
+                floors={siteFloors}
+                rooms={siteRooms}
+                equipment={siteEquipment}
+                selectedBuilding={scheduleLocation.building}
+                selectedFloor={scheduleLocation.floor}
+                selectedRoom={scheduleLocation.room}
+                selectedEquipmentCodes={scheduleEquipmentCodes}
+                onLocationChange={setScheduleLocation}
+                onEquipmentChange={setScheduleEquipmentCodes}
+              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="block text-sm font-medium">
+                  Frequency
+                  <select
+                    value={scheduleFrequency}
+                    onChange={(event) =>
+                      setScheduleFrequency(event.target.value as PM_Schedule["Frequency"])
+                    }
+                    className="mt-1 w-full px-3 py-2 border rounded"
+                  >
+                    {["Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Meter-based"].map(
+                      (frequency) => (
+                        <option key={frequency} value={frequency}>
+                          {frequency}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </label>
+                <label className="block text-sm font-medium">
+                  Next Due Date
+                  <input
+                    type="date"
+                    required
+                    value={scheduleDueDate}
+                    onChange={(event) => setScheduleDueDate(event.target.value)}
+                    className="mt-1 w-full px-3 py-2 border rounded"
+                  />
+                </label>
+                <label className="block text-sm font-medium">
+                  Lead Time Days
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={scheduleLeadTime}
+                    onChange={(event) => setScheduleLeadTime(Number(event.target.value))}
+                    className="mt-1 w-full px-3 py-2 border rounded"
+                  />
+                </label>
+                <label className="block text-sm font-medium">
+                  Margin Window Days
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={scheduleMarginWindow}
+                    onChange={(event) =>
+                      setScheduleMarginWindow(Number(event.target.value))
+                    }
+                    className="mt-1 w-full px-3 py-2 border rounded"
+                  />
+                </label>
+                {scheduleFrequency === "Meter-based" && (
+                  <>
+                    <label className="block text-sm font-medium">
+                      Meter Type
+                      <input
+                        required
+                        value={scheduleMeterType}
+                        onChange={(event) => setScheduleMeterType(event.target.value)}
+                        className="mt-1 w-full px-3 py-2 border rounded"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium">
+                      Meter Interval
+                      <input
+                        type="number"
+                        required
+                        min="0.01"
+                        step="any"
+                        value={scheduleMeterInterval}
+                        onChange={(event) =>
+                          setScheduleMeterInterval(Number(event.target.value))
+                        }
+                        className="mt-1 w-full px-3 py-2 border rounded"
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+            </div>
+            <footer className="px-6 py-4 border-t flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setScheduleModalOpen(false)}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Create Schedule
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

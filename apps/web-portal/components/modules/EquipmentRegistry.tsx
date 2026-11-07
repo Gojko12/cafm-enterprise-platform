@@ -11,13 +11,14 @@ import {
   ColumnDef,
   flexRender,
 } from "@tanstack/react-table";
-import { useApp } from "@/lib/hooks/useApp";
-import { getSampleData } from "@/lib/utils/sampleData";
+import { useCafmStore } from "@/lib/cafm-store";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
 import type { Equipment } from "@cafm/shared-schema";
 
 export function EquipmentRegistry() {
-  const { useSampleData } = useApp();
-  const sampleData = useSampleData ? getSampleData() : { equipment: [] };
+  const { data } = useCafmStore();
+  const { activeSiteId } = useSiteContext();
+  const equipment = useMemo(() => data.equipment.filter((item) => item.SiteId === activeSiteId), [data.equipment, activeSiteId]);
 
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
@@ -92,14 +93,14 @@ export function EquipmentRegistry() {
 
   // Filter data
   const filteredData = useMemo(() => {
-    return sampleData.equipment.filter((eq) =>
+    return equipment.filter((eq) =>
       eq.EquipmentCode.toLowerCase().includes(filterText.toLowerCase()) ||
       eq.EquipmentName.toLowerCase().includes(filterText.toLowerCase()) ||
       eq.LocalEquipmentCode
         ?.toLowerCase()
         .includes(filterText.toLowerCase()),
     );
-  }, [sampleData.equipment, filterText]);
+  }, [equipment, filterText]);
 
   // Create table instance
   const table = useReactTable({
@@ -295,7 +296,7 @@ export function EquipmentRegistry() {
       {detailsOpen && (
         <div className="max-w-7xl mx-auto bg-blue-50 rounded-lg border border-blue-200 p-6">
           {(() => {
-            const equipment = sampleData.equipment.find(
+            const equipment = data.equipment.find(
               (e) => e.EquipmentCode === detailsOpen,
             );
             return equipment ? (

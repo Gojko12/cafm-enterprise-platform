@@ -62,6 +62,7 @@ export const PM_ScheduleStepSchema = z
 
 export const PM_ChecklistStandardSchema = z.object({
   ChecklistCode: z.string().min(1),
+  SiteId: SiteIdSchema.optional(),
   Title: z.string().min(1),
   MaintenanceReason: z.string().min(1),
   TradeId: z.string().min(1),

@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { SiteIdSchema } from "./locations.js";
 
+export const CLASSICAL_TRADES = [
+  "Mechanical", "Civil", "Electrical", "MultiTechnic", "Cleaning", "HeavyGang", "Catering",
+] as const;
+export const ClassicalTradeSchema = z.enum(CLASSICAL_TRADES);
+export type ClassicalTrade = z.infer<typeof ClassicalTradeSchema>;
+
 export const TradeSchema = z.object({
   TradeId: z.string().min(1),
   TradeCode: z.string().min(1),

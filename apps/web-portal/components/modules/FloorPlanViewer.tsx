@@ -3,12 +3,12 @@
 import React, { useState, useRef } from "react";
 import { ZoomIn, ZoomOut, Info, AlertCircle } from "lucide-react";
 import { useApp } from "@/lib/hooks/useApp";
-import { getSampleData } from "@/lib/utils/sampleData";
+import { useCafmStore } from "@/lib/cafm-store";
 import type { Room } from "@cafm/shared-schema";
 
 export function FloorPlanViewer() {
-  const { selectedFloor, useSampleData } = useApp();
-  const sampleData = useSampleData ? getSampleData() : { rooms: [] };
+  const { selectedFloor } = useApp();
+  const { data: sampleData } = useCafmStore();
 
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panX, setPanX] = useState(0);
