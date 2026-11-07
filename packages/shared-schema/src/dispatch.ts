@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SiteIdSchema } from "./locations.js";
 
 export const CalendarDateSchema = z.iso.date();
+export const LocalTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const LocalDateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/)
   .refine((value) => CalendarDateSchema.safeParse(value.slice(0, 10)).success, "Invalid local date and time");
 export const LocationFreezeSchema = z.object({
@@ -31,9 +32,16 @@ export const CraftpersonAbsenceSchema = z.object({
   startDate: CalendarDateSchema,
   endDate: CalendarDateSchema,
   isFullDay: z.boolean(),
+  startTime: LocalTimeSchema.optional(),
+  endTime: LocalTimeSchema.optional(),
   unavailableHoursPerDay: z.number().nonnegative().default(8),
   status: z.enum(["Approved", "Pending", "Cancelled"]),
   notes: z.string(),
-}).refine((absence) => absence.startDate <= absence.endDate, { path: ["endDate"], message: "End date must not precede start date." });
+}).superRefine((absence, context) => {
+  if (absence.startDate > absence.endDate) context.addIssue({ code: "custom", path: ["endDate"], message: "End date must not precede start date." });
+  if (!absence.isFullDay && ((absence.startTime && !absence.endTime) || (!absence.startTime && absence.endTime) || (absence.startTime && absence.endTime && absence.startTime >= absence.endTime))) {
+    context.addIssue({ code: "custom", path: ["endTime"], message: "Provide a start and end time with end after start." });
+  }
+});
 
 export type CraftpersonAbsence = z.infer<typeof CraftpersonAbsenceSchema>;

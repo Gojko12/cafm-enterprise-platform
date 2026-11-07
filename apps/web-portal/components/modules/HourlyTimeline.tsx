@@ -1,0 +1,131 @@
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
+import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import type { BaseWorkRequest, CraftpersonAbsence, LocationFreeze } from "@cafm/shared-schema";
+import type { DemoData } from "../../lib/cafm-data";
+import { absenceInterval, dailyCapacity, fromWallMinutes, intervalFor, wallMinutes } from "../../lib/dispatch";
+import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "../../lib/location-freezes";
+
+type Person = DemoData["craftspeople"][number];
+type Preview = { wr: BaseWorkRequest; person: string; start: string; end: string };
+const HOUR_WIDTH = 36;
+
+function weekLabel(day: string) {
+  const date = new Date(`${day}T00:00:00Z`);
+  const thursday = new Date(date);
+  thursday.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const first = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((thursday.getTime() - first.getTime()) / 86400000 + 1) / 7);
+  return `w.${week} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit }: {
+  dates: string[]; people: Person[]; requests: BaseWorkRequest[]; absences: CraftpersonAbsence[]; freezes: LocationFreeze[];
+  site: string; firstHour: number; lastHour: number;
+  visible: (wr: BaseWorkRequest) => boolean;
+  onMove: (id: string, person: string, start: string, end: string, from?: string) => void;
+  onOpen: (id: string) => void;
+  onEdit: (wr: BaseWorkRequest, person: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState<string[]>([]);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const cleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanup.current?.(), []);
+  const width = (lastHour - firstHour) * HOUR_WIDTH;
+  const weeks: Array<{ label: string; count: number }> = [];
+  for (const day of dates) {
+    const label = weekLabel(day), last = weeks[weeks.length - 1];
+    if (last?.label === label) last.count++;
+    else weeks.push({ label, count: 1 });
+  }
+  const displayed = requests.map((wr) => preview?.wr.WR_ID === wr.WR_ID ? {
+    ...wr,
+    CraftpersonAssignments: [...(wr.CraftpersonAssignments ?? []).filter((entry) => entry.craftpersonId !== preview.person), {
+      craftpersonId: preview.person, assignedStartDateTime: preview.start, assignedEndDateTime: preview.end,
+    }],
+  } : wr);
+  const resize = (event: React.MouseEvent, wr: BaseWorkRequest, person: string, edge: "start" | "end") => {
+    event.preventDefault();
+    event.stopPropagation();
+    const interval = intervalFor(wr, person);
+    if (!interval) return;
+    cleanup.current?.();
+    const startX = event.clientX;
+    let nextStart = interval.assignedStartDateTime, nextEnd = interval.assignedEndDateTime;
+    const move = (e: MouseEvent) => {
+      const delta = Math.round((e.clientX - startX) / (HOUR_WIDTH / 2)) * 30;
+      const start = wallMinutes(interval.assignedStartDateTime), end = wallMinutes(interval.assignedEndDateTime);
+      nextStart = fromWallMinutes(edge === "start" ? Math.min(start + delta, end - 30) : start);
+      nextEnd = fromWallMinutes(edge === "end" ? Math.max(end + delta, start + 30) : end);
+      setPreview({ wr, person, start: nextStart, end: nextEnd });
+    };
+    const up = () => {
+      cleanup.current?.();
+      setPreview(null);
+      if (nextStart !== interval.assignedStartDateTime || nextEnd !== interval.assignedEndDateTime) onMove(wr.WR_ID, person, nextStart, nextEnd, person);
+    };
+    const clear = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); cleanup.current = null; };
+    cleanup.current = clear;
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+  return <div className="min-w-0 flex-1 overflow-auto rounded border bg-white">
+    <table className="border-collapse text-xs"><thead><tr><th rowSpan={2} className="min-w-48 p-2 text-left">Craftsperson</th>{weeks.map((week, index) => <th key={`${week.label}-${index}`} colSpan={week.count} className="border-l">{week.label}</th>)}</tr><tr>
+      {dates.map((day) => <th key={day} className="border-l" style={{ minWidth: width }}><div>{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][new Date(`${day}T00:00:00Z`).getUTCDay()]} {day.slice(8)}</div><div className="flex font-normal">{Array.from({ length: lastHour - firstHour }, (_, i) => <span key={i} style={{ width: HOUR_WIDTH }} className="shrink-0 border-l">{String(firstHour + i).padStart(2, "0")}</span>)}</div></th>)}</tr></thead>
+      <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => <React.Fragment key={trade}>
+        <tr className="bg-slate-100"><th colSpan={dates.length + 1} className="p-2 text-left"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th></tr>
+        {!collapsed.includes(trade) && people.filter((person) => person.Trade === trade).map((person) => <tr key={person.id}>
+          <th className="border-t p-2 text-left align-top">{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal">{person.Trade} · {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
+          {dates.map((day) => {
+            const start = wallMinutes(`${day}T00:00`) + firstHour * 60, end = start + (lastHour - firstHour) * 60;
+            const cap = dailyCapacity(displayed, absences, site, person.id, day, person.ShiftHours, person.shiftStart, person.shiftEnd);
+            const entries = cap.assigned.filter(visible).map((wr) => ({ wr, interval: intervalFor(wr, person.id) })).filter((item) => item.interval && wallMinutes(item.interval.assignedEndDateTime) > start && wallMinutes(item.interval.assignedStartDateTime) < end);
+            const shiftStart = wallMinutes(`${day}T${person.shiftStart ?? "07:00"}`), shiftEnd = wallMinutes(`${day}T${person.shiftEnd ?? "15:30"}`);
+            return <td key={day} className="border align-top" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+              event.preventDefault();
+              let payload: unknown;
+              try {
+                payload = JSON.parse(event.dataTransfer.getData("application/json"));
+              } catch { window.alert("Could not read the dragged work request."); return; }
+              if (!payload || typeof payload !== "object" || !("id" in payload) || typeof payload.id !== "string") { window.alert("Invalid dragged work request."); return; }
+              const wr = requests.find((item) => item.WR_ID === payload.id);
+              if (!wr) { window.alert("The dragged work request is no longer available."); return; }
+              const from = "from" in payload && typeof payload.from === "string" ? payload.from : undefined;
+              const previous = from ? intervalFor(wr, from) : null;
+              const duration = previous ? wallMinutes(previous.assignedEndDateTime) - wallMinutes(previous.assignedStartDateTime) : Math.max(30, (wr.ExpectedHours ?? 1) * 60);
+              const slot = start + Math.max(0, Math.min(lastHour - firstHour - 1, Math.floor((event.clientX - event.currentTarget.getBoundingClientRect().left) / HOUR_WIDTH))) * 60;
+              onMove(wr.WR_ID, person.id, fromWallMinutes(slot), fromWallMinutes(slot + duration), from);
+            }}><div className="relative" style={{ width, height: Math.max(56, 32 + entries.length * 28) }}>
+              {Array.from({ length: lastHour - firstHour }, (_, index) => {
+                return <div key={index} className="absolute inset-y-0 border-l bg-white" style={{ left: index * HOUR_WIDTH, width: HOUR_WIDTH }} />;
+              })}
+              {[[start, Math.min(end, shiftStart)], [Math.max(start, shiftEnd), end]].map(([left, right], index) => right > left ? <div key={index} className="pointer-events-none absolute inset-y-0 bg-slate-100/80" style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH }} /> : null)}
+              {cap.leave.map((leave) => {
+                const interval = absenceInterval(leave, day);
+                if (!interval) return null;
+                const left = Math.max(start, wallMinutes(interval[0])), right = Math.min(end, wallMinutes(interval[1]));
+                if (right <= left) return null;
+                const color = leave.absenceType === "Vacation" ? "bg-amber-100/90 text-amber-900" : leave.absenceType === "Training" ? "bg-indigo-100/90 text-indigo-900" : leave.absenceType === "SickLeave" ? "bg-rose-100/90 text-rose-900" : "bg-teal-100/90 text-teal-900";
+                return <div key={leave.id} className={`pointer-events-none absolute inset-y-0 overflow-hidden border ${color}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, ...(leave.absenceType === "Vacation" ? { backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 6px, rgba(180, 83, 9, 0.1) 6px, rgba(180, 83, 9, 0.1) 9px)" } : {}) }} title={leave.absenceType}>{leave.absenceType === "Vacation" ? "🏖" : leave.absenceType === "Training" ? "🎓" : leave.absenceType === "SickLeave" ? "🤒" : "●"} {leave.absenceType}</div>;
+              })}
+              <div className="pointer-events-none absolute left-1 top-0">{cap.allocated.toFixed(1)} / {cap.available.toFixed(1)} h <span className="inline-block h-1 w-16 bg-slate-300"><span className={`block h-1 ${cap.allocated > cap.available ? "bg-red-600" : "bg-green-600"}`} style={{ width: `${cap.available ? Math.min(100, 100 * cap.allocated / cap.available) : cap.allocated ? 100 : 0}%` }} /></span></div>
+              {entries.map(({ wr, interval }, index) => {
+                if (!interval) return null;
+                const left = Math.max(start, wallMinutes(interval.assignedStartDateTime)), right = Math.min(end, wallMinutes(interval.assignedEndDateTime));
+                const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
+                const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}`;
+                const editable = ![27, 78, 100].includes(wr.Percentage);
+                return <div key={wr.WR_ID} title={title} draggable={editable} onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID, from: person.id }))} className={`absolute flex h-6 items-center overflow-hidden rounded text-white ${wr.WR_Type === "FJ" ? "bg-amber-500" : wr.WR_Type === "LJ" ? "bg-purple-700" : "bg-blue-500"}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
+                  {editable && left === wallMinutes(interval.assignedStartDateTime) && <span role="separator" aria-label="Resize start" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "start")} />}
+                  <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_ID}{conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
+                  {editable && <><button aria-label={`Edit time for ${wr.WR_ID}`} onClick={() => onEdit(wr, person.id)}>✎</button><button aria-label={`Shorten ${wr.WR_ID}`} onClick={() => onMove(wr.WR_ID, person.id, interval.assignedStartDateTime, fromWallMinutes(Math.max(wallMinutes(interval.assignedStartDateTime) + 30, wallMinutes(interval.assignedEndDateTime) - 30)), person.id)}>−</button><button aria-label={`Extend ${wr.WR_ID}`} onClick={() => onMove(wr.WR_ID, person.id, interval.assignedStartDateTime, fromWallMinutes(wallMinutes(interval.assignedEndDateTime) + 30), person.id)}>+</button></>}
+                  {editable && right === wallMinutes(interval.assignedEndDateTime) && <span role="separator" aria-label="Resize end" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "end")} />}
+                </div>;
+              })}
+            </div></td>;
+          })}
+        </tr>)}
+      </React.Fragment>)}</tbody></table>
+  </div>;
+}

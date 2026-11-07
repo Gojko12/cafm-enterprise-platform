@@ -88,6 +88,18 @@ describe("portal synchronization", () => {
     expect(await db.getAllFromIndex("photoQueue", "by-status", "PENDING")).toHaveLength(0);
   });
 
+  it("preserves per-person assignment times when synchronizing mobile edits", async () => {
+    const assigned = { ...original, AssignedCraftpersonIds: ["TECH-001"], CraftpersonAssignments: [{ craftpersonId: "TECH-001", assignedStartDateTime: "2026-11-09T08:00", assignedEndDateTime: "2026-11-09T11:30" }] };
+    state.workRequests = [assigned];
+    const db = await getDB();
+    await db.put("workRequests", assigned);
+    const engine = new OfflineEngine();
+    await engine.saveWorkRequest({ ...assigned, Description: "Mobile update" });
+    expect(await engine.syncNow()).toMatchObject({ pending: 0 });
+    expect(state.workRequests[0].CraftpersonAssignments).toEqual(assigned.CraftpersonAssignments);
+    expect((await db.get("workRequests", "WR-1"))?.CraftpersonAssignments).toEqual(assigned.CraftpersonAssignments);
+  });
+
   it("preserves archived request histories when mobile pushes another request", async () => {
     const archived = { ...original, WR_ID: "DELETED-1", Activity: [{
       id: "delete-1", kind: "log" as const, actorId: "admin", actorName: "Admin",

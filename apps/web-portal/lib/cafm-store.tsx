@@ -17,8 +17,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v6";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v7";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
@@ -136,8 +136,9 @@ function seedData(): DemoData {
       allowPM: number === 2, allowFJ: false, allowLJ: false,
     }))),
     craftpersonAbsences: sites.flatMap((site) => [
-      { id: `${site}-leave-1`, siteId: site, craftpersonId: `S${site.slice(-2)}-C1`, absenceType: "Vacation" as const, startDate: "2026-11-05", endDate: "2026-11-06", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved" as const, notes: "Annual leave" },
-      { id: `${site}-leave-2`, siteId: site, craftpersonId: `S${site.slice(-2)}-C2`, absenceType: "SickLeave" as const, startDate: "2026-11-06", endDate: "2026-11-07", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved" as const, notes: "" },
+      { id: `${site}-leave-1`, siteId: site, craftpersonId: `S${site.slice(-2)}-C1`, absenceType: "Vacation" as const, startDate: "2026-11-09", endDate: "2026-11-10", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved" as const, notes: "Annual leave" },
+      { id: `${site}-leave-2`, siteId: site, craftpersonId: `S${site.slice(-2)}-C2`, absenceType: "SickLeave" as const, startDate: "2026-11-11", endDate: "2026-11-11", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved" as const, notes: "" },
+      { id: `${site}-leave-3`, siteId: site, craftpersonId: `S${site.slice(-2)}-C3`, absenceType: "Training" as const, startDate: "2026-11-11", endDate: "2026-11-11", isFullDay: false, startTime: "09:00", endTime: "13:00", unavailableHoursPerDay: 4, status: "Approved" as const, notes: "Safety training" },
     ]),
     ...section20Seed(sites),
     users,
@@ -386,7 +387,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const reset = () => {
-    if (!window.confirm(`Replace saved demo data for ${site} with the Section 24 seed? This cannot be undone.`)) return;
+    if (!window.confirm(`Replace saved demo data for ${site} with the Section 25 seed? This cannot be undone.`)) return;
     const previous = current.current;
     const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
     void commitSnapshot(previous, next).catch((error: unknown) => {

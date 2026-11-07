@@ -74,7 +74,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       const trade = CLASSICAL_TRADES[i % CLASSICAL_TRADES.length];
       craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Gregor", "Tomaž", "Blaž", "Eva", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
         LastName: ["GOJKOŠEK", "Gojkošek", "Gojkošek", "Veselič", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i],
-        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, SkillLevel: 2 + i % 3 });
+        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, shiftStart: "07:00", shiftEnd: "15:30", secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
     }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
@@ -180,6 +180,12 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         const second = siteCraft.find((person) => person.Trade === wr.TradeName && !wr.AssignedCraftpersonIds.includes(person.id));
         if (index % 9 === 0 && second) wr.AssignedCraftpersonIds.push(second.id);
         if (index % 11 === 0) { wr.DueDate = "2026-11-03"; wr.MarginDate = "2026-11-04"; }
+      }
+      if (wr.AssignedCraftpersonIds.length && wr.StartDate_DateToPerform && index % 2 === 0) {
+        const day = `2026-11-${String(7 + index % 7).padStart(2, "0")}`;
+        const [startTime, endTime] = [["07:00", "10:00"], ["10:30", "14:00"], ["08:00", "12:00"]][index % 3];
+        wr.StartDate_DateToPerform = day;
+        wr.CraftpersonAssignments = wr.AssignedCraftpersonIds.map((craftpersonId) => ({ craftpersonId, assignedStartDateTime: `${day}T${startTime}`, assignedEndDateTime: `${day}T${endTime}` }));
       }
       if (wr.IsFrozen) {
         wr.ActiveFreezeName = "Waiting for Spare Parts";

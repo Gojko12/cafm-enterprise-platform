@@ -36,7 +36,7 @@ export interface DemoData {
   workRequests: BaseWorkRequest[];
   deletedWorkRequests?: BaseWorkRequest[];
   users: UserAccess[];
-  craftspeople: { id: string; Name: string; LastName: string; username?: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number }[];
+  craftspeople: { id: string; Name: string; LastName: string; username?: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number; shiftStart?: string; shiftEnd?: string; secondaryTradeIds?: string[] }[];
   craftpersonAbsences: CraftpersonAbsence[];
   locationFreezes: LocationFreeze[];
   tradeRoleMappings: TradeRoleMapping[];

@@ -49,7 +49,7 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
       EstimatedCostEur: amount, CostType: costType === "Fixed" || costType === "Ceiling" ? costType : undefined,
       DueDate: due === base.DueDate?.slice(0, 10) ? base.DueDate : due || undefined,
       MarginDate: margin === base.MarginDate?.slice(0, 10) ? base.MarginDate : margin || undefined,
-      AssignedCraftpersonIds: craft, EquipmentCodes: codes,
+      AssignedCraftpersonIds: craft, CraftpersonAssignments: base.CraftpersonAssignments?.filter((item) => craft.includes(item.craftpersonId) && base.AssignedCraftpersonIds.includes(item.craftpersonId)), EquipmentCodes: codes,
       bl_id: location.building.bl_id, LevelName: location.floor?.LevelName, RoomCode: location.room?.RoomCode,
       ProblemLocation: [location.building.bl_id, location.floor?.LevelName, location.room?.RoomCode].filter(Boolean).join(" / "),
       UpdatedAt: now };

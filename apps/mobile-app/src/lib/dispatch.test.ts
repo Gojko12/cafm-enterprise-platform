@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CraftpersonAbsenceSchema } from "@cafm/shared-schema";
-import { addDays, dailyCapacity, frozenOn, resolveLeaveConflicts } from "../../../web-portal/lib/dispatch";
+import { addDays, assignmentAbsences, dailyCapacity, fromWallMinutes, frozenOn, intervalFor, resolveLeaveConflicts, wallMinutes } from "../../../web-portal/lib/dispatch";
 import { section20Seed } from "../../../web-portal/lib/section20-seed";
 
 describe("dispatch capacity", () => {
@@ -46,6 +46,38 @@ describe("dispatch capacity", () => {
       expect(ratios.some((ratio) => ratio > 0 && ratio < 0.8)).toBe(true);
       expect(ratios.some((ratio) => ratio >= 0.8 && ratio <= 1)).toBe(true);
       expect(ratios.some((ratio) => ratio > 1)).toBe(true);
+    }
+  });
+  it("allocates timed multi-day work only to overlapping days and ignores stale assignments", () => {
+    const timed = { ...wr, CraftpersonAssignments: [{ craftpersonId: "person", assignedStartDateTime: "2026-11-06T22:00", assignedEndDateTime: "2026-11-07T03:30" }] };
+    expect(dailyCapacity([timed], [], "SITE-01", "person", "2026-11-06", 8).allocated).toBe(2);
+    expect(dailyCapacity([timed], [], "SITE-01", "person", "2026-11-07", 8).allocated).toBe(3.5);
+    expect(intervalFor({ ...timed, AssignedCraftpersonIds: [] }, "person")).toBeNull();
+    expect(fromWallMinutes(wallMinutes("2026-03-29T01:30") + 120)).toBe("2026-03-29T03:30");
+  });
+  it("validates partial-day ranges, checks actual overlap and merges overlapping leave for capacity", () => {
+    const partial = { ...leave, startTime: "09:00", endTime: "13:00", unavailableHoursPerDay: 4 };
+    expect(CraftpersonAbsenceSchema.safeParse({ ...partial, endTime: "08:00" }).success).toBe(false);
+    expect(CraftpersonAbsenceSchema.safeParse({ ...partial, endTime: undefined }).success).toBe(false);
+    const morning = { craftpersonId: "person", assignedStartDateTime: "2026-11-06T07:00", assignedEndDateTime: "2026-11-06T09:00" };
+    expect(assignmentAbsences([partial], "SITE-01", morning)).toHaveLength(0);
+    expect(assignmentAbsences([partial], "SITE-01", { ...morning, assignedEndDateTime: "2026-11-06T09:30" })).toHaveLength(1);
+    expect(dailyCapacity([], [partial, { ...partial, id: "two", startTime: "11:00", endTime: "15:00" }], "SITE-01", "person", "2026-11-06", 8).available).toBe(2);
+  });
+  it("moves or removes timed records when resolving leave and rejects unavailable peers", () => {
+    const task = { ...wr, TradeName: "Mechanical", CraftpersonAssignments: [{ craftpersonId: "person", assignedStartDateTime: "2026-11-06T09:00", assignedEndDateTime: "2026-11-06T11:00" }] };
+    const people = [{ id: "peer", SiteId: "SITE-01", Trade: "Mechanical", ShiftHours: 8 }];
+    const result = resolveLeaveConflicts([task], [leave], people, leave, "reassign", (request) => request);
+    expect(result.requests[0].CraftpersonAssignments).toEqual([{ ...task.CraftpersonAssignments[0], craftpersonId: "peer" }]);
+    expect(resolveLeaveConflicts([task], [leave], people, leave, "unassign", (request) => request).requests[0].CraftpersonAssignments).toEqual([]);
+    const unavailable = { ...leave, id: "peer-leave", craftpersonId: "peer" };
+    expect(resolveLeaveConflicts([task], [leave, unavailable], people, leave, "reassign", (request) => request).unresolved).toBe(1);
+  });
+  it("seeds timed assignments and shifts at every site", () => {
+    for (const site of ["SITE-01", "SITE-02", "SITE-03"] as const) {
+      const seeded = section20Seed([site]);
+      expect(seeded.craftspeople.every((person) => person.shiftStart === "07:00" && person.shiftEnd === "15:30")).toBe(true);
+      expect(seeded.workRequests.some((request) => request.CraftpersonAssignments?.some((item) => item.assignedStartDateTime >= "2026-11-07T00:00" && item.assignedStartDateTime < "2026-11-14T00:00"))).toBe(true);
     }
   });
 });
