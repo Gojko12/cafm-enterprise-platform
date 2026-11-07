@@ -66,6 +66,7 @@ export const RoomSchema = z.object({
   Department: z.string().optional(),
   CostCenter: z.string().optional(),
   Polygon: GeoJSONPolygonSchema.optional(),
+  PolygonSource: z.enum(["Demo", "CAD", "CAD Sample"]).optional(),
   IsDeskReservable: z.boolean().default(false),
   IsActive: z.boolean().default(true),
 });

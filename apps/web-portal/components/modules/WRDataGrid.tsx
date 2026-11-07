@@ -8,7 +8,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { gridStatusChange } from "@/lib/wr-grid";
 import { groupLongJobs } from "@/lib/wr-overview";
-import { useTableColumns } from "@/components/common/TableColumns";
+import { ResizeHandle, useTableColumns } from "@/components/common/TableColumns";
 
 type Column = "id" | "description" | "status" | "percentage" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created";
 const columns: { key: Column; label: string }[] = [
@@ -104,9 +104,9 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
     setSelected([]);
   };
   const row = (wr: BaseWorkRequest) => <tr key={wr.WR_ID} className="border-t hover:bg-slate-50" onDoubleClick={() => onOpen(wr)}>
-    <td className="p-2" onDoubleClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${wr.WR_ID}`} checked={selected.includes(wr.WR_ID)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, wr.WR_ID] : current.filter((id) => id !== wr.WR_ID))} /></td>
-    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5">{key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : value(wr, key) || "—"}</td>; })}
-    <td className="p-2" onDoubleClick={(event) => event.stopPropagation()}><button className="whitespace-nowrap text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
+    <td className="p-2" title={`Select ${wr.WR_ID}`} onDoubleClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${wr.WR_ID}`} checked={selected.includes(wr.WR_ID)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, wr.WR_ID] : current.filter((id) => id !== wr.WR_ID))} /></td>
+    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={value(wr, key)}><div className="truncate">{key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : value(wr, key) || "—"}</div></td>; })}
+    <td className="p-2" title="Open / Edit" onDoubleClick={(event) => event.stopPropagation()}><button className="block max-w-full truncate text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
   return <div className="space-y-2">
     <div className="flex justify-end">{config.menu}</div>
     {error && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
@@ -127,16 +127,16 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       <button disabled={!bulkDue} onClick={() => apply((wr) => ({ ...wr, DueDate: bulkDue }), `Bulk due date changed to ${bulkDue}`)}>Apply date</button>
       <button className="text-red-700" onClick={remove}>Bulk Delete</button>
     </div>}
-    <div className="overflow-auto rounded border bg-white"><table className="w-full text-left text-xs"><thead className="bg-slate-50"><tr>
-      <th className="p-2"><input type="checkbox" aria-label="Select all visible" checked={allVisible} onChange={(event) => setSelected((current) => event.target.checked ? [...new Set([...current, ...displayed.map((wr) => wr.WR_ID)])] : current.filter((id) => !displayed.some((wr) => wr.WR_ID === id)))} /></th>
-      {config.visible.map((column) => <th key={column.id} className="min-w-[7rem] p-2"><button onClick={() => config.toggleSort(column.id)}>{column.label} {config.sort?.id === column.id ? config.sort.direction === "asc" ? "▲" : "▼" : ""}</button></th>)}<th className="p-2">Action</th></tr>
-      <tr><th />{config.visible.map((column) => <th key={column.id} className="p-1"><input aria-label={`Filter ${column.label}`} placeholder="Filter" className="w-full min-w-[6rem] rounded border px-1 py-1" value={filters[column.id as Column] ?? ""} onChange={(event) => {
+    <div className="overflow-auto rounded border bg-white"><table className="table-fixed text-left text-xs" style={{ width: config.width("__select") + config.width("__action") + config.visible.reduce((sum, column) => sum + config.width(column.id), 0) }}><colgroup><col style={{width: config.width("__select")}} />{config.visible.map((column) => <col key={column.id} style={{width: config.width(column.id)}} />)}<col style={{width: config.width("__action")}} /></colgroup><thead className="bg-slate-50"><tr>
+      <th className="relative p-2" title="Select all visible"><input type="checkbox" aria-label="Select all visible" checked={allVisible} onChange={(event) => setSelected((current) => event.target.checked ? [...new Set([...current, ...displayed.map((wr) => wr.WR_ID)])] : current.filter((id) => !displayed.some((wr) => wr.WR_ID === id)))} /><ResizeHandle label="Selection" width={config.width("__select")} onResize={(width) => config.resize("__select", width)} /></th>
+      {config.visible.map((column) => <th key={column.id} className="relative p-2" title={column.label}><button className="block max-w-full truncate text-left" onClick={() => config.toggleSort(column.id)}>{column.label} {config.sort?.id === column.id ? config.sort.direction === "asc" ? "▲" : "▼" : ""}</button><ResizeHandle label={column.label} width={config.width(column.id)} onResize={(width) => config.resize(column.id, width)} /></th>)}<th className="relative p-2" title="Action"><span className="block truncate">Action</span><ResizeHandle label="Action" width={config.width("__action")} onResize={(width) => config.resize("__action", width)} /></th></tr>
+      <tr><th />{config.visible.map((column) => <th key={column.id} className="p-1"><input aria-label={`Filter ${column.label}`} placeholder="Filter" className="w-full min-w-0 rounded border px-1 py-1" value={filters[column.id as Column] ?? ""} onChange={(event) => {
         const next = { ...filters, [column.id]: event.target.value };
         setFilters(next);
         onFilterCount?.(Object.values(next).filter((item) => item?.trim()).length);
       }} /></th>)}<th /></tr></thead>
-      <tbody>{grouped ? groups.map((group) => <React.Fragment key={group.key}><tr className="border-t bg-slate-100"><th colSpan={config.visible.length + 2} className="p-2">
-        <button aria-expanded={!collapsed.includes(group.key)} onClick={() => setCollapsed((current) => current.includes(group.key) ? current.filter((key) => key !== group.key) : [...current, group.key])}>
+      <tbody>{grouped ? groups.map((group) => <React.Fragment key={group.key}><tr className="border-t bg-slate-100"><th colSpan={config.visible.length + 2} className="p-2" title={`${group.percentage}% · ${group.description} · ${group.track} · ${group.requests.length} LJs · ${group.cost.toLocaleString("en-IE", { style: "currency", currency: "EUR" })}`}>
+        <button className="block max-w-full truncate text-left" aria-expanded={!collapsed.includes(group.key)} onClick={() => setCollapsed((current) => current.includes(group.key) ? current.filter((key) => key !== group.key) : [...current, group.key])}>
           {collapsed.includes(group.key) ? "▶" : "▼"} <span className="rounded bg-blue-100 px-2">{group.percentage}%</span> {group.description} · {group.track} · {group.requests.length} LJs · {group.cost.toLocaleString("en-IE", { style: "currency", currency: "EUR" })}
         </button></th></tr>{!collapsed.includes(group.key) && group.requests.map(row)}</React.Fragment>) : visible.map(row)}</tbody></table>
       {!visible.length && <p className="p-4 text-slate-600">No matching work requests.</p>}

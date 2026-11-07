@@ -1,4 +1,4 @@
-import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, EQUIPMENT_STATUSES } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
 
@@ -58,8 +58,15 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       for (let f = 0; f < 3; f++) {
         const LevelName = `Level ${f}`;
         floors.push({ SiteId: site, bl_id, LevelName, FloorNumber: f, GrossAreaM2: 1250 + f * 100, IsActive: true });
-        for (let r = 1; r <= 2; r++) rooms.push({ SiteId: site, bl_id, LevelName, RoomCode: `S${tag}-B${b}-L${f}-R${r}`,
-          Name: r === 1 ? "Plant and services room" : "Operations workspace", NetAreaM2: 48 + b * 4 + f * 3, IsDeskReservable: r === 2, IsActive: true });
+        for (let r = 1; r <= 2; r++) {
+          const area = 48 + b * 4 + f * 3;
+          const x = (r - 1) * 20;
+          rooms.push({ SiteId: site, bl_id, LevelName, RoomCode: `S${tag}-B${b}-L${f}-R${r}`,
+            Name: r === 1 ? "Plant and services room" : "Operations workspace", NetAreaM2: area,
+            Polygon: { type: "Polygon", coordinates: [[[x, 0], [x + area / 6, 0], [x + area / 6, 6], [x, 6], [x, 0]]] },
+            PolygonSource: "Demo",
+            IsDeskReservable: r === 2, IsActive: true });
+        }
       }
     }
     const siteRooms = rooms.filter((item) => item.SiteId === site);
@@ -76,7 +83,10 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       const root = codeFor(base + 1), child = codeFor(base + 2);
       for (const [level, code, parent] of [["Installation", root, undefined], ["SubEquipment", child, root], ["Component", codeFor(base + 3), child]] as const) {
         equipment.push({ SiteId: site, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, EquipmentCode: code,
-          EquipmentName: `${system[0]} ${level}`, EquipmentNameLocal: `${localNames[Number(tag) - 1][i]} · ${level}`, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation", Status: "Active",
+          EquipmentName: `${system[0]} ${level}`, EquipmentNameLocal: `${localNames[Number(tag) - 1][i]} · ${level}`, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation",
+          Status: level === "Installation" || i >= 7 ? "In Service" : EQUIPMENT_STATUSES[i + 1],
+          Activity: [{ id: `${code}-log`, kind: "log", actorId: "Mark", actorName: "Mark", actorRole: "ESA_TM", createdAt: "2026-10-10T09:00:00Z", text: "Equipment registered for maintenance." },
+            { id: `${code}-comment`, kind: "comment", actorId: "Thomas", actorName: "Thomas", actorRole: "ESA_TO", createdAt: "2026-10-11T09:00:00Z", text: "Inspection access confirmed.", editedAt: "2026-10-12T09:00:00Z", editHistory: [{ text: "Confirm inspection access.", timestamp: "2026-10-11T09:00:00Z" }] }],
           ParentEquipmentCode: parent, PrimaryTradeId: system[1], Manufacturer: "Campus Systems", Model: `CS-${100 + i}`,
           TechnicalSpecifications: { service: system[0], location: room.RoomCode }, Criticality: i % 3 === 0 ? "High" : "Medium" });
       }

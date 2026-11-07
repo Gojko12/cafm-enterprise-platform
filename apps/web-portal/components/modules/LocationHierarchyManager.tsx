@@ -159,22 +159,7 @@ export function LocationHierarchyManager() {
               </p>
 
               <CadUpload floor={selectedFloor} />
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr><th>Room code</th><th>Name</th><th>Net area (m²)</th></tr>
-                  </thead>
-                  <tbody>
-                    {sampleData.rooms
-                      .filter((room) => room.bl_id === selectedFloor.bl_id && room.LevelName === selectedFloor.LevelName)
-                      .map((room) => (
-                        <tr key={room.RoomCode} className="border-t">
-                          <td>{room.RoomCode}</td><td>{room.Name}</td><td>{room.NetAreaM2 ?? "—"}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
+              <OverviewTable preferenceKey="locations-cad-rooms" columns={roomColumns} rows={sampleData.rooms.filter((room) => room.bl_id === selectedFloor.bl_id && room.LevelName === selectedFloor.LevelName)} rowKey={(room) => room.RoomCode} />
             </div>
           ) : (
             <p className="text-sm text-gray-500 italic">

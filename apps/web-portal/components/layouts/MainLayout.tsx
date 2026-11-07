@@ -42,6 +42,13 @@ const SITE_IDS: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [hash, setHash] = React.useState("");
+  React.useEffect(() => {
+    const update = () => setHash(window.location.hash || "#PM");
+    update();
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+  }, [pathname]);
 
   return (
     <aside className="w-64 bg-gray-900 text-white h-screen overflow-y-auto border-r border-gray-800">
@@ -74,10 +81,12 @@ export function Sidebar() {
                 </p>
                 <div className="space-y-1">
                   {item.items.map(({ href, label, icon: Icon }) => {
-                    const isActive = pathname === href || pathname.startsWith(href + "/");
+                    const target = href.includes("#") ? href.slice(href.indexOf("#") + 1) : "";
+                    const route = target === "PM" ? "/preventive-maintenance" : target === "FJ" ? "/fast-jobs" : target === "LJ" ? "/long-jobs" : "";
+                    const isActive = target ? pathname === route || (pathname === "/work-requests" && hash === `#${target}`) : pathname === href || pathname.startsWith(href + "/");
                     if (href.includes("#")) {
                       return (
-                        <a key={href} href={href} className="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm text-gray-300 hover:bg-gray-800">
+                        <a key={href} href={href} aria-current={isActive ? "page" : undefined} className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}>
                           <Icon size={18} />
                           <span className="font-medium">{label}</span>
                         </a>

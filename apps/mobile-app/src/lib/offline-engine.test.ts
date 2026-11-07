@@ -309,7 +309,7 @@ describe("Filter & Equipment Picker", () => {
         LevelName: "Floor 1",
         RoomCode: "ROOM001",
         IsInstallation: false,
-        Status: "Active",
+        Status: "In Service",
         TechnicalSpecifications: {},
       },
       {
@@ -322,7 +322,7 @@ describe("Filter & Equipment Picker", () => {
         LevelName: "Floor 1",
         RoomCode: "ROOM002",
         IsInstallation: false,
-        Status: "Active",
+        Status: "In Service",
         TechnicalSpecifications: {},
       },
     ];

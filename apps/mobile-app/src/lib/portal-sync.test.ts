@@ -102,6 +102,13 @@ describe("portal synchronization", () => {
     expect(state.deletedWorkRequests).toEqual([archived]);
   });
 
+  it("normalizes legacy equipment statuses when pulling portal state", async () => {
+    const equipment = { ...ESOC_EQUIPMENT[0], Status: "Under Repair" };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ revision, state: { ...state, equipment: [equipment] } }) })));
+    await new OfflineEngine().syncNow();
+    expect(await (await getDB()).get("equipment", equipment.EquipmentCode)).toMatchObject({ Status: "Repair" });
+  });
+
   it("retains queued changes when the portal edited the same request", async () => {
     const db = await getDB();
     await db.put("workRequests", original);

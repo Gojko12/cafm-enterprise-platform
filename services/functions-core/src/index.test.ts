@@ -88,7 +88,7 @@ const mockEquipment: Equipment = {
   EquipmentCode: "EQ001",
   EquipmentName: "HVAC Unit A",
   EquipmentUseEnglish: "Main Ventilation System",
-  Status: "Active",
+  Status: "In Service",
   bl_id: "BL001",
   LevelName: "Ground",
   RoomCode: "R001",

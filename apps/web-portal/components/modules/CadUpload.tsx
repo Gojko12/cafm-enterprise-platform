@@ -57,10 +57,10 @@ export function CadUpload({ floor }: { floor: Floor }) {
           const index = rooms.findIndex((room) => room.SiteId === floor.SiteId && room.bl_id === floor.bl_id &&
             room.LevelName === floor.LevelName && room.RoomCode === extracted.RoomCode);
           if (index >= 0) {
-            rooms[index] = { ...rooms[index], NetAreaM2: extracted.NetAreaM2, Polygon: extracted.Polygon };
+            rooms[index] = { ...rooms[index], NetAreaM2: extracted.NetAreaM2, Polygon: extracted.Polygon, PolygonSource: file ? "CAD" : "CAD Sample" };
           } else {
             rooms.push({
-              ...extracted, SiteId: floor.SiteId, bl_id: floor.bl_id, LevelName: floor.LevelName,
+              ...extracted, SiteId: floor.SiteId, bl_id: floor.bl_id, LevelName: floor.LevelName, PolygonSource: file ? "CAD" : "CAD Sample",
               IsActive: true, IsDeskReservable: false,
             });
           }

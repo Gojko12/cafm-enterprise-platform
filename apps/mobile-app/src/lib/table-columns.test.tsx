@@ -41,4 +41,17 @@ describe("overview table columns", () => {
     expect(screen.queryByRole("columnheader", { name: "Name" })).toBeNull();
     expect(screen.getAllByRole("columnheader")[0].textContent).toContain("Cost");
   });
+  it("resizes with mouse and keyboard, persists widths and exposes full cell values", () => {
+    const view = render(<OverviewTable preferenceKey="test" columns={columns} rows={rows} rowKey={(item) => item.id} />);
+    const handle = screen.getByRole("separator", { name: "Resize Name" });
+    fireEvent.mouseDown(handle, { clientX: 100 });
+    fireEvent.mouseMove(window, { clientX: 160 });
+    fireEvent.mouseUp(window);
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(screen.getByTitle("Alpha").className).toContain("p-2");
+    expect(screen.getByRole("table").querySelector("col")?.style.width).toBe("220px");
+    view.unmount();
+    render(<OverviewTable preferenceKey="test" columns={columns} rows={rows} rowKey={(item) => item.id} />);
+    expect(screen.getByRole("table").querySelector("col")?.style.width).toBe("220px");
+  });
 });

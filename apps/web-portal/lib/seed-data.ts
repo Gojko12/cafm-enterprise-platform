@@ -54,10 +54,10 @@ export const ESOC_ROOMS: Room[] = [
 ];
 
 export const ESOC_EQUIPMENT: Equipment[] = [
-  { EquipmentCode: "HVAC-ESA-001", EquipmentName: "HVAC Unit Main", bl_id: "BL-ESOC-001", LevelName: "Ground Floor", RoomCode: "GF-HVAC-001", SiteId: "SITE-01", SerialNumber: "HV-2022-001", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "ELEC-ESA-001", EquipmentName: "Main Distribution Panel", bl_id: "BL-ESOC-001", LevelName: "Ground Floor", RoomCode: "GF-ELEC-001", SiteId: "SITE-01", SerialNumber: "EP-2020-001", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "DOOR-ESA-001", EquipmentName: "Security Door 1", bl_id: "BL-ESOC-001", LevelName: "Ground Floor", RoomCode: "GF-LOBBY-001", SiteId: "SITE-01", SerialNumber: "SD-2019-001", IsInstallation: false, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "HVAC-ESA-002", EquipmentName: "HVAC Unit Floor 3", bl_id: "BL-ESOC-001", LevelName: "Floor 3", RoomCode: "F3-HVAC-001", SiteId: "SITE-01", SerialNumber: "HV-2022-002", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
+  { EquipmentCode: "HVAC-ESA-001", EquipmentName: "HVAC Unit Main", bl_id: "BL-ESOC-001", LevelName: "Ground Floor", RoomCode: "GF-HVAC-001", SiteId: "SITE-01", SerialNumber: "HV-2022-001", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "ELEC-ESA-001", EquipmentName: "Main Distribution Panel", bl_id: "BL-ESOC-001", LevelName: "Ground Floor", RoomCode: "GF-ELEC-001", SiteId: "SITE-01", SerialNumber: "EP-2020-001", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "DOOR-ESA-001", EquipmentName: "Security Door 1", bl_id: "BL-ESOC-001", LevelName: "Ground Floor", RoomCode: "GF-LOBBY-001", SiteId: "SITE-01", SerialNumber: "SD-2019-001", IsInstallation: false, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "HVAC-ESA-002", EquipmentName: "HVAC Unit Floor 3", bl_id: "BL-ESOC-001", LevelName: "Floor 3", RoomCode: "F3-HVAC-001", SiteId: "SITE-01", SerialNumber: "HV-2022-002", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
 ];
 
 // SITE-02: ESTEC Noordwijk
@@ -96,9 +96,9 @@ export const ESTEC_ROOMS: Room[] = [
 ];
 
 export const ESTEC_EQUIPMENT: Equipment[] = [
-  { EquipmentCode: "HVAC-EST-001", EquipmentName: "Central HVAC System", bl_id: "BL-ESTEC-001", LevelName: "Ground Floor", RoomCode: "GF-HVAC-001", SiteId: "SITE-02", SerialNumber: "HV-2023-001", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "ELEC-EST-001", EquipmentName: "Main Panel", bl_id: "BL-ESTEC-001", LevelName: "Ground Floor", RoomCode: "GF-ELEC-001", SiteId: "SITE-02", SerialNumber: "EP-2023-001", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "DOOR-EST-001", EquipmentName: "Door 1", bl_id: "BL-ESTEC-001", LevelName: "Ground Floor", RoomCode: "GF-REC-001", SiteId: "SITE-02", SerialNumber: "SD-2023-001", IsInstallation: false, Status: "Active", TechnicalSpecifications: {} },
+  { EquipmentCode: "HVAC-EST-001", EquipmentName: "Central HVAC System", bl_id: "BL-ESTEC-001", LevelName: "Ground Floor", RoomCode: "GF-HVAC-001", SiteId: "SITE-02", SerialNumber: "HV-2023-001", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "ELEC-EST-001", EquipmentName: "Main Panel", bl_id: "BL-ESTEC-001", LevelName: "Ground Floor", RoomCode: "GF-ELEC-001", SiteId: "SITE-02", SerialNumber: "EP-2023-001", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "DOOR-EST-001", EquipmentName: "Door 1", bl_id: "BL-ESTEC-001", LevelName: "Ground Floor", RoomCode: "GF-REC-001", SiteId: "SITE-02", SerialNumber: "SD-2023-001", IsInstallation: false, Status: "In Service", TechnicalSpecifications: {} },
 ];
 
 // SITE-03: ESRIN Frascati
@@ -127,9 +127,9 @@ export const ESRIN_ROOMS: Room[] = [
 ];
 
 export const ESRIN_EQUIPMENT: Equipment[] = [
-  { EquipmentCode: "ELEC-ERI-001", EquipmentName: "Transformer Unit", bl_id: "BL-ESRIN-001", LevelName: "Basement", RoomCode: "B1-ELEC-001", SiteId: "SITE-03", SerialNumber: "TU-2023-001", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "HVAC-ERI-001", EquipmentName: "HVAC Main", bl_id: "BL-ESRIN-001", LevelName: "Ground Floor", RoomCode: "GF-HVAC-001", SiteId: "SITE-03", SerialNumber: "HV-2023-001", IsInstallation: true, Status: "Active", TechnicalSpecifications: {} },
-  { EquipmentCode: "SERVER-ERI-001", EquipmentName: "Server Cabinet 1", bl_id: "BL-ESRIN-001", LevelName: "Floor 1", RoomCode: "F1-SERVER-001", SiteId: "SITE-03", SerialNumber: "SC-2022-001", IsInstallation: false, Status: "Active", TechnicalSpecifications: {} },
+  { EquipmentCode: "ELEC-ERI-001", EquipmentName: "Transformer Unit", bl_id: "BL-ESRIN-001", LevelName: "Basement", RoomCode: "B1-ELEC-001", SiteId: "SITE-03", SerialNumber: "TU-2023-001", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "HVAC-ERI-001", EquipmentName: "HVAC Main", bl_id: "BL-ESRIN-001", LevelName: "Ground Floor", RoomCode: "GF-HVAC-001", SiteId: "SITE-03", SerialNumber: "HV-2023-001", IsInstallation: true, Status: "In Service", TechnicalSpecifications: {} },
+  { EquipmentCode: "SERVER-ERI-001", EquipmentName: "Server Cabinet 1", bl_id: "BL-ESRIN-001", LevelName: "Floor 1", RoomCode: "F1-SERVER-001", SiteId: "SITE-03", SerialNumber: "SC-2022-001", IsInstallation: false, Status: "In Service", TechnicalSpecifications: {} },
 ];
 
 // Sample Work Requests across sites

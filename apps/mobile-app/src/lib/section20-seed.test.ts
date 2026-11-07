@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema, PM_ChecklistStandardSchema, PM_ScheduleSchema, CLASSICAL_TRADES, EQUIPMENT_CATEGORIES } from "@cafm/shared-schema";
+import { BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema, EquipmentStatusSchema, normalizeEquipmentStatus, PM_ChecklistStandardSchema, PM_ScheduleSchema, CLASSICAL_TRADES, EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES } from "@cafm/shared-schema";
 import { section20Seed } from "../../../web-portal/lib/section20-seed";
 import { groupLongJobs } from "../../../web-portal/lib/wr-overview";
+import { resolveEquipmentLocation } from "../../../web-portal/lib/equipment-locator";
+import { equipmentChangeDescriptions } from "../../../web-portal/lib/equipment-activity";
 
 describe("Section 20 demo seed", () => {
   const sites = ["SITE-01", "SITE-02", "SITE-03"] as const;
@@ -20,8 +22,11 @@ describe("Section 20 demo seed", () => {
       expect(bySite(data.buildings).length).toBeGreaterThanOrEqual(4);
       for (const building of bySite(data.buildings)) expect(bySite(data.floors).filter((floor) => floor.bl_id === building.bl_id).length).toBeGreaterThanOrEqual(3);
       expect(bySite(data.rooms).length).toBeGreaterThanOrEqual(15);
+      expect(bySite(data.rooms).every((room) => room.Polygon?.coordinates[0].length === 5)).toBe(true);
       expect(bySite(data.equipment).length).toBeGreaterThanOrEqual(25);
       expect(new Set(bySite(data.equipment).map((eq) => eq.Category))).toEqual(new Set(Object.keys(EQUIPMENT_CATEGORIES)));
+      expect(new Set(bySite(data.equipment).map((eq) => eq.Status))).toEqual(new Set(EQUIPMENT_STATUSES));
+      expect(bySite(data.equipment).every((eq) => eq.Activity?.some((entry) => entry.kind === "log") && eq.Activity?.some((entry) => entry.kind === "comment" && entry.editHistory?.length))).toBe(true);
       expect(bySite(data.craftspeople).length).toBeGreaterThanOrEqual(10);
       expect(new Set(bySite(data.craftspeople).map((person) => person.Trade))).toEqual(new Set(CLASSICAL_TRADES));
       expect(bySite(data.blueprints).length).toBeGreaterThanOrEqual(10);
@@ -49,6 +54,32 @@ describe("Section 20 demo seed", () => {
       ]) expect(pm.some(predicate)).toBe(true);
       expect(new Set(pm.filter((wr) => wr.Percentage === 55).map((wr) => wr.FreezeReason))).toEqual(new Set(["Access", "Labor", "Parts"]));
     }
+  });
+  it("migrates only recognized legacy equipment statuses", () => {
+    for (const [legacy, expected] of [["Active", "In Service"], ["Under Repair", "Repair"], ["Decommissioned", "Out Of Service"]] as const) {
+      expect(EquipmentSchema.parse({ ...data.equipment[0], Status: legacy }).Status).toBe(expected);
+      expect(EquipmentStatusSchema.parse(normalizeEquipmentStatus(legacy))).toBe(expected);
+    }
+    expect(EquipmentSchema.safeParse({ ...data.equipment[0], Status: "Unknown" }).success).toBe(false);
+  });
+  it("resolves equipment locations only with matching site, hierarchy and polygon", () => {
+    const equipment = data.equipment[0];
+    const query = { equipment: equipment.EquipmentCode, building: equipment.bl_id, floor: equipment.LevelName, room: equipment.RoomCode };
+    expect(resolveEquipmentLocation(query, equipment.SiteId, data)?.room.RoomCode).toBe(equipment.RoomCode);
+    expect(resolveEquipmentLocation(query, "SITE-02", data)).toBeNull();
+    expect(resolveEquipmentLocation({ ...query, room: "wrong" }, equipment.SiteId, data)).toBeNull();
+    expect(resolveEquipmentLocation(query, equipment.SiteId, { ...data, rooms: [] })).toBeNull();
+    expect(resolveEquipmentLocation(query, equipment.SiteId, { ...data, floors: [] })).toBeNull();
+  });
+  it("reports equipment field and document changes without embedding document contents", () => {
+    const before = data.equipment[0];
+    const after = { ...before, Status: "Repair" as const, Model: "Carrier 30XA", Documents: [{ id: "doc", name: "manual.pdf", type: "application/pdf", dataUrl: "secret-content" }] };
+    const logs = equipmentChangeDescriptions(before, after, "Mark");
+    expect(logs).toContain("Status changed from 'In Service' to 'Repair' by Mark");
+    expect(logs).toContain("Model changed from 'CS-100' to 'Carrier 30XA' by Mark");
+    expect(logs).toContain("Documents changed from 'none' to 'manual.pdf' by Mark");
+    expect(logs.join(" ")).not.toContain("secret-content");
+    expect(equipmentChangeDescriptions(before, before, "Mark")).toEqual([]);
   });
   it("resolves all hierarchy and schedule references and groups filtered jobs", () => {
     expect(new Set(data.equipment.map((item) => item.EquipmentCode)).size).toBe(data.equipment.length);

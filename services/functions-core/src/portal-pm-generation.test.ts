@@ -16,7 +16,7 @@ const schedule: PM_Schedule = {
 };
 const equipment: Equipment[] = ["E1", "E2"].map((code) => ({
   EquipmentCode: code, EquipmentName: code, SiteId: "SITE-01", bl_id: "B", LevelName: "F", RoomCode: "R",
-  IsInstallation: false, Status: "Active", TechnicalSpecifications: {},
+  IsInstallation: false, Status: "In Service", TechnicalSpecifications: {},
 }));
 const input = {
   schedules: [schedule], blueprints: [blueprint], equipment, workRequests: [], siteId: "SITE-01" as const,

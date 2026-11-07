@@ -15,7 +15,11 @@ export const TradeSchema = z.object({
   IsActive: z.boolean().default(true),
 });
 
-export const EquipmentStatusSchema = z.enum(["Active", "Decommissioned", "Under Repair"]);
+export const EQUIPMENT_STATUSES = ["In Service", "Out Of Service", "Repair", "In Storage", "Salvaged", "Disposed Of", "Sold", "In Engineering"] as const;
+export const EquipmentStatusSchema = z.enum(EQUIPMENT_STATUSES);
+export function normalizeEquipmentStatus(status: string): string {
+  return status === "Active" ? "In Service" : status === "Decommissioned" ? "Out Of Service" : status === "Under Repair" ? "Repair" : status;
+}
 
 export const EQUIPMENT_CATEGORIES = {
   A: "Air Conditioning and Heat Pumps (Air/Air)", B: "Building Management System (BMS)",
@@ -51,7 +55,12 @@ export const EquipmentSchema = z.object({
   EquipmentStandardId: z.string().optional(),
   EquipmentUseEnglish: z.string().optional(),
   IsInstallation: z.boolean().default(false),
-  Status: EquipmentStatusSchema.default("Active"),
+  Status: z.preprocess((value) => typeof value === "string" ? normalizeEquipmentStatus(value) : value, EquipmentStatusSchema.default("In Service")),
+  Activity: z.array(z.object({
+    id: z.string(), kind: z.enum(["comment", "log"]), actorId: z.string(), actorName: z.string(), actorRole: z.string(),
+    createdAt: z.string(), text: z.string(), editedAt: z.string().optional(),
+    editHistory: z.array(z.object({ text: z.string(), timestamp: z.string() })).optional(),
+  })).optional(),
   Manufacturer: z.string().optional(),
   Model: z.string().optional(),
   SerialNumber: z.string().optional(),

@@ -65,7 +65,7 @@ const equipment: Equipment[] = [
     RoomCode: "R-2",
     SiteId: "SITE-01",
     IsInstallation: false,
-    Status: "Active",
+    Status: "In Service",
     TechnicalSpecifications: {},
   },
   {
@@ -76,7 +76,7 @@ const equipment: Equipment[] = [
     RoomCode: "R-1",
     SiteId: "SITE-01",
     IsInstallation: false,
-    Status: "Active",
+    Status: "In Service",
     TechnicalSpecifications: {},
   },
 ];

@@ -1,15 +1,27 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { ZoomIn, ZoomOut, Info, AlertCircle } from "lucide-react";
 import { useApp } from "@/lib/hooks/useApp";
 import { useCafmStore } from "@/lib/cafm-store";
 import type { Room } from "@cafm/shared-schema";
 import { CadUpload } from "@/components/modules/CadUpload";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { resolveEquipmentLocation, type EquipmentLocationQuery } from "@/lib/equipment-locator";
 
 export function FloorPlanViewer() {
-  const { selectedFloor } = useApp();
+  const { selectedFloor: selectedFloorFromApp } = useApp();
   const { data: sampleData } = useCafmStore();
+  const { activeSiteId } = useSiteContext();
+  const [locator, setLocator] = useState<EquipmentLocationQuery | null>(null);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.has("eqId")) setLocator({ building: query.get("buildingId") ?? "", floor: query.get("floorId") ?? "", room: query.get("roomId") ?? "", equipment: query.get("eqId") ?? "" });
+  }, []);
+  const resolved = locator ? resolveEquipmentLocation(locator, activeSiteId, sampleData) : null;
+  const equipment = resolved?.equipment;
+  const selectedFloor = locator ? resolved?.floor ?? null : selectedFloorFromApp;
+  const locatedRoom = resolved?.room;
 
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panX, setPanX] = useState(0);
@@ -29,7 +41,7 @@ export function FloorPlanViewer() {
           r.SiteId === selectedFloor.SiteId,
       )
     : [];
-  const points = roomsInFloor.flatMap((room) => room.Polygon?.coordinates.flat() ?? []);
+  const points = (locatedRoom ? [locatedRoom] : roomsInFloor).flatMap((room) => room.Polygon?.coordinates.flat() ?? []);
   const minX = points.length ? Math.min(...points.map((point) => point[0])) : 0;
   const minY = points.length ? Math.min(...points.map((point) => point[1])) : 0;
   const width = points.length ? Math.max(...points.map((point) => point[0])) - minX : 500;
@@ -70,6 +82,7 @@ export function FloorPlanViewer() {
     setIsDragging(false);
   };
 
+  if (locator && (!selectedFloor || !locatedRoom)) return <div role="alert" className="p-6 text-red-700">The requested equipment or its room polygon is unavailable at the active site.</div>;
   if (!selectedFloor) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -91,6 +104,7 @@ export function FloorPlanViewer() {
             <p className="text-sm text-gray-600">
               {selectedFloor.GrossAreaM2} m² • {roomsInFloor.length} rooms
             </p>
+            {locatedRoom && equipment && <p className="text-sm text-blue-700">Equipment {equipment.EquipmentCode} is located in highlighted room {locatedRoom.RoomCode}; its exact position is not recorded.{locatedRoom.PolygonSource === "Demo" || locatedRoom.PolygonSource === "CAD Sample" ? " This is demonstration geometry, not a surveyed floor plan." : ""}</p>}
           </div>
           <div className="flex items-center gap-4">
             <CadUpload floor={selectedFloor} />
@@ -188,7 +202,7 @@ export function FloorPlanViewer() {
             {roomsInFloor.map((room) => {
               if (!room.Polygon) return null;
 
-              const isSelected = selectedRoomForInspection?.RoomCode === room.RoomCode;
+              const isSelected = selectedRoomForInspection?.RoomCode === room.RoomCode || locatedRoom?.RoomCode === room.RoomCode;
               const fillColor = getRoomColor(room);
               const coords = room.Polygon.coordinates.map((ring) =>
                 ring.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${point[1]}`).join(" ") + " Z",

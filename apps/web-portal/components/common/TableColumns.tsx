@@ -1,9 +1,28 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-export type TableColumn<T> = { id: string; label: string; value: (row: T) => string | number | undefined; render?: (row: T) => React.ReactNode };
-type Settings = { order: string[]; hidden: string[] };
+export type TableColumn<T> = { id: string; label: string; value: (row: T) => string | number | undefined; render?: (row: T) => React.ReactNode; renderFilter?: () => React.ReactNode };
+type Settings = { order: string[]; hidden: string[]; widths?: Record<string, number> };
+
+export function ResizeHandle({ label, onResize, width }: { label: string; width: number; onResize: (width: number) => void }) {
+  const cleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanup.current?.(), []);
+  return <span role="separator" aria-label={`Resize ${label}`} aria-orientation="vertical" tabIndex={0}
+    className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-blue-300"
+    onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); onResize(Math.max(60, Math.min(800, width + (event.key === "ArrowLeft" ? -10 : 10)))); }
+    }}
+    onMouseDown={(event) => {
+      event.preventDefault(); event.stopPropagation();
+      const start = event.clientX;
+      const move = (next: MouseEvent) => onResize(Math.max(60, Math.min(800, width + next.clientX - start)));
+      cleanup.current?.();
+      const stop = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", stop); cleanup.current = null; };
+      cleanup.current = stop;
+      window.addEventListener("mousemove", move); window.addEventListener("mouseup", stop);
+    }} />;
+}
 
 export function useTableColumns<T>(key: string, columns: TableColumn<T>[]) {
   const [settings, setSettings] = useState<Settings>({ order: columns.map((column) => column.id), hidden: [] });
@@ -20,8 +39,10 @@ export function useTableColumns<T>(key: string, columns: TableColumn<T>[]) {
           throw new Error("Invalid column preferences");
         }
         const ids = columns.map((column) => column.id);
+        const widths = "widths" in parsed && parsed.widths && typeof parsed.widths === "object"
+          ? Object.fromEntries(Object.entries(parsed.widths).filter(([id, value]) => (ids.includes(id) || id === "__select" || id === "__action") && typeof value === "number" && Number.isFinite(value) && value >= 60 && value <= 800)) : {};
         setSettings({ order: [...new Set([...parsed.order.filter((id: string) => ids.includes(id)), ...ids])],
-          hidden: parsed.hidden.filter((id: string) => ids.includes(id)) });
+          hidden: parsed.hidden.filter((id: string) => ids.includes(id)), widths });
       }
     } catch (error) { console.error("Could not load table column preferences", error); }
     setLoaded(true);
@@ -51,7 +72,9 @@ export function useTableColumns<T>(key: string, columns: TableColumn<T>[]) {
       return sort.direction === "asc" ? result : -result;
     });
   };
-  return { visible, ordered, sort, toggleSort, sorted, menu: <details className="relative text-xs">
+  const width = (id: string) => settings.widths?.[id] ?? (id === "__select" ? 60 : id === "__action" ? 120 : 150);
+  const resize = (id: string, value: number) => setSettings((current) => ({ ...current, widths: { ...current.widths, [id]: value } }));
+  return { visible, ordered, sort, toggleSort, sorted, width, resize, menu: <details className="relative text-xs">
     <summary className="cursor-pointer rounded border bg-white px-2 py-1">Columns ⚙️</summary>
     <div className="absolute right-0 z-30 max-h-80 w-64 overflow-auto rounded border bg-white p-2 shadow-lg">
       {ordered.map((column, index) => <div key={column.id} className="flex items-center gap-1 py-1" draggable
@@ -74,21 +97,21 @@ export function useTableColumns<T>(key: string, columns: TableColumn<T>[]) {
     </div></details> };
 }
 
-export function OverviewTable<T>({ preferenceKey, columns, rows, rowKey, onRow }: {
-  preferenceKey: string; columns: TableColumn<T>[]; rows: T[]; rowKey: (item: T) => string; onRow?: (item: T) => void;
+export function OverviewTable<T>({ preferenceKey, columns, rows, rowKey, onRow, rowClassName }: {
+  preferenceKey: string; columns: TableColumn<T>[]; rows: T[]; rowKey: (item: T) => string; onRow?: (item: T) => void; rowClassName?: (item: T) => string;
 }) {
   const config = useTableColumns(preferenceKey, columns);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const filtered = config.sorted(rows.filter((item) => config.visible.every((column) =>
     String(column.value(item) ?? "").toLowerCase().includes((filters[column.id] ?? "").trim().toLowerCase()))));
   return <div className="space-y-2"><div className="flex justify-end">{config.menu}</div><div className="overflow-auto rounded border">
-    <table className="w-full text-left text-xs"><thead className="bg-slate-100"><tr>{config.visible.map((column) => <th key={column.id} className="p-2">
-      <button onClick={() => config.toggleSort(column.id)}>{column.label} {config.sort?.id === column.id ? config.sort.direction === "asc" ? "▲" : "▼" : ""}</button>
-    </th>)}</tr><tr>{config.visible.map((column) => <th key={column.id} className="p-1"><input aria-label={`Filter ${column.label}`} placeholder="Filter"
-      className="w-full min-w-20 rounded border p-1" value={filters[column.id] ?? ""} onChange={(event) => setFilters({ ...filters, [column.id]: event.target.value })} /></th>)}</tr></thead>
-      <tbody>{filtered.map((item) => <tr key={rowKey(item)} className="border-t hover:bg-slate-50" tabIndex={onRow ? 0 : undefined}
+    <table className="table-fixed text-left text-xs" style={{ width: config.visible.reduce((sum, column) => sum + config.width(column.id), 0) }}><colgroup>{config.visible.map((column) => <col key={column.id} style={{ width: config.width(column.id) }} />)}</colgroup><thead className="bg-slate-100"><tr>{config.visible.map((column) => <th key={column.id} className="relative p-2" title={column.label}>
+      <button className="block max-w-full truncate text-left" onClick={() => config.toggleSort(column.id)}>{column.label} {config.sort?.id === column.id ? config.sort.direction === "asc" ? "▲" : "▼" : ""}</button><ResizeHandle label={column.label} width={config.width(column.id)} onResize={(width) => config.resize(column.id, width)} />
+    </th>)}</tr><tr>{config.visible.map((column) => <th key={column.id} className="p-1">{column.renderFilter ? column.renderFilter() : <input aria-label={`Filter ${column.label}`} placeholder="Filter"
+      className="w-full min-w-0 rounded border p-1" value={filters[column.id] ?? ""} onChange={(event) => setFilters({ ...filters, [column.id]: event.target.value })} />}</th>)}</tr></thead>
+      <tbody>{filtered.map((item) => <tr key={rowKey(item)} className={`border-t hover:bg-slate-50 ${rowClassName?.(item) ?? ""}`} tabIndex={onRow ? 0 : undefined}
         onClick={() => onRow?.(item)} onKeyDown={(event) => { if (onRow && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onRow(item); } }}>
-        {config.visible.map((column) => <td key={column.id} className="p-2">{column.render ? column.render(item) : column.value(item) ?? "—"}</td>)}</tr>)}</tbody></table>
+        {config.visible.map((column) => <td key={column.id} className="p-2" title={String(column.value(item) ?? "")}><div className="block max-w-full truncate">{column.render ? column.render(item) : column.value(item) ?? "—"}</div></td>)}</tr>)}</tbody></table>
     {!filtered.length && <p className="p-3 text-xs">No matching records.</p>}
   </div></div>;
 }

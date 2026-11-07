@@ -14,7 +14,8 @@ const stateSchema = z.object({
   buildings: z.array(z.custom<Building>((value) => BuildingSchema.safeParse(value).success)),
   floors: z.array(z.custom<Floor>((value) => FloorSchema.safeParse(value).success)),
   rooms: z.array(z.custom<Room>((value) => RoomSchema.safeParse(value).success)),
-  equipment: z.array(z.custom<Equipment>((value) => EquipmentSchema.safeParse(value).success)),
+  equipment: z.array(z.custom<Equipment>((value) => EquipmentSchema.safeParse(value).success)
+    .transform((value) => ({ ...value, Status: EquipmentSchema.parse(value).Status }))),
   blueprints: z.array(z.custom<PM_ChecklistStandard>((value) => PM_ChecklistStandardSchema.safeParse(value).success)),
   schedules: z.array(z.custom<PM_Schedule>((value) => PM_ScheduleSchema.safeParse(value).success)),
   workRequests: z.array(workRequestSchema),
