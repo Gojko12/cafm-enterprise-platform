@@ -8,6 +8,7 @@ import { describeLocationFreeze, getCurrentLocationFreezes } from "../../lib/loc
 import { tradeColor } from "../../lib/trade-colors";
 import { intervalFor } from "../../lib/dispatch";
 import { MultiSelectFilter } from "../common/MultiSelectFilter";
+import { startRequestDrag } from "../../lib/drag-preview";
 
 type Person = DemoData["craftspeople"][number];
 const fields = [
@@ -40,7 +41,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [scheduled, setScheduled] = useState(true);
+  const [scheduleFilter, setScheduleFilter] = useState<"all" | "scheduled" | "unscheduled">("all");
   const [sort, setSort] = useState<Field>("id");
   const [descending, setDescending] = useState(false);
   useEffect(() => {
@@ -74,7 +75,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
     (!activeStatuses.length || activeStatuses.includes(wr.Percentage)) &&
     (trades === null || trades.includes(wr.TradeName ?? "")) && (buildingsFilter === null || buildingsFilter.includes(wr.bl_id ?? "")) &&
     [wr.bl_id, wr.LevelName, wr.RoomCode, buildings.find((item) => item.bl_id === wr.bl_id)?.Name].some((value) => String(value ?? "").toLowerCase().includes(location.toLowerCase())) &&
-    (scheduled || !wr.AssignedCraftpersonIds.length || (!wr.StartDate_DateToPerform && !wr.CraftpersonAssignments?.some((entry) => wr.AssignedCraftpersonIds.includes(entry.craftpersonId)))) &&
+    (scheduleFilter === "all" || wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id) !== null) === (scheduleFilter === "scheduled")) &&
     (!from || !!wr.DueDate && wr.DueDate.slice(0, 10) >= from) && (!to || !!wr.DueDate && wr.DueDate.slice(0, 10) <= to) &&
     Object.values(values(wr)).some((value) => value.toLowerCase().includes(search.toLowerCase())))
     .sort((a, b) => values(a)[sort].localeCompare(values(b)[sort], undefined, { numeric: true }) * (descending ? -1 : 1));
@@ -96,15 +97,15 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
         <input aria-label="Filter location" className="w-full border p-1" placeholder="Building, floor or room" value={location} onChange={(event) => setLocation(event.target.value)} />
         <label>Due From <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label> <label>To <input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         {from && to && from > to && <p role="alert" className="text-red-700">Due date range is invalid.</p>}
-        <label className="block"><input type="checkbox" checked={scheduled} onChange={(event) => setScheduled(event.target.checked)} /> Show scheduled WRs</label>
+        <div role="group" aria-label="Schedule filter" className="flex flex-wrap">{([["unscheduled", "Unscheduled"], ["all", "Scheduled & Unscheduled"], ["scheduled", "Scheduled"]] as const).map(([value, label]) => <button key={value} type="button" className={button} aria-pressed={scheduleFilter === value} onClick={() => setScheduleFilter(value)}>{label}</button>)}</div>
       </details>
       <div className="max-h-[65vh] overflow-auto">
-        {mode === "card" ? rows.map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID }))} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)}`}>
+        {mode === "card" ? rows.map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)}`}>
           {fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <p key={id} className="truncate" title={`${label}: ${values(wr)[id]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
           {getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄ Freeze Active at Location</span>}
           <div><button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button> <button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button> {wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</div>
         </article>) : <table className="w-full table-fixed text-left" style={{ minWidth: `${shown.length * 144 + 230}px` }}><thead><tr>{fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <th key={id} className="w-36"><button className="truncate" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button></th>)}<th className="w-56">Actions</th></tr></thead><tbody>
-          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID }))} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{fields.filter(([id]) => shown.includes(id)).map(([id]) => <td key={id} className="truncate p-1" title={values(wr)[id]}>{cell(wr, id)}</td>)}<td>{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
+          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{fields.filter(([id]) => shown.includes(id)).map(([id]) => <td key={id} className="truncate p-1" title={values(wr)[id]}>{cell(wr, id)}</td>)}<td>{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
         </tbody></table>}
         {!rows.length && <p className="p-2">No matching work requests.</p>}
       </div>

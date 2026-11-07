@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CraftpersonAbsenceSchema } from "@cafm/shared-schema";
-import { addDays, assignmentAbsences, dailyCapacity, fromWallMinutes, frozenOn, intervalFor, resolveLeaveConflicts, schedulePerson, wallMinutes } from "../../../web-portal/lib/dispatch";
+import { addDays, assignPerson, assignmentAbsences, dailyCapacity, fromWallMinutes, frozenOn, intervalFor, resolveLeaveConflicts, schedulePerson, unassignPerson, wallMinutes } from "../../../web-portal/lib/dispatch";
 import { section20Seed } from "../../../web-portal/lib/section20-seed";
 
 describe("dispatch capacity", () => {
@@ -96,6 +96,22 @@ describe("dispatch capacity", () => {
     const unscheduled = schedulePerson({ ...wr, AssignedCraftpersonIds: ["person"], CraftpersonAssignments: undefined, StartDate_DateToPerform: undefined }, second);
     expect(intervalFor(unscheduled, "person")).toBeNull();
     expect(intervalFor(unscheduled, "peer")).toEqual(second);
+    const removed = unassignPerson(both, "person");
+    expect(removed.AssignedCraftpersonIds).toEqual(["peer"]);
+    expect(intervalFor(removed, "peer")).toEqual(second);
+    expect(intervalFor(removed, "person")).toBeNull();
+    expect(intervalFor(unassignPerson(removed, "peer"), "peer")).toBeNull();
+  });
+  it("preserves legacy schedules and recorded labor when assigning and unassigning", () => {
+    const labor = { craftpersonId: "peer", name: "Peer", lastName: "Example", hourlyRate: 42, workingTimeMinutes: 45 };
+    const legacy = { ...wr, CraftpersonAssignments: undefined, CraftpersonLabor: [labor] };
+    const assigned = assignPerson(legacy, { ...labor, workingTimeMinutes: 0 });
+    expect(intervalFor(assigned, "person")?.assignedStartDateTime).toBe("2026-11-06T07:00");
+    expect(intervalFor(assigned, "peer")).toBeNull();
+    expect(assigned.CraftpersonLabor).toEqual([labor]);
+    const removed = unassignPerson(assigned, "peer");
+    expect(removed.AssignedCraftpersonIds).toEqual(["person"]);
+    expect(removed.CraftpersonLabor).toEqual([labor]);
   });
   it("seeds multi-person PM and LJ assignments at every site", () => {
     for (const site of ["SITE-01", "SITE-02", "SITE-03"] as const) {

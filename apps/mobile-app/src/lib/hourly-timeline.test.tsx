@@ -18,7 +18,7 @@ describe("hourly dispatch timeline", () => {
   const props = {
     dates: ["2026-11-09"], people: [person], requests: [wr], absences: [], freezes: [],
     site: "SITE-01", firstHour: 6, lastHour: 20, visible: () => true,
-    onMove: vi.fn(), onOpen: vi.fn(), onEdit: vi.fn(),
+    onMove: vi.fn(), onOpen: vi.fn(), onEdit: vi.fn(), onRemove: vi.fn(),
   };
   it("renders the clipped hours and previews a half-hour resize without committing until mouseup", () => {
     const onMove = vi.fn();
@@ -47,6 +47,18 @@ describe("hourly dispatch timeline", () => {
     Object.defineProperty(drop, "clientX", { value: 4 * 36 + 1 });
     fireEvent(cell!, drop);
     expect(onMove).toHaveBeenCalledWith(wr.WR_ID, person.id, "2026-11-09T10:00", "2026-11-09T13:30", person.id);
+  });
+  it("unschedules only the selected person and uses a compact trade-colored drag ghost", () => {
+    const onRemove = vi.fn(), setData = vi.fn(), setDragImage = vi.fn();
+    render(<HourlyTimeline {...props} onRemove={onRemove} />);
+    const bar = screen.getByText(wr.WR_ID).parentElement!;
+    fireEvent.dragStart(bar, { dataTransfer: { setData, setDragImage } });
+    const ghost = setDragImage.mock.calls[0][0] as HTMLElement;
+    expect(ghost.textContent).toBe(`${wr.WR_ID} (2h)`);
+    expect(ghost.style.width).toBe("88px");
+    expect(ghost.style.height).toBe("26px");
+    fireEvent.click(screen.getByTitle("Remove from calendar (Unschedule)"));
+    expect(onRemove).toHaveBeenCalledWith(wr.WR_ID, person.id);
   });
   it("hydrates server-rendered timeline markup without recoverable errors", async () => {
     const container = document.createElement("div");

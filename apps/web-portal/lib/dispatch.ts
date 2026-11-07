@@ -33,6 +33,25 @@ export function schedulePerson(wr: BaseWorkRequest, assignment: TimedAssignment)
   };
 }
 
+export function assignPerson(wr: BaseWorkRequest, labor: NonNullable<BaseWorkRequest["CraftpersonLabor"]>[number]): BaseWorkRequest {
+  if (wr.AssignedCraftpersonIds.includes(labor.craftpersonId)) return wr;
+  return {
+    ...wr,
+    AssignedCraftpersonIds: [...wr.AssignedCraftpersonIds, labor.craftpersonId],
+    CraftpersonAssignments: wr.AssignedCraftpersonIds.map((id) => intervalFor(wr, id)).filter((item): item is TimedAssignment => item !== null),
+    StartDate_DateToPerform: undefined,
+    CraftpersonLabor: wr.CraftpersonLabor?.some((item) => item.craftpersonId === labor.craftpersonId) ? wr.CraftpersonLabor : [...(wr.CraftpersonLabor ?? []), labor],
+  };
+}
+
+export function unassignPerson(wr: BaseWorkRequest, person: string): BaseWorkRequest {
+  const ids = wr.AssignedCraftpersonIds.filter((id) => id !== person);
+  const assignments = ids.map((id) => intervalFor(wr, id)).filter((item): item is TimedAssignment => item !== null);
+  return { ...wr, AssignedCraftpersonIds: ids, CraftpersonAssignments: assignments,
+    StartDate_DateToPerform: undefined, StartDateTBD: assignments.length === 0,
+    CraftpersonLabor: (wr.CraftpersonLabor ?? []).filter((item) => item.craftpersonId !== person || item.workingTimeMinutes > 0) };
+}
+
 export function absenceInterval(absence: CraftpersonAbsence, day: string) {
   if (absence.status !== "Approved" || day < absence.startDate || day > absence.endDate) return null;
   if (absence.isFullDay || !absence.startTime || !absence.endTime) return [`${day}T00:00`, `${addDays(day, 1)}T00:00`] as const;
@@ -92,7 +111,7 @@ export function dailyCapacity(wrs: BaseWorkRequest[], absences: CraftpersonAbsen
 export function resolveLeaveConflicts(
   requests: BaseWorkRequest[],
   absences: CraftpersonAbsence[],
-  people: Array<{ id: string; SiteId: string; Trade: string; ShiftHours: number; shiftStart?: string; shiftEnd?: string; secondaryTradeIds?: string[] }>,
+  people: Array<{ id: string; SiteId: string; Trade: string; ShiftHours: number; Name?: string; LastName?: string; HourlyRate?: number; shiftStart?: string; shiftEnd?: string; secondaryTradeIds?: string[] }>,
   absence: CraftpersonAbsence,
   mode: "unassign" | "reassign",
   audit: (wr: BaseWorkRequest, text: string) => BaseWorkRequest,
@@ -118,11 +137,12 @@ export function resolveLeaveConflicts(
         return true;
       })()) : undefined;
     if (mode === "reassign" && !peer) { unresolved++; continue; }
-    const ids = wr.AssignedCraftpersonIds.filter((id) => id !== absence.craftpersonId);
-    if (peer) ids.push(peer.id);
-    const assignments = (wr.CraftpersonAssignments ?? []).filter((item) => item.craftpersonId !== absence.craftpersonId);
-    if (peer && wr.CraftpersonAssignments?.some((item) => item.craftpersonId === absence.craftpersonId)) assignments.push({ ...interval, craftpersonId: peer.id });
-    const next = audit({ ...wr, AssignedCraftpersonIds: ids, CraftpersonAssignments: wr.CraftpersonAssignments ? assignments : undefined }, `Leave conflict: ${absence.craftpersonId} ${peer ? `reassigned to ${peer.id}` : "unassigned"}`);
+    let result = unassignPerson(wr, absence.craftpersonId);
+    if (peer) {
+      result = assignPerson(result, { craftpersonId: peer.id, name: peer.Name ?? peer.id, lastName: peer.LastName ?? "", hourlyRate: peer.HourlyRate ?? 0, workingTimeMinutes: 0 });
+      result = schedulePerson(result, { ...interval, craftpersonId: peer.id });
+    }
+    const next = audit(result, `Leave conflict: ${absence.craftpersonId} ${peer ? `reassigned to ${peer.id}` : "unassigned"}`);
     updated = updated.map((item) => item === wr ? next : item);
   }
   return { requests: updated, unresolved };

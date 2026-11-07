@@ -37,8 +37,10 @@ describe("work request source panel", () => {
     expect(screen.getByRole("columnheader", { name: /Margin Date/ })).toBeTruthy();
     const row = screen.getByText("PM-1").closest("tr")!;
     const setData = vi.fn();
-    fireEvent.dragStart(row, { dataTransfer: { setData } });
+    const setDragImage = vi.fn();
+    fireEvent.dragStart(row, { dataTransfer: { setData, setDragImage } });
     expect(setData).toHaveBeenCalledWith("application/json", JSON.stringify({ id: "PM-1" }));
+    expect(setDragImage).toHaveBeenCalledWith(expect.any(HTMLElement), 12, 13);
     fireEvent.click(within(row).getByRole("button", { name: /Open/ }));
     expect(onOpen).toHaveBeenCalledWith("PM-1");
     view.unmount();
@@ -58,12 +60,24 @@ describe("work request source panel", () => {
     const scheduled = { ...pm, AssignedCraftpersonIds: [seed.craftspeople[0].id], CraftpersonAssignments: [{ craftpersonId: seed.craftspeople[0].id, assignedStartDateTime: "2026-11-09T08:00", assignedEndDateTime: "2026-11-09T11:00" }] };
     const onShow = vi.fn();
     render(<WRSourcePanel {...props} requests={[scheduled]} onShow={onShow} />);
-    expect(screen.getByLabelText("Show scheduled WRs")).toHaveProperty("checked", true);
+    expect(screen.getByRole("button", { name: "Scheduled & Unscheduled" }).getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: /Show$/ }));
     fireEvent.click(screen.getByRole("button", { name: "List View" }));
     fireEvent.click(screen.getByRole("button", { name: /Show$/ }));
     expect(onShow).toHaveBeenCalledTimes(2);
     expect(onShow).toHaveBeenCalledWith("PM-1");
+  });
+  it("filters scheduled, unscheduled and mixed requests", () => {
+    const scheduled = { ...pm, AssignedCraftpersonIds: [seed.craftspeople[0].id], CraftpersonAssignments: [{ craftpersonId: seed.craftspeople[0].id, assignedStartDateTime: "2026-11-09T08:00", assignedEndDateTime: "2026-11-09T11:00" }] };
+    render(<WRSourcePanel {...props} requests={[scheduled, lj]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Scheduled", exact: true }));
+    expect(screen.getByText("Pump")).toBeTruthy();
+    expect(screen.queryByText("Repair")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Unscheduled", exact: true }));
+    expect(screen.queryByText("Pump")).toBeNull();
+    expect(screen.getByText("Repair")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Scheduled & Unscheduled" }));
+    expect(screen.getByText("Pump")).toBeTruthy();
   });
   it("filters independently by multiple trades and buildings", () => {
     const first = { ...pm, TradeName: "Mechanical", bl_id: seed.buildings[0].bl_id };

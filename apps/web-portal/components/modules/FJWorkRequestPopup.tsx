@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
+import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
+import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
@@ -134,19 +136,15 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
             <label className="rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white">Assign Craftperson
               <select aria-label="Assign Craftperson" className="ml-2 rounded text-slate-900" value="" onChange={(e) => {
                 const person = craftpeople.find((item) => item.id === e.target.value);
-                if (!person || (workRequest.CraftpersonLabor ?? []).some((line) => line.craftpersonId === person.id)) return;
-                update((wr) => ({ ...wr, CraftpersonLabor: [...(wr.CraftpersonLabor ?? []), {
+                if (!person || workRequest.AssignedCraftpersonIds.includes(person.id)) return;
+                update((wr) => assignPerson(wr, {
                   craftpersonId: person.id, hourlyRate: person.HourlyRate, workingTimeMinutes: 0,
                   name: person.Name, lastName: person.LastName,
-                }] }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
+                }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
               }}><option value="">Select…</option>{craftpeople.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} ({person.Trade})</option>)}</select>
             </label>
           </div>
-          <div className="overflow-x-auto rounded border bg-white"><table className="w-full min-w-[700px] text-left text-sm"><thead className="bg-slate-50"><tr>{["Hourly rate", "Working time (minutes)", "Name", "LastName", "Action"].map((head) => <th key={head} className="p-3">{head}</th>)}</tr></thead>
-            <tbody>{(workRequest.CraftpersonLabor ?? []).map((row) => <tr key={row.craftpersonId} className="border-t">
-              <td className="p-3">{row.hourlyRate.toFixed(2)} EUR</td><td className="p-3"><input type="number" min="0" value={row.workingTimeMinutes} onChange={(e) => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).map((line) => line.craftpersonId === row.craftpersonId ? { ...line, workingTimeMinutes: Number(e.target.value) } : line) }))} className="w-28 rounded border px-2 py-1" /></td>
-              <td className="p-3">{row.name}</td><td className="p-3">{row.lastName}</td><td className="p-3"><button className="text-red-700" onClick={() => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).filter((line) => line.craftpersonId !== row.craftpersonId) }), `${row.name} ${row.lastName} removed by ${actorName}`)}>Remove</button></td></tr>)}
-              {!workRequest.CraftpersonLabor?.length && <tr><td className="p-4 text-slate-500" colSpan={5}>No craftpeople assigned.</td></tr>}</tbody></table></div>
+          <WorkRequestLabor wr={workRequest} people={craftpeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} />
           <section className="rounded border bg-white p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">Spare parts / materials</h3><button type="button" onClick={() => update((wr) => ({ ...wr, SpareParts: [...(wr.SpareParts ?? []), { id: crypto.randomUUID(), description: "", quantity: 1, unitCostEur: 0 }] }), `Spare part row added by ${actorName}`)} className="rounded border px-3 py-1 text-sm">+ Add Part</button></div>
             <div className="mt-3 space-y-2">{(workRequest.SpareParts ?? []).map((part) => <div key={part.id} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
               <input aria-label="Spare part description" value={part.description} onChange={(e) => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).map((item) => item.id === part.id ? { ...item, description: e.target.value } : item) }))} placeholder="Description" className="rounded border px-2 py-1" />

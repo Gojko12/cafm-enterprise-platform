@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest, CraftpersonAbsence } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
-import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, resolveLeaveConflicts, schedulePerson, wallMinutes } from "@/lib/dispatch";
+import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, resolveLeaveConflicts, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
 import { HourlyTimeline } from "@/components/modules/HourlyTimeline";
 import type { TimelineSpotlight } from "@/components/modules/HourlyTimeline";
 import { MultiSelectFilter } from "@/components/common/MultiSelectFilter";
@@ -49,7 +49,9 @@ function SchedulerContent() {
   const [tab, setTab] = useState<"dispatch" | "availability" | "freezes">("dispatch");
   const [firstHour, setFirstHour] = useState(6);
   const [lastHour, setLastHour] = useState(20);
-  const [weekends, setWeekends] = useState(true);
+  const [weekends, setWeekends] = useState(false);
+  const [isolateWrId, setIsolateWrId] = useState<string | null>(null);
+  const focusHandled = useRef("");
   const [open, setOpen] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [leaveFor, setLeaveFor] = useState<string | null>(null);
@@ -71,7 +73,7 @@ function SchedulerContent() {
     const value = searchParams.get("tab");
     setTab(value === "freezes" || value === "availability" ? value : "dispatch");
   }, [searchParams]);
-  useEffect(() => { setSelectedPeople(null); setBuildings(null); setSpotlight(null); setShowChoices(null); }, [activeSiteId]);
+  useEffect(() => { setSelectedPeople(null); setBuildings(null); setSpotlight(null); setShowChoices(null); setIsolateWrId(null); }, [activeSiteId]);
   useEffect(() => {
     if (!spotlight) return;
     const timer = window.setTimeout(() => setSpotlight(null), 5000);
@@ -89,8 +91,8 @@ function SchedulerContent() {
   const people = data.craftspeople.filter((person) => person.SiteId === activeSiteId);
   const days = view === "day" ? 1 : view === "week" ? 7 : view === "two" ? 14 : new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
   const start = view === "month" ? `${date.slice(0, 7)}-01` : date;
-  const dates = Array.from({ length: days }, (_, index) => addDays(start, index)).filter((day) => weekends || (view !== "week" && view !== "two") || ![0, 6].includes(new Date(`${day}T12:00:00`).getDay()));
-  const visible = (wr: BaseWorkRequest) => types.includes(wr.WR_Type) && (types.includes("Frozen") || !wr.IsFrozen) && (types.includes("Completed") || ![78, 100].includes(wr.Percentage));
+  const dates = Array.from({ length: days }, (_, index) => addDays(start, index)).filter((day) => weekends || view === "day" || ![0, 6].includes(new Date(`${day}T12:00:00`).getDay()));
+  const visible = (wr: BaseWorkRequest) => (!isolateWrId || wr.WR_ID === isolateWrId) && types.includes(wr.WR_Type) && (types.includes("Frozen") || !wr.IsFrozen) && (types.includes("Completed") || ![78, 100].includes(wr.Percentage));
   const filteredPeople = people.filter((person) => (trades === null || trades.includes(person.Trade)) &&
     (selectedPeople === null || selectedPeople.includes(person.id)) &&
     (buildings === null || siteRequests.some((wr) => wr.bl_id && buildings.includes(wr.bl_id) && wr.AssignedCraftpersonIds.includes(person.id))) &&
@@ -134,7 +136,9 @@ function SchedulerContent() {
       if (!current || JSON.stringify(current) !== JSON.stringify(wr) || JSON.stringify(state.craftpersonAbsences) !== snapshot || !state.craftspeople.some((item) => item.id === person.id && item.SiteId === activeSiteId && JSON.stringify(item) === JSON.stringify(person))) {
         queueMicrotask(() => setError("Request, availability or craftsperson changed. Retry scheduling.")); return state;
       }
-      const next = audit(schedulePerson(current, assignment), `Scheduled ${person.id}: ${startTime} – ${endTime}${leave.length ? "; leave override" : ""}${offShift ? "; off-shift override" : ""}${mismatch ? "; trade mismatch override" : ""}${reason ? `; margin override: ${reason}` : ""} by ${activePerson}`);
+      const scheduled = schedulePerson(current, assignment);
+      if (!scheduled.CraftpersonLabor?.some((item) => item.craftpersonId === person.id)) scheduled.CraftpersonLabor = [...(scheduled.CraftpersonLabor ?? []), { craftpersonId: person.id, name: person.Name, lastName: person.LastName, hourlyRate: person.HourlyRate, workingTimeMinutes: 0 }];
+      const next = audit(scheduled, `Scheduled ${person.id}: ${startTime} – ${endTime}${leave.length ? "; leave override" : ""}${offShift ? "; off-shift override" : ""}${mismatch ? "; trade mismatch override" : ""}${reason ? `; margin override: ${reason}` : ""} by ${activePerson}`);
       const conflicts = getActiveFreezeConflictsForWR(next, state.locationFreezes);
       queueMicrotask(() => setNotice(conflicts.length ? `❄ Planned in Freeze Period: ${conflicts.map(describeLocationFreeze).join("; ")}` : ""));
       return { ...state, workRequests: state.workRequests.map((item) => item === current ? next : item) };
@@ -184,15 +188,47 @@ function SchedulerContent() {
   const showRequest = (id: string) => {
     const wr = siteRequests.find((item) => item.WR_ID === id);
     if (!wr) { setError("Work request is no longer available."); return; }
+    if (isolateWrId && isolateWrId !== id) {
+      setIsolateWrId(null);
+      const url = new URL(window.location.href);
+      ["focusWrId", "focusCraftpersonId", "focusStart", "isolateWr"].forEach((key) => url.searchParams.delete(key));
+      window.history.replaceState(null, "", url);
+    }
     const assignments = wr.AssignedCraftpersonIds.filter((id) => intervalFor(wr, id));
     if (!assignments.length) { setError("This request has no scheduled assignment."); return; }
     if (assignments.length === 1) locate(wr, assignments[0]); else setShowChoices(id);
+  };
+  useEffect(() => {
+    const id = searchParams.get("focusWrId"), person = searchParams.get("focusCraftpersonId");
+    const key = `${activeSiteId}:${searchParams.toString()}`;
+    if (!id || !person) { focusHandled.current = ""; setIsolateWrId(null); return; }
+    if (focusHandled.current === key) return;
+    const wr = siteRequests.find((item) => item.WR_ID === id);
+    if (!wr || !people.some((item) => item.id === person) || !intervalFor(wr, person)) {
+      setError("The requested assignment is unavailable for this site."); focusHandled.current = key; return;
+    }
+    focusHandled.current = key;
+    setIsolateWrId(searchParams.get("isolateWr") === "true" ? id : null);
+    locate(wr, person);
+    if (searchParams.get("focusStart") && searchParams.get("focusStart") !== intervalFor(wr, person)?.assignedStartDateTime) setNotice("The assignment has moved; showing its current scheduled time.");
+  });
+  const removeAssignment = (id: string, person: string) => {
+    const original = siteRequests.find((item) => item.WR_ID === id);
+    if (!original || !original.AssignedCraftpersonIds.includes(person)) { setError("Assignment is no longer available."); return; }
+    if (!window.confirm(`Remove ${person} from ${id}?`)) return;
+    setData((state) => {
+      const current = state.workRequests.find((item) => item.SiteId === activeSiteId && item.WR_ID === id);
+      if (!current || JSON.stringify(current) !== JSON.stringify(original)) { queueMicrotask(() => setError("Request changed; retry.")); return state; }
+      return { ...state, workRequests: state.workRequests.map((item) => item === current ? audit(unassignPerson(current, person), `Unassigned ${person} by ${activePerson}`) : item) };
+    });
+    setEditTime(null);
   };
   return <div className="space-y-2 p-3 text-xs">
     <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button></div>
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
+    {isolateWrId && <div role="status" className="rounded bg-blue-100 p-2">Showing only assignments for WR {isolateWrId} <button className={button} onClick={() => { setIsolateWrId(null); const url = new URL(window.location.href); ["focusWrId", "focusCraftpersonId", "focusStart", "isolateWr"].forEach((key) => url.searchParams.delete(key)); window.history.replaceState(null, "", url); }}>Show All Calendar WRs ✕</button></div>}
     <div className="flex flex-wrap items-center gap-2 rounded border bg-white p-2">
       <button className={button} onClick={() => moveDate(-1)}>◀ Prev</button><button className={button} onClick={() => setDate(calendarDate(new Date()))}>Today</button><button className={button} onClick={() => moveDate(1)}>Next ▶</button>
       <strong>{dates[0]} – {dates[dates.length - 1]}</strong>
@@ -208,7 +244,7 @@ function SchedulerContent() {
     </div>
     <p>Shift Hours · <span className="bg-slate-100">Off-Shift</span> · <span className="bg-amber-100">🏖 Vacation</span> · <span className="bg-indigo-100">🎓 Training</span> · <span className="bg-rose-100">🤒 Sick Leave</span> · ❄ Location Freeze</p>
     <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} onOpen={setOpen} onShow={showRequest} onAssign={(id) => { setQuickPerson(""); setQuickDate(date); setQuickAssign(id); }} />
-      <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
+      <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
     {tab === "availability" && <div className="space-y-4 rounded border bg-white p-3">
@@ -231,7 +267,7 @@ function SchedulerContent() {
     </div>}
     {showChoices && (() => { const wr = siteRequests.find((item) => item.WR_ID === showChoices); return wr ? <AssignmentLocatorDialog request={wr} people={people} onSelect={(id) => locate(wr, id)} onClose={() => setShowChoices(null)} /> : null; })()}
     {quickAssign && <div role="dialog" aria-modal="true" aria-label="Assign work request" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: quickAssign, person: quickPerson, date: quickDate }); }}><h2 className="font-bold">Assign {quickAssign}</h2><select required className="block border p-1" value={quickPerson} onChange={(event) => setQuickPerson(event.target.value)}><option value="">Select craftsperson</option>{people.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}</select><input required type="date" className="block border p-1" value={quickDate} onChange={(event) => setQuickDate(event.target.value)} /><button className={button}>Assign</button> <button type="button" className={button} onClick={() => setQuickAssign(null)}>Cancel</button></form></div>}
-    {editTime && <div role="dialog" aria-modal="true" aria-label="Edit assignment time" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: editTime.id, person: editTime.person, from: editTime.person, date: editTime.start.slice(0, 10), start: editTime.start, end: editTime.end }); }}><h2 className="font-bold">Edit {editTime.id}</h2><label className="block">Start <input required type="datetime-local" value={editTime.start} onChange={(event) => setEditTime({ ...editTime, start: event.target.value })} /></label><label className="block">End <input required type="datetime-local" value={editTime.end} onChange={(event) => setEditTime({ ...editTime, end: event.target.value })} /></label><button className={button}>Save</button> <button type="button" className={button} onClick={() => setEditTime(null)}>Cancel</button></form></div>}
+    {editTime && <div role="dialog" aria-modal="true" aria-label="Edit assignment time" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: editTime.id, person: editTime.person, from: editTime.person, date: editTime.start.slice(0, 10), start: editTime.start, end: editTime.end }); }}><h2 className="font-bold">Edit {editTime.id}</h2><label className="block">Start <input required type="datetime-local" value={editTime.start} onChange={(event) => setEditTime({ ...editTime, start: event.target.value })} /></label><label className="block">End <input required type="datetime-local" value={editTime.end} onChange={(event) => setEditTime({ ...editTime, end: event.target.value })} /></label><button className={button}>Save</button> <button type="button" className={button} title="Remove from calendar (Unschedule)" onClick={() => removeAssignment(editTime.id, editTime.person)}>✕ Unschedule</button> <button type="button" className={button} onClick={() => setEditTime(null)}>Cancel</button></form></div>}
     {leaveFor !== null && <AbsenceForm people={people} initial={leaveFor} existing={editLeave} onClose={() => setLeaveFor(null)} onSave={(entry) => {
       setData((state) => {
         const current = state.craftpersonAbsences.find((item) => item.id === entry.id && item.siteId === activeSiteId);

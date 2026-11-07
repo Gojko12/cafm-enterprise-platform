@@ -12,6 +12,8 @@ import { useCafmStore } from "@/lib/cafm-store";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
+import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
+import { assignPerson } from "@/lib/dispatch";
 
 const TABS = [
   "Work request details",
@@ -59,7 +61,6 @@ export function PMWorkRequestPopup({
   const [executorOpen, setExecutorOpen] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [craftFilter, setCraftFilter] = useState("");
-  const [craftTableFilter, setCraftTableFilter] = useState("");
   const [documentFilter, setDocumentFilter] = useState("");
   const [stepFilter, setStepFilter] = useState("");
   const [stepCompletionFilter, setStepCompletionFilter] = useState("all");
@@ -397,11 +398,7 @@ export function PMWorkRequestPopup({
       if ((workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
       const labor = { craftpersonId: userId, hourlyRate: craftperson.HourlyRate, workingTimeMinutes: 0,
         name: craftperson.Name, lastName: craftperson.LastName };
-      updateWorkRequest((current) => ({
-        ...current,
-        AssignedCraftpersonIds: [...(current.AssignedCraftpersonIds ?? []), userId],
-        CraftpersonLabor: [...(current.CraftpersonLabor ?? []), labor],
-      }), `Craftperson ${craftperson.Name} ${craftperson.LastName} assigned to ${workRequest.WR_ID} by ${actorName}`);
+      updateWorkRequest((current) => assignPerson(current, labor), `Craftperson ${craftperson.Name} ${craftperson.LastName} assigned to ${workRequest.WR_ID} by ${actorName}`);
       setAssignModalOpen(false);
       setCraftFilter("");
       return;
@@ -417,22 +414,9 @@ export function PMWorkRequestPopup({
       name: names.join(" ") || lastName,
       lastName,
     };
-    updateWorkRequest((current) => ({
-      ...current,
-      AssignedCraftpersonIds: [...(current.AssignedCraftpersonIds ?? []), userId],
-      CraftpersonLabor: [...(current.CraftpersonLabor ?? []), labor],
-    }), `Craftperson ${user.DisplayName} assigned to ${workRequest.WR_ID} by ${actorName}`);
+    updateWorkRequest((current) => assignPerson(current, labor), `Craftperson ${user.DisplayName} assigned to ${workRequest.WR_ID} by ${actorName}`);
     setAssignModalOpen(false);
     setCraftFilter("");
-  };
-
-  const updateLabor = (craftpersonId: string, field: "hourlyRate" | "workingTimeMinutes", value: number) => {
-    updateWorkRequest((current) => ({
-      ...current,
-      CraftpersonLabor: (current.CraftpersonLabor ?? []).map((labor) =>
-        labor.craftpersonId === craftpersonId ? { ...labor, [field]: value } : labor,
-      ),
-    }), `Labor details updated for ${craftpersonId} by ${actorName}`);
   };
 
   const addFollowUp = () => {
@@ -664,36 +648,7 @@ export function PMWorkRequestPopup({
                 Assign Craftperson
               </button>
             </div>
-            <div className="overflow-x-auto rounded border bg-white">
-              <div className="border-b p-3">
-                <input aria-label="Filter craftperson labor" value={craftTableFilter}
-                  onChange={(event) => setCraftTableFilter(event.target.value)} placeholder="Filter craftpeople..."
-                  className="rounded border px-3 py-2 text-sm" />
-              </div>
-              <table className="w-full min-w-[700px] text-left text-sm">
-                <thead className="bg-slate-50"><tr>
-                  <th className="p-3">Hourly rate</th><th className="p-3">Working time (hours/minutes)</th>
-                  <th className="p-3">Name</th><th className="p-3">LastName</th>
-                </tr></thead>
-                <tbody>
-                  {(workRequest.CraftpersonLabor ?? []).filter((labor) =>
-                    `${labor.name} ${labor.lastName}`.toLowerCase().includes(craftTableFilter.toLowerCase()),
-                  ).map((labor) => (
-                    <tr key={labor.craftpersonId} className="border-t">
-                      <td className="p-3"><label className="sr-only">Hourly rate</label><input type="number" min="0" step="0.01"
-                        value={labor.hourlyRate} onChange={(event) => updateLabor(labor.craftpersonId, "hourlyRate", Math.max(0, Number(event.target.value)))}
-                        className="w-28 rounded border px-2 py-1" /></td>
-                      <td className="p-3"><label className="sr-only">Working time in minutes</label><input type="number" min="0"
-                        value={labor.workingTimeMinutes}
-                        onChange={(event) => updateLabor(labor.craftpersonId, "workingTimeMinutes", Math.max(0, Number(event.target.value)))}
-                        className="w-28 rounded border px-2 py-1" /> min ({Math.floor(labor.workingTimeMinutes / 60)}h {labor.workingTimeMinutes % 60}m)</td>
-                      <td className="p-3">{labor.name}</td><td className="p-3">{labor.lastName}</td>
-                    </tr>
-                  ))}
-                  {!workRequest.CraftpersonLabor?.length && <tr><td colSpan={4} className="p-5 text-center text-slate-500">No craftspeople assigned.</td></tr>}
-                </tbody>
-              </table>
-            </div>
+            <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} />
             <div className="grid gap-3 rounded border bg-white p-4 md:grid-cols-[1fr_2fr]">
               <label className="text-sm font-medium">WR Statuses
                 <select aria-label="WR Statuses" value={currentStatusChoice?.key ?? ""}

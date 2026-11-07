@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
+import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
+import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest, LJRole } from "@cafm/shared-schema";
 import { useCafmStore, ASSIGNMENT_ROLES } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -424,17 +426,12 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
           </div>
           <label className="text-sm font-medium">Assign Craftperson<select aria-label="Assign Craftperson to Long Job" value="" onChange={(e) => {
             const person = data.craftspeople.find((item) => item.id === e.target.value && item.SiteId === workRequest.SiteId);
-            if (!person || (workRequest.CraftpersonLabor ?? []).some((line) => line.craftpersonId === person.id)) return;
-            update((wr) => ({ ...wr, CraftpersonLabor: [...(wr.CraftpersonLabor ?? []), {
+            if (!person || workRequest.AssignedCraftpersonIds.includes(person.id)) return;
+            update((wr) => assignPerson(wr, {
               craftpersonId: person.id, hourlyRate: person.HourlyRate, workingTimeMinutes: 0, name: person.Name, lastName: person.LastName,
-            }] }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
+            }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
           }} className="ml-3 rounded border px-3 py-2"><option value="">Select craftperson</option>{data.craftspeople.filter((item) => item.SiteId === workRequest.SiteId).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} — {person.Trade}</option>)}</select></label>
-          <div className="overflow-x-auto rounded border"><table className="w-full text-left text-sm"><thead className="bg-slate-50"><tr>{["Hourly rate", "Working time (minutes)", "Name", "LastName", "Action"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
-            {(workRequest.CraftpersonLabor ?? []).map((person) => <tr key={person.craftpersonId} className="border-t">
-              <td className="p-3"><input type="number" min="0" step="0.01" value={person.hourlyRate} onChange={(e) => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).map((line) => line.craftpersonId === person.craftpersonId ? { ...line, hourlyRate: Number(e.target.value) } : line) }))} className="w-24 rounded border px-2 py-1" /> EUR</td>
-              <td className="p-3"><input type="number" min="0" value={person.workingTimeMinutes} onChange={(e) => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).map((line) => line.craftpersonId === person.craftpersonId ? { ...line, workingTimeMinutes: Number(e.target.value) } : line) }))} className="w-28 rounded border px-2 py-1" /></td>
-              <td className="p-3">{person.name}</td><td className="p-3">{person.lastName}</td><td className="p-3"><button onClick={() => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).filter((line) => line.craftpersonId !== person.craftpersonId) }), `${person.name} ${person.lastName} removed by ${actorName}`)} className="text-red-700">Remove</button></td></tr>)}
-            {!workRequest.CraftpersonLabor?.length && <tr><td colSpan={5} className="p-3 text-slate-500">No craftspeople assigned.</td></tr>}</tbody></table></div>
+          <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} />
           <button disabled={workRequest.Percentage !== 50 && workRequest.Percentage !== 55} onClick={() => stage(required ? 78 : 94, required ? "Technically Completed" : "All acceptance gates waived", {}, ["TRADE_TM", "TRADE_LONG_JOB", "ESA_IM"])} className="rounded bg-green-700 px-4 py-2 font-semibold text-white disabled:opacity-40">Technically Completed ({required ? "78%" : "94%"})</button>
           <p className="text-xs text-slate-500">Acceptance configured: {required ? "Yes" : "No"}; SLA margin dates remain available in the core record.</p>
         </section>}
