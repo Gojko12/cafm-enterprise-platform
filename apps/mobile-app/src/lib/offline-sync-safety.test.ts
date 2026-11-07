@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
   const transaction = vi.fn((stores: string[], mode: string) => ({
     objectStore: (name: string) => ({
       put: name === "workRequests" ? putWorkRequest : putMutation,
+      get,
     }),
     done: Promise.resolve(),
   }));
@@ -44,7 +45,7 @@ describe("offline sync safety", () => {
     expect(mocks.transaction).toHaveBeenCalledWith(["workRequests", "syncQueue"], "readwrite");
     expect(mocks.putWorkRequest).toHaveBeenCalledWith(wr);
     expect(mocks.putMutation).toHaveBeenCalledWith(
-      expect.objectContaining({ MutationType: "WR_UPDATE", Payload: wr, SyncStatus: "PENDING" }),
+      expect.objectContaining({ MutationType: "WR_UPDATE", Payload: wr, BaseWorkRequest: null, SyncStatus: "PENDING" }),
     );
   });
 

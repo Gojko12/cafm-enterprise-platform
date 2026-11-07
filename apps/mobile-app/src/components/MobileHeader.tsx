@@ -1,15 +1,19 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { formatDistanceToNow } from "date-fns";
+import type { SiteId } from "@cafm/shared-schema";
+import type { SyncStatus } from "../lib/offline-engine";
 
 interface MobileHeaderProps {
-  activeSiteId: string;
-  onSyncNow?: () => Promise<void>;
+  activeSiteId: SiteId;
+  onSiteChange?: (site: SiteId) => void;
+  onSyncNow?: () => Promise<SyncStatus>;
   isSimulatedOffline?: boolean;
   onToggleOfflineMode?: (isOffline: boolean) => void;
 }
 
 export const MobileHeader: React.FC<MobileHeaderProps> = ({
   activeSiteId,
+  onSiteChange,
   onSyncNow,
   isSimulatedOffline = false,
   onToggleOfflineMode,
@@ -17,22 +21,17 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [displaySiteId, setDisplaySiteId] = useState(activeSiteId);
-
-  useEffect(() => {
-    setDisplaySiteId(activeSiteId);
-  }, [activeSiteId]);
 
   const handleSyncNow = async () => {
     setIsSyncing(true);
     try {
       if (onSyncNow) {
-        await onSyncNow();
+        const status = await onSyncNow();
+        setPendingCount(status.pending);
       } else {
         throw new Error("Synchronization is not available.");
       }
       setLastSyncTime(new Date());
-      setPendingCount(0);
     } catch (error) {
       console.error("Sync failed:", error);
       alert(error instanceof Error ? error.message : "Synchronization failed.");
@@ -60,7 +59,14 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
           <div className="flex items-center gap-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
               <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
-              {displaySiteId}
+              <select aria-label="Active site" value={activeSiteId} onChange={(event) => {
+                const site = event.target.value;
+                if (site === "SITE-01" || site === "SITE-02" || site === "SITE-03") onSiteChange?.(site);
+              }} className="bg-transparent">
+                <option value="SITE-01">SITE-01</option>
+                <option value="SITE-02">SITE-02</option>
+                <option value="SITE-03">SITE-03</option>
+              </select>
             </div>
 
             {/* Online/Offline Toggle */}

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   initOfflineEngine,
   getOfflineEngine,
@@ -158,6 +158,26 @@ describe("WorkSession Timer", () => {
 
     const result = await stopWorkSession(sessionId);
     expect(result.totalTimeMinutes).toBeGreaterThanOrEqual(0);
+  });
+
+  it("excludes multiple pauses from the logged session", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T10:00:00Z"));
+      const sessionId = await startWorkSession("2026000001", "TECH001");
+      vi.setSystemTime(new Date("2026-01-01T10:10:00Z"));
+      await pauseWorkSession(sessionId);
+      vi.setSystemTime(new Date("2026-01-01T10:20:00Z"));
+      await resumeWorkSession(sessionId);
+      vi.setSystemTime(new Date("2026-01-01T10:25:00Z"));
+      await pauseWorkSession(sessionId);
+      vi.setSystemTime(new Date("2026-01-01T10:30:00Z"));
+      expect(await stopWorkSession(sessionId)).toEqual({ totalTimeMinutes: 15 });
+      await expect(stopWorkSession(sessionId)).rejects.toThrow("already stopped");
+      expect(await (await getDB()).getAllFromIndex("syncQueue", "by-type", "SESSION_LOG")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("should support timer override reason", async () => {

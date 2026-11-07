@@ -1,5 +1,6 @@
 import { getDB } from "./db.js";
-import { BaseWorkRequest, Building, Floor, Room, Equipment } from "@cafm/shared-schema";
+import { BaseWorkRequest, Building, Floor, Room, Equipment, SiteId } from "@cafm/shared-schema";
+import { stable, synchronizePortal } from "./portal-sync";
 
 /**
  * Generate UUID v4
@@ -63,6 +64,9 @@ export async function compressPhoto(
 export class OfflineEngine {
   private isOnline: boolean = navigator.onLine;
   private syncInProgress: boolean = false;
+  private site: SiteId = "SITE-01";
+  private person = "TECH-001";
+  private simulatedOffline = false;
   private onlineChangeListeners: Array<(isOnline: boolean) => void> = [];
   private syncStatusListeners: Array<(status: SyncStatus) => void> = [];
 
@@ -89,17 +93,30 @@ export class OfflineEngine {
     this.syncStatusListeners.push(listener);
   }
 
+  configureSync(site: SiteId, person: string, simulatedOffline = false): void {
+    this.site = site;
+    this.person = person;
+    this.simulatedOffline = simulatedOffline;
+  }
+
   /**
    * Write work request to local persistence
    */
-  async saveWorkRequest(wr: BaseWorkRequest): Promise<void> {
+  async saveWorkRequest(wr: BaseWorkRequest, expectedBase?: BaseWorkRequest | null): Promise<void> {
     const db = await getDB();
     const tx = db.transaction(["workRequests", "syncQueue"], "readwrite");
+    const previous = await tx.objectStore("workRequests").get(wr.WR_ID);
+    if (expectedBase !== undefined && stable(previous ?? null) !== stable(expectedBase)) {
+      tx.abort();
+      await tx.done.catch(() => undefined);
+      throw new Error(`Work request ${wr.WR_ID} changed while it was being edited. Your edits were not saved.`);
+    }
     await tx.objectStore("workRequests").put(wr);
     await tx.objectStore("syncQueue").put({
       QueueId: uuidv4(),
       MutationType: "WR_UPDATE",
       Payload: wr,
+      BaseWorkRequest: previous ?? null,
       SyncStatus: "PENDING",
       CreatedAt: new Date().toISOString(),
       RetryCount: 0,
@@ -276,14 +293,20 @@ export class OfflineEngine {
     payload: Record<string, unknown>,
   ): Promise<void> {
     const db = await getDB();
-    await db.put("syncQueue", {
+    const tx = db.transaction(["workRequests", "syncQueue"], "readwrite");
+    const wrId = payload.WR_ID;
+    const baseline = mutationType === "STEP_COMPLETE" && typeof wrId === "string"
+      ? await tx.objectStore("workRequests").get(wrId) : undefined;
+    await tx.objectStore("syncQueue").put({
       QueueId: uuidv4(),
       MutationType: mutationType,
       Payload: payload,
+      ...(mutationType === "STEP_COMPLETE" ? { BaseWorkRequest: baseline ?? null } : {}),
       SyncStatus: "PENDING",
       CreatedAt: new Date().toISOString(),
       RetryCount: 0,
     });
+    await tx.done;
   }
 
   /**
@@ -314,7 +337,15 @@ export class OfflineEngine {
       status.pending = syncItems.length + photoItems.length;
       status.lastSyncTime = await this.getLastSyncTime();
       this.syncStatusListeners.forEach((listener) => listener(status));
-      throw new Error("Synchronization is not configured. Changes remain on this device.");
+      if (this.simulatedOffline || !this.isOnline) {
+        throw new Error("Device is offline. Changes remain on this device.");
+      }
+      const result = await synchronizePortal(db, this.site, this.person, syncItems, photoItems);
+      status.synced = result.synced;
+      status.pending = result.pending;
+      status.lastSyncTime = result.lastSyncTime;
+      this.syncStatusListeners.forEach((listener) => listener(status));
+      return status;
     } finally {
       this.syncInProgress = false;
     }

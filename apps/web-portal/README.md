@@ -6,11 +6,25 @@ Production-grade Next.js (App Router) web application for the Enterprise CAFM & 
 
 ### Demo state
 
-The site switcher is available for all three demo sites. Locations, equipment,
-work requests, and checklist blueprints in the connected views use the
-browser's `cafm-demo-data-v1` localStorage entry. Reset Demo Data replaces that
-entry after confirmation. This is browser-local demo data, not shared or
-access-controlled persistence.
+The site switcher is available for all three demo sites. Connected views cache
+each site's state in localStorage. When local demo sync is configured, they
+also synchronize it to `.data/cafm-db.json` through `/api/cafm-state`. Reset
+Demo Data replaces the selected site's state after confirmation. Conflicting
+local edits are retained and reported instead of silently overwritten.
+
+Local sync is disabled until a shared token is configured. Generate a random
+token of at least 32 characters locally; set `CAFM_SYNC_TOKEN` and
+`NEXT_PUBLIC_CAFM_SYNC_TOKEN` to that value in the web portal's `.env.local`,
+and `VITE_CAFM_SYNC_TOKEN` to the same value in the mobile app's `.env.local`.
+Restart both development servers after changing the variables. Open the portal
+for a site first so it can initialize that site's server state. No Firebase
+credentials are required for this local sync.
+
+Only the localhost ports 3000 and 3001 are allowed by CORS. Site and person
+headers are demo selectors, not authenticated identities; the token is exposed
+to both clients and is not per-user authorization. Keep the servers on a
+trusted machine and network. This mode does not provide production RBAC or
+security isolation against a user who can access the demo token.
 
 Trade-role assignments and demo users, PM schedules, generated work requests,
 checklist snapshots, activity entries, comments and attachments also use this

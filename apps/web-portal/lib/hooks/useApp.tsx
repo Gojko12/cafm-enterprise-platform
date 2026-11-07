@@ -55,9 +55,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={value}>
-      <CafmStoreProvider>
-        <SiteContextProvider>{children}</SiteContextProvider>
-      </CafmStoreProvider>
+      <SiteContextProvider>
+        <CafmStoreProvider>{children}</CafmStoreProvider>
+      </SiteContextProvider>
     </AppContext.Provider>
   );
 }

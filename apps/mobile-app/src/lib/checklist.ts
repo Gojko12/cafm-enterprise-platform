@@ -39,6 +39,7 @@ export async function startWorkSession(wrId: string, technicianId: string): Prom
   const session: WorkSessionEntry = {
     SessionId: sessionId,
     WR_ID: wrId,
+    TechnicianId: technicianId,
     StartedAt: new Date().toISOString(),
     TotalTimeMinutes: 0,
     Status: "RUNNING",
@@ -74,6 +75,10 @@ export async function resumeWorkSession(sessionId: string): Promise<void> {
   if (session.Status !== "PAUSED") throw new Error("Session is not paused");
 
   session.ResumedAt = new Date().toISOString();
+  if (session.PausedAt) {
+    session.PausedDurationMs = (session.PausedDurationMs ?? 0) +
+      new Date(session.ResumedAt).getTime() - new Date(session.PausedAt).getTime();
+  }
   session.Status = "RUNNING";
   await db.put("workSessions", session);
 }
@@ -86,31 +91,30 @@ export async function stopWorkSession(
   timerOverrideReason?: string,
 ): Promise<{ totalTimeMinutes: number }> {
   const db = await getDB();
-  const session = await db.get("workSessions", sessionId);
+  const tx = db.transaction(["workSessions", "syncQueue"], "readwrite");
+  const session = await tx.objectStore("workSessions").get(sessionId);
 
   if (!session) throw new Error("Session not found");
+  if (session.Status === "STOPPED") throw new Error("Session is already stopped");
 
   const startTime = new Date(session.StartedAt).getTime();
-  let endTime = new Date().getTime();
-
-  if (session.PausedAt) {
-    const pauseTime = new Date(session.PausedAt).getTime();
-    endTime = session.ResumedAt ? new Date(session.ResumedAt).getTime() : pauseTime;
-  }
-
-  const totalMinutes = Math.round((endTime - startTime) / 60000);
-
   session.StoppedAt = new Date().toISOString();
+  const endTime = new Date(session.StoppedAt).getTime();
+  const currentPause = session.Status === "PAUSED" && session.PausedAt
+    ? endTime - new Date(session.PausedAt).getTime() : 0;
+  const totalMinutes = Math.round(Math.max(0, endTime - startTime - (session.PausedDurationMs ?? 0) - currentPause) / 60000);
   session.TotalTimeMinutes = totalMinutes;
   session.Status = "STOPPED";
   if (timerOverrideReason) {
     session.TimerOverrideReason = timerOverrideReason;
   }
 
-  await db.put("workSessions", session);
-
-  const engine = getOfflineEngine();
-  await engine.queueMutation("SESSION_LOG", { ...session });
+  await tx.objectStore("workSessions").put(session);
+  await tx.objectStore("syncQueue").put({
+    QueueId: uuidv4(), MutationType: "SESSION_LOG", Payload: { ...session },
+    SyncStatus: "PENDING", CreatedAt: session.StoppedAt, RetryCount: 0,
+  });
+  await tx.done;
 
   return { totalTimeMinutes: totalMinutes };
 }
@@ -218,7 +222,9 @@ export async function createFollowUpCorrectiveWR(
     WR_ID: followUpWrId,
     WR_Type: "LJ",
     ESAWorkType: "Corrective Maintenance",
+    SiteId: originalWr.SiteId,
     Description: `Follow-up from ${originalWrId}: ${description}`,
+    ParentPM_WR_ID: originalWrId,
     bl_id: originalWr.bl_id,
     LevelName: originalWr.LevelName,
     RoomCode: originalWr.RoomCode,
@@ -229,7 +235,16 @@ export async function createFollowUpCorrectiveWR(
     WorkRequestSubstatus: "Issued",
     Percentage: 50,
     CreatedBy: "SYSTEM",
-  } as any);
+    AssignedCraftpersonIds: [],
+    AssignedUserIds: [],
+    TotalTimeMinutes: 0,
+    IsFrozen: false,
+    StartDateTBD: false,
+    RequiresSAT: false,
+    RequiresDrawingUpdate: false,
+    RequiresInventoryUpdate: false,
+    AcceptanceGates: [],
+  }, null);
 
   // Queue photos
   for (const photoUrl of failurePhotos) {
@@ -249,18 +264,11 @@ export async function claimWorkRequest(wrId: string, technicianId: string): Prom
   if (!wr) throw new Error("Work request not found");
 
   // Add to assigned list
-  if (!wr.AssignedUserIds) {
-    wr.AssignedUserIds = [];
-  }
-  if (!wr.AssignedUserIds.includes(technicianId)) {
-    wr.AssignedUserIds.push(technicianId);
-  }
-
-  await db.put("workRequests", wr);
-
-  // Queue sync
   const engine = getOfflineEngine();
-  await engine.saveWorkRequest(wr);
+  const assignedUsers = wr.AssignedUserIds ?? [];
+  const assigned = assignedUsers.includes(technicianId)
+    ? assignedUsers : [...assignedUsers, technicianId];
+  await engine.saveWorkRequest({ ...wr, AssignedUserIds: assigned }, wr);
 }
 
 

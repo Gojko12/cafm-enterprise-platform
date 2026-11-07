@@ -625,6 +625,7 @@ Include a toggle in the `Actions` header:
 - State includes sites and locations, equipment hierarchy, classical trades, site role assignments including Main/Deputy and notification preferences, blueprints, schedules, craftspeople, and PM/FJ/LJ work requests including history and checklist history.
 - Web changes become available to mobile, and offline checklist answers, evidence, work sessions and follow-up work requests synchronize back to web. Both manual and background synchronization must retain unsent changes on failure and report conflicts rather than silently overwrite concurrent changes or report simulated success.
 - Disk persistence and the sync API must preserve site isolation and access controls; CORS is not authentication. Writes must be validated and crash-safe, and concurrent clients must not lose changes.
+- The local demo uses a separately configured shared token and site-scoped snapshots. CORS permits only `http://localhost:3000` and `http://localhost:3001`; clients send `x-cafm-site-id` and `x-cafm-person`. These selectors and the browser-visible token are not authenticated identities or production site authorization. Do not expose the demo server to untrusted networks; Firebase-backed authentication and authorization remain necessary for production.
 
 ### 18.2 Live CAD Room Extraction
 - `/api/cad-parse` accepts DXF uploads or a generated sample and invokes the Python CAD parser using `ezdxf` and Shapely. It returns room codes, net areas in square metres, GeoJSON/SVG geometry, and extracted desks.

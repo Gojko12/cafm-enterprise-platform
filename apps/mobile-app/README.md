@@ -1,7 +1,7 @@
 # CAFM Enterprise Mobile App — Phase 5: Offline-First Field Application
 
 ## Overview
-Offline-first mobile web application for technicians and QA inspectors. Built with React, TypeScript, Zustand, and IndexedDB. Server synchronization is not yet configured.
+Offline-first mobile web application for technicians and QA inspectors. Built with React, TypeScript, Zustand, and IndexedDB. Local demo synchronization uses the web portal's disk-backed API.
 
 ## Architecture
 
@@ -18,7 +18,7 @@ Offline-first mobile web application for technicians and QA inspectors. Built wi
    - Location hierarchy caching (Building → Floor → Room)
    - Equipment registry with trade filters
    - Checklist blueprints & step definitions
-   - Queues offline changes; "Sync Now" currently reports that server synchronization is unavailable
+   - Queues offline changes and synchronizes them with the portal on demand and in the background
    - Online/Offline mode simulator toggle
 
 2. **Photo Compression** (`src/lib/offline-engine.ts :: compressPhoto()`)
@@ -28,7 +28,7 @@ Offline-first mobile web application for technicians and QA inspectors. Built wi
    - Queues photos for synchronization
 
 3. **Work Session Timer** (`src/lib/checklist.ts`)
-   - Start/Pause/Stop timer with microsecond-level accuracy
+   - Start/Pause/Stop timer with minute-based reporting
    - Manual override with mandatory reason logging
    - Automatic WorkSession record persistence
    - Queues stopped work sessions for synchronization
@@ -68,8 +68,10 @@ syncMetadata      - Last sync time & conflict tracking
 ```
 
 ### Sync Strategy
-- Work-request changes, step audits, stopped work sessions and photos are retained locally until a real sync transport is configured.
-- The manual sync action reports the configuration error instead of marking pending entries as synchronized. Online reconnection logs the same error.
+- Set `VITE_CAFM_SYNC_TOKEN` in `.env.local` to the same locally generated token used by the web portal; see the web portal README for setup. No Firebase credentials are needed.
+- The portal must first initialize the selected site. The mobile app syncs with `http://localhost:3000/api/cafm-state`, using the active site and technician as demo selectors.
+- Work requests, step audits, stopped work sessions, and photos remain queued until the portal confirms the write. A conflicting work-request edit is reported and retained for manual resolution. Legacy queued edits without a recorded baseline cannot safely overwrite an existing portal request.
+- The shared browser-visible token and selectors do not authenticate users or enforce production per-person site permissions. Use this local demo only on a trusted machine and network.
 
 ## Usage
 

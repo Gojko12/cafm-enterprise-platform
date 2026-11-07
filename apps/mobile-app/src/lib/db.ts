@@ -33,9 +33,11 @@ export interface PM_StepAuditLogEntry {
 export interface WorkSessionEntry {
   SessionId: string;
   WR_ID: string;
+  TechnicianId?: string;
   StartedAt: string;
   PausedAt?: string;
   ResumedAt?: string;
+  PausedDurationMs?: number;
   StoppedAt?: string;
   TotalTimeMinutes: number;
   TimerOverrideReason?: string;
@@ -59,6 +61,7 @@ export interface SyncQueueEntry {
   QueueId: string;
   MutationType: "WR_UPDATE" | "WR_ASSIGNMENT" | "STEP_COMPLETE" | "PHOTO_UPLOAD" | "SESSION_LOG";
   Payload: Record<string, unknown>;
+  BaseWorkRequest?: BaseWorkRequest | null;
   SyncStatus: "PENDING" | "SYNCED" | "FAILED";
   CreatedAt: string;
   SyncedAt?: string;

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { useSiteContext } from "@/lib/contexts/SiteContext";
 import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
 import {
   ESOC_BUILDINGS, ESOC_EQUIPMENT, ESOC_FLOORS, ESOC_ROOMS,
@@ -44,6 +45,7 @@ interface DemoData {
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
   siteRoleAssignments: SiteRoleAssignment[];
+  mobileMutationIds: string[];
 }
 
 export interface ExtractedDesk {
@@ -62,6 +64,49 @@ export interface ExtractedDesk {
 }
 
 const STORAGE_KEY = "cafm-demo-data-v1";
+const PENDING_KEY = "cafm-demo-pending-v1";
+const BASE_KEY = "cafm-demo-base-v1";
+const SYNC_TOKEN = process.env.NEXT_PUBLIC_CAFM_SYNC_TOKEN;
+
+async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
+  if (!SYNC_TOKEN || SYNC_TOKEN.length < 32) throw new Error("Local demo sync token is not configured.");
+  const response = await fetch("/api/cafm-state", {
+    method,
+    headers: { Authorization: `Bearer ${SYNC_TOKEN}`, "X-CAFM-Site-Id": site, "X-CAFM-Person": person, ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  const result: unknown = await response.json();
+  if (!response.ok) {
+    const message = result && typeof result === "object" && "error" in result ? String(result.error) : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  if (!result || typeof result !== "object" || !("revision" in result) || typeof result.revision !== "number" || !("state" in result)) {
+    throw new Error("Invalid state response.");
+  }
+  return { revision: result.revision, state: result.state };
+}
+
+function scopeData(data: DemoData, site: SiteId): DemoData {
+  return {
+    ...data,
+    sites: [site],
+    buildings: data.buildings.filter((item) => item.SiteId === site),
+    floors: data.floors.filter((item) => item.SiteId === site),
+    rooms: data.rooms.filter((item) => item.SiteId === site),
+    desks: data.desks.filter((item) => item.SiteId === site),
+    equipment: data.equipment.filter((item) => item.SiteId === site),
+    blueprints: data.blueprints.filter((item) => !item.SiteId || item.SiteId === site),
+    schedules: data.schedules.filter((item) => item.SiteId === site),
+    workRequests: data.workRequests.filter((item) => item.SiteId === site),
+    users: data.users.filter((item) => item.AssignedSiteIds.includes(site))
+      .map((item) => ({ ...item, AssignedSiteIds: [site] })),
+    craftspeople: data.craftspeople.filter((item) => item.SiteId === site),
+    tradeRoleMappings: data.tradeRoleMappings.filter((item) => item.SiteId === site),
+    siteRoleMappings: data.siteRoleMappings.filter((item) => item.SiteId === site),
+    siteRoleAssignments: data.siteRoleAssignments.filter((item) => item.SiteId === site),
+  };
+}
 
 function seedData(): DemoData {
   const sites: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
@@ -120,6 +165,7 @@ function seedData(): DemoData {
   })));
   return {
     sites,
+    mobileMutationIds: [],
     buildings: [...ESOC_BUILDINGS, ...ESTEC_BUILDINGS, ...ESRIN_BUILDINGS],
     floors: [...ESOC_FLOORS, ...ESTEC_FLOORS, ...ESRIN_FLOORS],
     rooms: [...ESOC_ROOMS, ...ESTEC_ROOMS, ...ESRIN_ROOMS],
@@ -150,12 +196,44 @@ interface Store {
 const StoreContext = createContext<Store | null>(null);
 
 export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<DemoData>(seedData);
+  const { activeSiteId, activePerson } = useSiteContext();
+  return <ScopedStoreProvider key={activeSiteId} site={activeSiteId} person={activePerson}>{children}</ScopedStoreProvider>;
+}
+
+function ScopedStoreProvider({ children, site, person }: { children: React.ReactNode; site: SiteId; person: string }) {
+  const [data, setData] = useState<DemoData>(() => scopeData(seedData(), site));
+  const personRef = useRef(person);
+  personRef.current = person;
+  const storageKey = `${STORAGE_KEY}:${site}`;
+  const pendingKey = `${PENDING_KEY}:${site}`;
+  const baseKey = `${BASE_KEY}:${site}`;
   const [ready, setReady] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const revision = useRef(0);
+  const acknowledged = useRef("");
+  const current = useRef(data);
+  const busy = useRef(false);
+  const blocked = useRef(false);
+  const connected = useRef(false);
+  const initialized = useRef(false);
+  current.current = data;
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+    let active = true;
+    async function initialize() {
+      try {
+      const saved = localStorage.getItem(storageKey) ?? localStorage.getItem(STORAGE_KEY);
+      let initial = scopeData(seedData(), site);
+      const baseText = localStorage.getItem(baseKey);
+      if (baseText) {
+        const base: unknown = JSON.parse(baseText);
+        if (!base || typeof base !== "object" || !("revision" in base) || !Number.isInteger(base.revision) ||
+            typeof base.revision !== "number" || base.revision < 0 || !("snapshot" in base) || typeof base.snapshot !== "string") {
+          throw new Error("Stored synchronization baseline has an invalid format.");
+        }
+        revision.current = base.revision;
+        acknowledged.current = base.snapshot;
+      }
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
         const defaults = seedData();
@@ -182,35 +260,143 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        setData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings,
+        initial = scopeData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
-          craftspeople: savedData.craftspeople ?? defaults.craftspeople });
+          craftspeople: savedData.craftspeople ?? defaults.craftspeople }, site);
       }
-    } catch (error) {
-      console.error("Could not load demo data", error);
-      window.alert("Could not load saved demo data. The saved data was not overwritten; reset demo data to recover.");
-      return;
+      try {
+        const remote = await stateRequest(site, personRef.current, "GET");
+        const pendingText = localStorage.getItem(pendingKey);
+        const pending: unknown = pendingText ? JSON.parse(pendingText) : null;
+        if (pending !== null && (!pending || typeof pending !== "object" || !("revision" in pending) ||
+            typeof pending.revision !== "number" || !Number.isInteger(pending.revision) || pending.revision < 0)) {
+          throw new Error("Stored pending synchronization data has an invalid format.");
+        }
+        revision.current = remote.revision;
+        if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
+          blocked.current = true;
+          setSyncError("The server changed while local edits were pending. Local edits were retained; resolve the conflict before syncing.");
+        } else if (pending && typeof pending === "object" && "revision" in pending && pending.revision === remote.revision) {
+          acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
+        } else if (remote.state !== null) {
+          if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
+            throw new Error("Invalid server state.");
+          }
+          initial = scopeData({ ...seedData(), ...remote.state } as DemoData, site);
+          acknowledged.current = JSON.stringify(initial);
+        }
+        connected.current = true;
+        if (!blocked.current) localStorage.setItem(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : "Could not load server state.");
+      }
+      if (!active) return;
+      current.current = initial;
+      setData(initial);
+      initialized.current = true;
+      setReady(true);
+      } catch (error) {
+        console.error("Could not load demo data", error);
+        if (active) setSyncError("Could not load saved demo data. The saved data was not overwritten.");
+      }
     }
-    setReady(true);
-  }, []);
+    void initialize();
+    return () => { active = false; };
+  }, [site, storageKey, pendingKey, baseKey]);
 
   useEffect(() => {
     if (!ready) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      if (JSON.stringify(data) !== acknowledged.current) {
+        localStorage.setItem(pendingKey, JSON.stringify({ revision: revision.current }));
+      }
     } catch (error) {
       console.error("Could not save demo data", error);
-      window.alert("Could not save demo data to local storage.");
+      setSyncError("Could not save demo data to local storage.");
     }
-  }, [data, ready]);
+  }, [data, ready, storageKey, pendingKey]);
+
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    async function sync() {
+      if (!initialized.current || busy.current || blocked.current) return;
+      busy.current = true;
+      try {
+        if (!connected.current) {
+          const remote = await stateRequest(site, personRef.current, "GET");
+          const pendingText = localStorage.getItem(pendingKey);
+          const pending: unknown = pendingText ? JSON.parse(pendingText) : null;
+          if (pending !== null && (!pending || typeof pending !== "object" || !("revision" in pending) ||
+              typeof pending.revision !== "number" || !Number.isInteger(pending.revision) || pending.revision < 0)) {
+            blocked.current = true;
+            throw new Error("Stored pending synchronization data has an invalid format.");
+          }
+          if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
+            blocked.current = true;
+            throw new Error("The server changed while local edits were pending. Local edits were retained; resolve the conflict before syncing.");
+          }
+          revision.current = remote.revision;
+          if (pending) {
+            acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
+          } else if (remote.state !== null) {
+            if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
+              throw new Error("Invalid server state.");
+            }
+            const next = scopeData({ ...seedData(), ...remote.state } as DemoData, site);
+            acknowledged.current = JSON.stringify(next);
+            current.current = next;
+            if (active) setData(next);
+          }
+          connected.current = true;
+          localStorage.setItem(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+        }
+        const snapshot = current.current;
+        const serialized = JSON.stringify(snapshot);
+        if (serialized !== acknowledged.current) {
+          const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: snapshot });
+          revision.current = result.revision;
+          acknowledged.current = serialized;
+          localStorage.setItem(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+          if (JSON.stringify(current.current) === serialized) localStorage.removeItem(pendingKey);
+          else localStorage.setItem(pendingKey, JSON.stringify({ revision: revision.current }));
+        } else {
+          const result = await stateRequest(site, personRef.current, "GET");
+          if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
+            const next = scopeData({ ...seedData(), ...result.state } as DemoData, site);
+            revision.current = result.revision;
+            acknowledged.current = JSON.stringify(next);
+            localStorage.setItem(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+            current.current = next;
+            if (active) setData(next);
+          }
+        }
+        if (active) setSyncError(null);
+      } catch (error) {
+        console.error("CAFM state sync failed", error);
+        const message = error instanceof Error ? error.message : "State sync failed.";
+        if (message.includes("changed")) blocked.current = true;
+        if (active) setSyncError(message);
+      } finally {
+        busy.current = false;
+      }
+    }
+    void sync();
+    const interval = window.setInterval(() => void sync(), 3000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [ready, site, pendingKey, baseKey]);
 
   const reset = () => {
     if (!window.confirm("Reset all saved demo data? This cannot be undone.")) return;
-    setData(seedData());
+    setData((previous) => ({ ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds }));
     setReady(true);
   };
 
-  return <StoreContext.Provider value={{ data, setData, reset }}>{children}</StoreContext.Provider>;
+  return <StoreContext.Provider value={{ data, setData, reset }}>
+    {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}
+    {ready ? children : <div>Loading saved CAFM data...</div>}
+  </StoreContext.Provider>;
 }
 
 export function useCafmStore() {

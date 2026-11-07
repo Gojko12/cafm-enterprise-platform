@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { initOfflineEngine, OfflineEngine } from "./lib/offline-engine";
 import { getDB } from "./lib/db";
 import {
@@ -29,6 +29,8 @@ export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
   const [activeSiteId, setActiveSiteId] = useState<SiteId>("SITE-01");
   const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("TECH-001");
+  const activeSelection = useRef({ activeSiteId, currentTechnicianId });
+  activeSelection.current = { activeSiteId, currentTechnicianId };
 
   // State
   const [engine, setEngine] = useState<OfflineEngine | null>(null);
@@ -50,81 +52,60 @@ export default function App() {
   const setFilter = useFilterStore((state) => state.setFilter);
   const [appliedFilters, setAppliedFilters] = useState(filters);
 
-  // Initialize engine and load data
+  const refreshData = useCallback(async () => {
+    const db = await getDB();
+    const [storedBuildings, storedFloors, storedRooms, storedEquipment, storedRequests] = await Promise.all([
+      db.getAll("buildings"), db.getAll("floors"), db.getAll("rooms"),
+      db.getAll("equipment"), db.getAll("workRequests"),
+    ]);
+    if (activeSelection.current.activeSiteId !== activeSiteId ||
+        activeSelection.current.currentTechnicianId !== currentTechnicianId) return;
+    setBuildings(storedBuildings.filter((item) => item.SiteId === activeSiteId));
+    setFloors(storedFloors.filter((item) => item.SiteId === activeSiteId));
+    setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId));
+    setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId));
+    const siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
+    setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId)));
+    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length));
+  }, [activeSiteId, currentTechnicianId]);
+
   useEffect(() => {
-    const setupApp = async () => {
-      try {
-        const offlineEngine = initOfflineEngine();
-        setEngine(offlineEngine);
-
-        // Load initial data
-        const db = await getDB();
-
-        // Load locations
-        const [storedBuildings, storedFloors, storedRooms, storedEquipment] =
-          await Promise.all([
-            db.getAll("buildings"),
-            db.getAll("floors"),
-            db.getAll("rooms"),
-            db.getAll("equipment"),
-          ]);
-        const buildingsData = storedBuildings.filter(
-          (building) => building.SiteId === activeSiteId,
-        );
-        setBuildings(buildingsData);
-        const initialFloors = storedFloors.filter(
-          (floor) => floor.SiteId === activeSiteId,
-        );
-        setFloors(initialFloors);
-        setRooms(storedRooms.filter((room) => room.SiteId === activeSiteId));
-
-        // Load equipment
-        const equipmentData = storedEquipment.filter(
-          (item) => item.SiteId === activeSiteId,
-        );
-        setEquipment(equipmentData);
-
-        // Load WRs
-        const allWRs = await offlineEngine.getWorkRequests();
-        const myWRsData = allWRs.filter((wr) =>
-          wr.AssignedUserIds?.includes(currentTechnicianId)
-        );
-        const unassignedData = allWRs.filter((wr) => !wr.AssignedUserIds?.length);
-
-        setMyWRs(myWRsData);
-        setUnassignedWRs(unassignedData);
-
-        console.log("App initialized with", {
-          buildings: buildingsData.length,
-          floors: initialFloors.length,
-          equipment: equipmentData.length,
-          myWRs: myWRsData.length,
-          unassigned: unassignedData.length,
-        });
-      } catch (err) {
-        console.error("Failed to initialize app:", err);
-      }
-    };
-
-    setupApp();
+    setEngine(initOfflineEngine());
   }, []);
+
+  useEffect(() => {
+    if (!engine) return;
+    engine.configureSync(activeSiteId, currentTechnicianId, isSimulatedOffline);
+    void refreshData().catch((error) => console.error("Could not load offline data:", error));
+    if (isSimulatedOffline) return;
+    const sync = () => {
+      void engine.syncNow().then(refreshData).catch((error) => console.error("Background sync failed:", error));
+    };
+    sync();
+    const interval = window.setInterval(sync, 30000);
+    return () => window.clearInterval(interval);
+  }, [engine, activeSiteId, currentTechnicianId, isSimulatedOffline, refreshData]);
 
   const handleSyncNow = async () => {
     if (!engine) throw new Error("The offline engine is not ready.");
-    await engine.syncNow();
+    const result = await engine.syncNow();
+    await refreshData();
+    return result;
   };
 
   const handleToggleOfflineMode = (isOffline: boolean) => {
     setIsSimulatedOffline(isOffline);
   };
 
-  const handleClaimWR = (wrId: string) => {
-    // Claim work request
+  const handleClaimWR = async (wrId: string) => {
     const claimed = unassignedWRs.find((wr) => wr.WR_ID === wrId);
-    if (claimed) {
-      claimed.AssignedUserIds = [currentTechnicianId];
-      setMyWRs([...myWRs, claimed]);
-      setUnassignedWRs(unassignedWRs.filter((wr) => wr.WR_ID !== wrId));
+    if (!claimed || !engine) return;
+    try {
+      await engine.saveWorkRequest({ ...claimed, AssignedUserIds: [currentTechnicianId] }, claimed);
+      await refreshData();
+    } catch (error) {
+      console.error("Could not claim work request:", error);
+      alert("Could not save the work request assignment.");
     }
   };
 
@@ -179,7 +160,7 @@ export default function App() {
     if (!engine) {
       throw new Error("The offline work request store is not ready yet.");
     }
-    await engine.saveWorkRequest(request);
+    await engine.saveWorkRequest(request, null);
     setMyWRs((current) => [...current, request]);
   };
 
@@ -225,6 +206,7 @@ export default function App() {
       RequiresInventoryUpdate: false,
       AcceptanceGates: [],
       UpdatedAt: now,
+      Attachments: job.photoUrl ? [{ id: crypto.randomUUID(), name: "Fast job photo", type: "image", dataUrl: job.photoUrl }] : [],
     };
     await persistCreatedRequest(request);
   };
@@ -355,7 +337,7 @@ export default function App() {
                   },
                 ],
               };
-              await engine.saveWorkRequest(savedWR);
+              await engine.saveWorkRequest(savedWR, selectedWR);
               setMyWRs((current) => current.map((wr) => wr.WR_ID === savedWR.WR_ID ? savedWR : wr));
               setUnassignedWRs((current) => current.map((wr) => wr.WR_ID === savedWR.WR_ID ? savedWR : wr));
               setCurrentView("home");
@@ -429,6 +411,13 @@ export default function App() {
       {/* Header */}
       <MobileHeader
         activeSiteId={activeSiteId}
+        onSiteChange={(site) => {
+          if (currentView !== "home") {
+            alert("Return to the work request list before switching sites.");
+            return;
+          }
+          setActiveSiteId(site);
+        }}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}
         onToggleOfflineMode={handleToggleOfflineMode}

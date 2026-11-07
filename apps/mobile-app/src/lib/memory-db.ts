@@ -39,6 +39,11 @@ function keyFor(name: StoreName, value: Record<string, unknown>) {
 function storeApi(name: StoreName) {
   const store = getStore(name);
   return {
+    async get(key: unknown) {
+      const value = store.get(serializeKey(key));
+      return value === undefined ? undefined : clone(value);
+    },
+    async getAll() { return [...store.values()].map(clone); },
     async put(value: Record<string, unknown>) {
       const key = keyFor(name, value);
       store.set(key, clone(value));
@@ -75,6 +80,7 @@ export function createMemoryDatabase(): IDBPDatabase<MobileAppDB> {
           return storeApi(name);
         },
         store: storeApi(selected[0]),
+        abort() {},
         done: Promise.resolve(),
       };
     },

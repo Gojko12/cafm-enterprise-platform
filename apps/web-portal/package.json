@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev --port 3000 --hostname localhost",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --hostname localhost",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "typecheck": "tsc --noEmit"
   },
@@ -37,4 +37,3 @@
     "typescript": "^5.8.0"
   }
 }
-
