@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { CraftpersonAbsenceSchema } from "@cafm/shared-schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ const stateSchema = z.object({
   blueprints: records,
   schedules: records,
   craftspeople: records,
+  craftpersonAbsences: z.array(CraftpersonAbsenceSchema).optional(),
   siteRoleAssignments: records,
   workRequests: records,
   deletedWorkRequests: records.optional(),
@@ -68,6 +70,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
+  if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;
   if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return false;
   return true;
 }

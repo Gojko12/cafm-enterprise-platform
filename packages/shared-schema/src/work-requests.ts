@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LocationHierarchySchema, SiteIdSchema } from "./locations.js";
 import { PM_ScheduleStepSchema, PM_StepAuditLogSchema, PM_WorkRequestStepSchema } from "./smart-pm.js";
+import { CalendarDateSchema } from "./dispatch.js";
 
 export const WR_Type = z.enum(["PM", "LJ", "FJ"]);
 export type WR_Type = z.infer<typeof WR_Type>;
@@ -120,6 +121,8 @@ export const BaseWorkRequestSchema = z.object({
   TotalTimeMinutes: z.number().nonnegative().default(0),
   CreatedDate: z.string().min(1),
   StartDate: z.string().min(1).optional(),
+  StartDate_DateToPerform: CalendarDateSchema.optional(),
+  Helper_SortUrgency: z.number().int().min(1).max(4).optional(),
   StartDateTBD: z.boolean().default(false),
   DueDate: z.string().min(1).optional(),
   MarginDate: z.string().min(1).optional(),
@@ -137,6 +140,8 @@ export const BaseWorkRequestSchema = z.object({
   IsFrozen: z.boolean().default(false),
   FreezeStartedAt: z.string().optional(),
   FreezeEndedAt: z.string().optional(),
+  FreezeStartDate: CalendarDateSchema.optional(),
+  FreezeEndDate: CalendarDateSchema.optional(),
   FreezeReason: z.string().optional(),
   // Financial & Escalation Fields (for Phase 6)
   EstimatedCostEur: z.number().nonnegative().optional(),

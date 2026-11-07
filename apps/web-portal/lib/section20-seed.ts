@@ -70,10 +70,10 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       }
     }
     const siteRooms = rooms.filter((item) => item.SiteId === site);
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 12; i++) {
       const trade = CLASSICAL_TRADES[i % CLASSICAL_TRADES.length];
-      craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Marko", "Anna", "Pieter", "Sofia", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines"][i],
-        LastName: ["Novak", "Meyer", "Visser", "Rossi", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, SkillLevel: 2 + i % 3 });
+      craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Marko", "Anna", "Pieter", "Sofia", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
+        LastName: ["Novak", "Meyer", "Visser", "Rossi", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, SkillLevel: 2 + i % 3 });
     }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
@@ -169,6 +169,26 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       workRequests.push({ ...wr, RequiresSAT: requiresSAT, RequiresDrawingUpdate: requiresDrawing, AcceptanceGates: gates,
         ...(requiresSAT && pct >= 79 ? { PreSATApproved: true } : {}),
         ...(pct === 10 ? { OriginatingFJ_WR_ID: `2026${String((Number(tag) - 1) * 77 + 31).padStart(6, "0")}` } : {}) });
+    });
+    workRequests.filter((wr) => wr.SiteId === site).forEach((wr, index) => {
+      wr.ExpectedHours = [2, 4, 6, 8, 2.5][index % 5];
+      wr.Helper_SortUrgency = index % 4 + 1;
+      if (index % 5 === 0) wr.AssignedCraftpersonIds = [];
+      else {
+        wr.StartDate_DateToPerform = `2026-11-${String(2 + index % 7).padStart(2, "0")}`;
+        const second = siteCraft.find((person) => person.Trade === wr.TradeName && !wr.AssignedCraftpersonIds.includes(person.id));
+        if (index % 9 === 0 && second) wr.AssignedCraftpersonIds.push(second.id);
+        if (index % 11 === 0) { wr.DueDate = "2026-11-03"; wr.MarginDate = "2026-11-04"; }
+      }
+      if (wr.IsFrozen) {
+        wr.ActiveFreezeName = "Waiting for Spare Parts";
+        wr.FreezeStartDate = "2026-11-02";
+        wr.FreezeEndDate = "2026-11-08";
+      } else if (index % 13 === 0) {
+        wr.PlannedFreezeText = "Plant shutdown required";
+        wr.FreezeStartDate = "2026-11-05";
+        wr.FreezeEndDate = "2026-11-07";
+      }
     });
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };

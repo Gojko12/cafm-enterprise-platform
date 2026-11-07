@@ -17,8 +17,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v4";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v5";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
@@ -58,6 +58,7 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     users: data.users.filter((item) => item.AssignedSiteIds.includes(site))
       .map((item) => ({ ...item, AssignedSiteIds: [site] })),
     craftspeople: data.craftspeople.filter((item) => item.SiteId === site),
+    craftpersonAbsences: (data.craftpersonAbsences ?? []).filter((item) => item.siteId === site),
     tradeRoleMappings: data.tradeRoleMappings.filter((item) => item.SiteId === site),
     siteRoleMappings: data.siteRoleMappings.filter((item) => item.SiteId === site),
     siteRoleAssignments: data.siteRoleAssignments.filter((item) => item.SiteId === site),
@@ -124,6 +125,10 @@ function seedData(): DemoData {
     mobileMutationIds: [],
     deletedWorkRequests: [],
     desks: [],
+    craftpersonAbsences: sites.flatMap((site) => [
+      { id: `${site}-leave-1`, siteId: site, craftpersonId: `S${site.slice(-2)}-C1`, absenceType: "Vacation" as const, startDate: "2026-11-05", endDate: "2026-11-06", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved" as const, notes: "Annual leave" },
+      { id: `${site}-leave-2`, siteId: site, craftpersonId: `S${site.slice(-2)}-C2`, absenceType: "SickLeave" as const, startDate: "2026-11-06", endDate: "2026-11-07", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved" as const, notes: "" },
+    ]),
     ...section20Seed(sites),
     users,
     tradeRoleMappings: sites.flatMap((site) => CLASSICAL_TRADES.map((trade) => ({
@@ -211,7 +216,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        initial = scopeData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings,
+        initial = scopeData({ ...defaults, ...savedData, craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople }, site);
       }
@@ -233,7 +238,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
             throw new Error("Invalid server state.");
           }
-          initial = scopeData({ ...seedData(), ...remote.state } as DemoData, site);
+          initial = scopeData({ ...seedData(), craftpersonAbsences: [], ...remote.state } as DemoData, site);
           acknowledged.current = JSON.stringify(initial);
         }
         connected.current = true;
@@ -295,7 +300,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
               throw new Error("Invalid server state.");
             }
-            const next = scopeData({ ...seedData(), ...remote.state } as DemoData, site);
+            const next = scopeData({ ...seedData(), craftpersonAbsences: [], ...remote.state } as DemoData, site);
             acknowledged.current = JSON.stringify(next);
             current.current = next;
             if (active) setData(next);
@@ -315,7 +320,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         } else {
           const result = await stateRequest(site, personRef.current, "GET");
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
-            const next = scopeData({ ...seedData(), ...result.state } as DemoData, site);
+            const next = scopeData({ ...seedData(), craftpersonAbsences: [], ...result.state } as DemoData, site);
             revision.current = result.revision;
             acknowledged.current = JSON.stringify(next);
             localStorage.setItem(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
@@ -370,7 +375,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const reset = () => {
-    if (!window.confirm(`Replace saved demo data for ${site} with the Section 22 seed? This cannot be undone.`)) return;
+    if (!window.confirm(`Replace saved demo data for ${site} with the Section 23 seed? This cannot be undone.`)) return;
     const previous = current.current;
     const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
     void commitSnapshot(previous, next).catch((error: unknown) => {

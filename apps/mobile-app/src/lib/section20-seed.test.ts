@@ -27,7 +27,7 @@ describe("Section 20 demo seed", () => {
       expect(new Set(bySite(data.equipment).map((eq) => eq.Category))).toEqual(new Set(Object.keys(EQUIPMENT_CATEGORIES)));
       expect(new Set(bySite(data.equipment).map((eq) => eq.Status))).toEqual(new Set(EQUIPMENT_STATUSES));
       expect(bySite(data.equipment).every((eq) => eq.Activity?.some((entry) => entry.kind === "log") && eq.Activity?.some((entry) => entry.kind === "comment" && entry.editHistory?.length))).toBe(true);
-      expect(bySite(data.craftspeople).length).toBeGreaterThanOrEqual(10);
+      expect(bySite(data.craftspeople).length).toBeGreaterThanOrEqual(12);
       expect(new Set(bySite(data.craftspeople).map((person) => person.Trade))).toEqual(new Set(CLASSICAL_TRADES));
       expect(bySite(data.blueprints).length).toBeGreaterThanOrEqual(10);
       expect(bySite(data.schedules).length).toBeGreaterThanOrEqual(16);
@@ -36,6 +36,10 @@ describe("Section 20 demo seed", () => {
         expect(blueprint.Steps.filter((step) => step.InputType === "Boolean").map((step) => step.favourableBoolean)).toEqual([true, false]);
       }
       const wrs = bySite(data.workRequests);
+      expect(wrs.filter((wr) => !wr.AssignedCraftpersonIds.length || !wr.StartDate_DateToPerform).length).toBeGreaterThanOrEqual(10);
+      expect(wrs.some((wr) => wr.AssignedCraftpersonIds.length > 1)).toBe(true);
+      expect(wrs.some((wr) => wr.IsFrozen && wr.ActiveFreezeName && wr.FreezeStartDate && wr.FreezeEndDate)).toBe(true);
+      expect(wrs.some((wr) => wr.PlannedFreezeText && wr.FreezeStartDate && wr.FreezeEndDate)).toBe(true);
       for (const [type, min] of [["PM", 25], ["FJ", 15], ["LJ", 22]] as const) expect(wrs.filter((wr) => wr.WR_Type === type).length).toBeGreaterThanOrEqual(min);
       expect(new Set(wrs.filter((wr) => wr.WR_Type === "LJ").map((wr) => wr.Percentage))).toEqual(new Set([0,10,20,21,23,25,26,27,28,29,30,31,32,40,50,55,78,79,80,81,94,95,96,97,98,99,100]));
       expect(wrs.every((wr) => (wr.Activity?.filter((item) => item.kind === "log").length ?? 0) >= 3 && (wr.Activity?.filter((item) => item.kind === "comment").length ?? 0) >= 2)).toBe(true);

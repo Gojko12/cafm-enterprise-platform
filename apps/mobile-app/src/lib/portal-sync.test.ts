@@ -102,6 +102,17 @@ describe("portal synchronization", () => {
     expect(state.deletedWorkRequests).toEqual([archived]);
   });
 
+  it("preserves portal absence records when a mobile edit is synchronized", async () => {
+    const absence = { id: "leave-1", siteId: "SITE-01", craftpersonId: "craft-1", absenceType: "Vacation", startDate: "2026-11-06", endDate: "2026-11-07", isFullDay: true, unavailableHoursPerDay: 8, status: "Approved", notes: "" };
+    Object.assign(state, { craftpersonAbsences: [absence] });
+    const db = await getDB();
+    await db.put("workRequests", original);
+    const engine = new OfflineEngine();
+    await engine.saveWorkRequest({ ...original, Description: "Mobile update" });
+    await engine.syncNow();
+    expect(state).toMatchObject({ craftpersonAbsences: [absence] });
+  });
+
   it("normalizes legacy equipment statuses when pulling portal state", async () => {
     const equipment = { ...ESOC_EQUIPMENT[0], Status: "Under Repair" };
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ revision, state: { ...state, equipment: [equipment] } }) })));
