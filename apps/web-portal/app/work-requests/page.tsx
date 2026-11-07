@@ -4,12 +4,12 @@ import React, { useEffect, useState } from "react";
 import { Plus, MoreVertical, ArrowUp, Eye } from "lucide-react";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LongJobDrawer } from "@/components/modules/long-jobs/LongJobDrawer";
-import { AcceptanceGatesPanel } from "@/components/modules/long-jobs/AcceptanceGatesPanel";
 import { BaseWorkRequest, WR_Statuses, WR_Type } from "@cafm/shared-schema";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { FastJobModal, type FastJobData } from "@/components/modules/FastJobModal";
+import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
 
 const mockWorkRequests: BaseWorkRequest[] = [
@@ -102,6 +102,7 @@ const mockWorkRequests: BaseWorkRequest[] = [
 
 export default function WorkRequestsPage() {
   const { activeSiteId, activeLJRole } = useSiteContext();
+  const { currentRole } = useApp();
   const { data, setData } = useCafmStore();
   const workRequests = data.workRequests;
   const setWorkRequests = (requests: BaseWorkRequest[]) =>
@@ -123,7 +124,6 @@ export default function WorkRequestsPage() {
     "create"
   );
   const [selectedWR, setSelectedWR] = useState<BaseWorkRequest | null>(null);
-  const [selectedForGates, setSelectedForGates] = useState<BaseWorkRequest | null>(null);
   const [locationFilter, setLocationFilter] = useState<{
     building: Building | null;
     floor: Floor | null;
@@ -235,8 +235,8 @@ export default function WorkRequestsPage() {
 
   const handleSubmitWR = (wr: Partial<BaseWorkRequest>) => {
     if (drawerMode === "create") {
-      if (!wr.bl_id || !wr.LevelName || !wr.TradeId || !wr.Description?.trim()) {
-        alert("A description, trade, building and floor are required.");
+      if (!wr.bl_id || !wr.TradeId || !wr.Description?.trim()) {
+        alert("A description, trade and building are required.");
         return;
       }
       const newWR: BaseWorkRequest = {
@@ -248,8 +248,9 @@ export default function WorkRequestsPage() {
         ProblemLocation: wr.ProblemLocation,
         CreatedDate: wr.CreatedDate || new Date().toISOString().split("T")[0],
         WorkRequestStatus: "Requested",
-        WorkRequestSubstatus: "New Request for Quotation",
+        WorkRequestSubstatus: wr.ProcessTrack === "RFW" ? "New Request for Work" : "New Request for Quotation",
         Percentage: 0,
+        ProcessTrack: wr.ProcessTrack ?? "RFQ",
         SiteId: activeSiteId,
         bl_id: wr.bl_id,
         LevelName: wr.LevelName,
@@ -286,20 +287,6 @@ export default function WorkRequestsPage() {
       };
       setWorkRequests([...workRequests, ljWR]);
     }
-  };
-
-  const handleGateStatusChange = (
-    wrId: string,
-    newPercentage: number,
-    updates: Partial<BaseWorkRequest>
-  ) => {
-    setWorkRequests(
-      workRequests.map((wr) =>
-        wr.WR_ID === wrId
-          ? { ...wr, Percentage: newPercentage, ...updates }
-          : wr
-      )
-    );
   };
 
   return (
@@ -356,6 +343,13 @@ export default function WorkRequestsPage() {
           </button>
         ))}
       </div>
+      {currentRole === "TeamLeader" && requestType !== "LJ" && (
+        <button type="button" className="block w-full text-left bg-blue-50 border border-blue-200 rounded p-4"
+          onClick={() => { if (requestType === "PM") setBucket("technical"); }}>
+          <strong>Team Leader Checklist &amp; WR Overview</strong>
+          <span className="block text-sm">Review {siteRequests.filter((wr) => wr.Percentage === 78).length} technically completed {requestType} work requests.</span>
+        </button>
+      )}
       {requestType === "PM" && <div className="flex flex-wrap gap-2">
         {buckets.map((item) => <button key={item.id} onClick={() => setBucket(item.id)}
           aria-pressed={bucket === item.id}
@@ -528,36 +522,8 @@ export default function WorkRequestsPage() {
                   </div>
                 )}
 
-                {/* Acceptance Gates Panel Toggle */}
-                {wr.WR_Type === "LJ" && wr.Percentage >= 40 && (
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <button
-                      onClick={() =>
-                        setSelectedForGates(
-                          selectedForGates?.WR_ID === wr.WR_ID ? null : wr
-                        )
-                      }
-                      className="text-sm px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-                    >
-                      {selectedForGates?.WR_ID === wr.WR_ID
-                        ? "Hide Gates Panel"
-                        : "Manage Acceptance Gates"}
-                    </button>
-                  </div>
-                )}
               </div>
 
-              {/* Expanded Acceptance Gates Panel */}
-              {selectedForGates?.WR_ID === wr.WR_ID && wr.WR_Type === "LJ" && (
-                <div className="p-4 border-t border-gray-200 bg-white">
-                  <AcceptanceGatesPanel
-                    workRequest={wr}
-                    onStatusChange={(newPercentage, updates) =>
-                      handleGateStatusChange(wr.WR_ID, newPercentage, updates)
-                    }
-                  />
-                </div>
-              )}
             </div>
           ))
         )}
@@ -569,7 +535,7 @@ export default function WorkRequestsPage() {
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onSubmit={handleSubmitWR}
-        workRequest={selectedWR}
+        workRequest={selectedWR ? workRequests.find((wr) => wr.WR_ID === selectedWR.WR_ID && wr.SiteId === selectedWR.SiteId) ?? selectedWR : null}
         mode={drawerMode}
       />
       <FastJobModal

@@ -33,6 +33,7 @@ export const PM_ScheduleStepSchema = z
     Instructions: z.string().optional(),
     SortOrder: z.number().int().nonnegative(),
     InputType: PMStepInputType,
+    favourableBoolean: z.boolean().optional(),
     Unit: z.string().optional(),
     MinThreshold: z.number().optional(),
     MaxThreshold: z.number().optional(),

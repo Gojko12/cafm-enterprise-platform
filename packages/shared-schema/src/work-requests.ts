@@ -106,6 +106,7 @@ export const BaseWorkRequestSchema = z.object({
   WorkRequestSubstatus: z.string().min(1),
   Percentage: z.number().min(0).max(100),
   ...LocationHierarchySchema.shape,
+  LevelName: z.string().min(1).optional(),
   SiteId: SiteIdSchema,
   AssignedCraftpersonIds: z.array(z.string().min(1)).default([]),
   AssignedUserIds: z.array(z.string().min(1)).default([]),
@@ -122,6 +123,33 @@ export const BaseWorkRequestSchema = z.object({
   ParentPM_WR_ID: z.string().min(1).optional(),
   OriginatingFJ_WR_ID: z.string().min(1).optional(),
   EscalatedToLJ_WR_ID: z.string().min(1).optional(),
+  ProcessTrack: z.enum(["RFQ", "RFW"]).optional(),
+  PreSATApproved: z.boolean().optional(),
+  Activity: z.array(z.object({
+    id: z.string(),
+    kind: z.enum(["comment", "log"]),
+    actorId: z.string(),
+    actorName: z.string(),
+    actorRole: z.string(),
+    createdAt: z.string(),
+    text: z.string(),
+    editHistory: z.array(z.object({ text: z.string(), timestamp: z.string() })).optional(),
+    editedAt: z.string().optional(),
+  })).optional(),
+  Attachments: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    type: z.string(),
+    dataUrl: z.string(),
+  })).optional(),
+  ChecklistResults: z.array(z.object({
+    stepId: z.string(),
+    passed: z.boolean(),
+    value: z.union([z.string(), z.number(), z.array(z.string())]),
+    photoPaths: z.array(z.string()).optional(),
+    comment: z.string().optional(),
+    completedAt: z.string(),
+  })).optional(),
   // Long Job specific fields
   RequiresSAT: z.boolean().default(false),
   RequiresDrawingUpdate: z.boolean().default(false),
@@ -473,6 +501,7 @@ export const LJ_TRANSITION_MATRIX: readonly LJTransitionMatrixEntry[] = Object.f
     allowedActions: [
       { actionName: "Save", targetPercentage: 40, allowedRoles: ["ESA_TO", "ESA_TM", "ESA_LJM", "TRADE_TM", "ESA_LONG_JOB", "TRADE_LONG_JOB"] },
       { actionName: "Start Work", targetPercentage: 50, allowedRoles: ["TRADE_TM", "TRADE_LONG_JOB"] },
+      { actionName: "Technically Completed", targetPercentage: 78, allowedRoles: ["TRADE_TM", "TRADE_LONG_JOB"] },
     ],
   },
   {
@@ -559,7 +588,7 @@ export const LJ_TRANSITION_MATRIX: readonly LJTransitionMatrixEntry[] = Object.f
   },
   {
     percentage: 95,
-    label: "Complete WR – Cost Information + Customer Feedback",
+    label: "Complete WR ï¿½ Cost Information + Customer Feedback",
     description: "Work complete; awaiting cost sign-off",
     track: "RFW",
     allowedRoles: ["TRADE_CM"],

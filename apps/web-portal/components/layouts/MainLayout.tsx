@@ -128,7 +128,7 @@ export function TopBar() {
   const { currentRole, setCurrentRole, setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
   const { activeSiteId, setActiveSiteId, activeLJRole, setActiveLJRole } = useSiteContext();
   const { reset } = useCafmStore();
-  const roles = ["SiteAdministrator", "ESA_LongJobManager", "PM_Planner", "QA_Inspector", "MobileTechnician", "StandardEmployee"];
+  const roles = ["SiteAdministrator", "ESA_LongJobManager", "PM_Planner", "QA_Inspector", "MobileTechnician", "TeamLeader", "StandardEmployee"];
 
   const getRoleBadgeColor = (role: string) => {
     if (role.includes("Admin")) return "bg-red-100 text-red-800";

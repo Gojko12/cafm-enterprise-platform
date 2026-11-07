@@ -19,6 +19,7 @@ export const UserRole = z.enum([
   "PM_Planner",
   "QA_Inspector",
   "MobileTechnician",
+  "TeamLeader",
   "StandardEmployee",
 ]);
 
@@ -270,6 +271,14 @@ export const ROLE_PERMISSIONS = {
     "workRequests.readAll",
     "technicalAudits.read",
     "technicalAudits.write",
+  ],
+  TeamLeader: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.update",
+    "workRequests.approve",
+    "checklists.execute",
   ],
   MobileTechnician: [
     "locations.read",

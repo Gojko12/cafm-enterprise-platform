@@ -1,338 +1,70 @@
 "use client";
 
-import React, { useState } from "react";
-import { BaseWorkRequest, LJAcceptanceGate, LJRole } from "@cafm/shared-schema";
+import React from "react";
+import type { BaseWorkRequest, LJAcceptanceGate, LJRole } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { CheckCircle2, Clock, AlertCircle } from "lucide-react";
 
 interface AcceptanceGatesPanelProps {
   workRequest: BaseWorkRequest;
-  onStatusChange: (
-    newPercentage: number,
-    gateUpdates: Partial<BaseWorkRequest>
-  ) => void;
+  onStatusChange: (percentage: number, updates: Partial<BaseWorkRequest>, description?: string) => void;
   isReadOnly?: boolean;
+  role?: LJRole | null;
 }
 
-const GATE_ROLES: Record<string, LJRole[]> = {
-  SAT: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"],
-  DrawingEngineering: ["ESA_DO", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"],
-  CIFMInventory: ["ESA_IM", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"],
-};
+const gates = [
+  { type: "SAT", field: "RequiresSAT", title: "SAT", approvers: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"] },
+  { type: "DrawingEngineering", field: "RequiresDrawingUpdate", title: "Draftsman Drawing Update", approvers: ["ESA_DO", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"] },
+  { type: "CIFMInventory", field: "RequiresInventoryUpdate", title: "CIFM Inventory Update", approvers: ["ESA_IM", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"] },
+] as const;
+const esaRoles: LJRole[] = ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"];
+const tradeRoles: LJRole[] = ["TRADE_TM", "TRADE_LONG_JOB"];
 
-export function AcceptanceGatesPanel({
-  workRequest,
-  onStatusChange,
-  isReadOnly = false,
-}: AcceptanceGatesPanelProps) {
-  const { activeLJRole } = useSiteContext();
-  const [gateStatus, setGateStatus] = useState<
-    Record<string, LJAcceptanceGate>
-  >({
-    SAT: {
-      GateType: "SAT",
-      IsRequired: workRequest.RequiresSAT || false,
-      Status: "Pending",
-      AssignedToRole: "ESA_TO",
-    },
-    DrawingEngineering: {
-      GateType: "DrawingEngineering",
-      IsRequired: workRequest.RequiresDrawingUpdate || false,
-      Status: "Pending",
-      AssignedToRole: "ESA_DO",
-    },
-    CIFMInventory: {
-      GateType: "CIFMInventory",
-      IsRequired: workRequest.RequiresInventoryUpdate || false,
-      Status: "Pending",
-      AssignedToRole: "ESA_IM",
-    },
-  });
+export function AcceptanceGatesPanel({ workRequest: wr, onStatusChange, isReadOnly = false, role }: AcceptanceGatesPanelProps) {
+  const { activeLJRole, currentUser } = useSiteContext();
+  const actorRole = role ?? activeLJRole;
+  const allowed = (roles: readonly string[]) => !isReadOnly && !!actorRole && roles.includes(actorRole);
+  const active = wr.Percentage >= 78 && wr.Percentage < 94;
 
-  const requiredGates = Object.values(gateStatus).filter((g) => g.IsRequired);
-  const approvedGates = requiredGates.filter((g) => g.Status === "Approved");
-  const allGatesApproved = requiredGates.length === approvedGates.length;
-
-  const handleGateAction = (gateType: string, action: string) => {
-    const gate = gateStatus[gateType];
-    let newStatus = gate.Status;
-
-    switch (action) {
-      case "requestReview":
-        newStatus = "ReviewRequested";
-        break;
-      case "sendInvitation":
-        newStatus = "InvitationSent";
-        break;
-      case "approve":
-        newStatus = "Approved";
-        break;
-      case "approvePreSAT":
-        newStatus = "Pending";
-        break;
-    }
-
-    const updated = { ...gateStatus, [gateType]: { ...gate, Status: newStatus } };
-    setGateStatus(updated);
+  const updateGate = (type: LJAcceptanceGate["GateType"], status: LJAcceptanceGate["Status"]) => {
+    const updated: LJAcceptanceGate[] = [...wr.AcceptanceGates.filter((gate) => gate.GateType !== type), {
+      GateType: type, IsRequired: true, Status: status,
+      ...(status === "Approved" ? { ApprovedBy: currentUser?.DisplayName ?? "Current user", ApprovedAt: new Date().toISOString() } : {}),
+    }];
+    const allApproved = gates.every((gate) => !wr[gate.field] ||
+      updated.some((item) => item.GateType === gate.type && item.Status === "Approved"));
+    let percentage = wr.Percentage;
+    if (status === "Approved" && allApproved) percentage = 94;
+    else if (type === "SAT" && status === "InvitationSent") percentage = 80;
+    else if (type === "SAT" && status === "Approved") percentage = 81;
+    const substatus = percentage === 94 ? "All Acceptances Completed" :
+      percentage === 80 ? "Work Request Ready for SAT Approval (Invite)" :
+      percentage === 81 ? "SAT Approved" : wr.WorkRequestSubstatus;
+    onStatusChange(percentage, { AcceptanceGates: updated, WorkRequestSubstatus: substatus },
+      `${type} ${status === "Approved" ? "gave OK" : status === "ReviewRequested" ? "review requested" : "invitation sent"}`);
   };
 
-  const handleTechnicallyCompleted = () => {
-    if (requiredGates.length === 0) {
-      onStatusChange(94, { Percentage: 94, WorkRequestSubstatus: "All Acceptances Completed" });
-    } else {
-      onStatusChange(78, { Percentage: 78, WorkRequestSubstatus: "Work Ready for Approvals Cycle" });
-    }
-  };
-
-  const currentPercentage = workRequest.Percentage;
-  const isIn78To94Range = currentPercentage >= 78 && currentPercentage <= 94;
-
-  if (!isIn78To94Range && !requiredGates.some((g) => g.IsRequired)) {
-    return null;
-  }
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <h2 className="text-xl font-bold mb-4">
-        {currentPercentage < 78
-          ? "Acceptance Gate Configuration"
-          : "78% - 94% Acceptance Engine"}
-      </h2>
-
-      {/* Gate Toggles (if not started yet) */}
-      {currentPercentage < 78 && (
-        <div className="mb-6 pb-6 border-b border-gray-200">
-          <h3 className="font-semibold text-sm mb-3">Required Gates</h3>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={gateStatus.SAT.IsRequired}
-                onChange={(e) =>
-                  setGateStatus({
-                    ...gateStatus,
-                    SAT: { ...gateStatus.SAT, IsRequired: e.target.checked },
-                  })
-                }
-                disabled={isReadOnly}
-                className="w-4 h-4"
-              />
-              <span className="text-sm">Requires SAT (Site Acceptance Test)</span>
-            </label>
-
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={gateStatus.DrawingEngineering.IsRequired}
-                onChange={(e) =>
-                  setGateStatus({
-                    ...gateStatus,
-                    DrawingEngineering: {
-                      ...gateStatus.DrawingEngineering,
-                      IsRequired: e.target.checked,
-                    },
-                  })
-                }
-                disabled={isReadOnly}
-                className="w-4 h-4"
-              />
-              <span className="text-sm">Requires Drawing/Engineering Update</span>
-            </label>
-
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={gateStatus.CIFMInventory.IsRequired}
-                onChange={(e) =>
-                  setGateStatus({
-                    ...gateStatus,
-                    CIFMInventory: {
-                      ...gateStatus.CIFMInventory,
-                      IsRequired: e.target.checked,
-                    },
-                  })
-                }
-                disabled={isReadOnly}
-                className="w-4 h-4"
-              />
-              <span className="text-sm">Requires CIFM Inventory Update</span>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Gates Status Display (when in 78-94 range) */}
-      {isIn78To94Range && requiredGates.length > 0 && (
-        <div className="space-y-4 mb-6">
-          {requiredGates.map((gate) => (
-            <div
-              key={gate.GateType}
-              className="border border-gray-200 rounded-lg p-4 bg-gray-50"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  {gate.Status === "Approved" ? (
-                    <CheckCircle2 className="w-5 h-5 text-green-600" />
-                  ) : gate.Status === "InvitationSent" ? (
-                    <AlertCircle className="w-5 h-5 text-blue-600" />
-                  ) : (
-                    <Clock className="w-5 h-5 text-yellow-600" />
-                  )}
-                  <h4 className="font-semibold text-sm">
-                    {gate.GateType === "SAT" && "Site Acceptance Test (SAT)"}
-                    {gate.GateType === "DrawingEngineering" && "Drawing/Engineering"}
-                    {gate.GateType === "CIFMInventory" && "CIFM Inventory"}
-                  </h4>
-                </div>
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    gate.Status === "Approved"
-                      ? "bg-green-100 text-green-800"
-                      : gate.Status === "InvitationSent"
-                      ? "bg-blue-100 text-blue-800"
-                      : "bg-yellow-100 text-yellow-800"
-                  }`}
-                >
-                  {gate.Status}
-                </span>
-              </div>
-
-              {gate.AssignedToRole && (
-                <p className="text-xs text-gray-600 mb-3">
-                  Assigned to: {gate.AssignedToRole}
-                </p>
-              )}
-
-              {/* Role-specific Actions */}
-              <div className="flex flex-wrap gap-2">
-                {gate.GateType === "SAT" && activeLJRole && (
-                  <>
-                    {["TRADE_TM", "TRADE_LONG_JOB"].includes(activeLJRole) && (
-                      <button
-                        onClick={() => handleGateAction("SAT", "approvePreSAT")}
-                        className="px-2 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
-                      >
-                        Approve Pre-SAT
-                      </button>
-                    )}
-                    {["ESA_TO", "ESA_TM", "ESA_LONG_JOB"].includes(activeLJRole) && (
-                      <>
-                        <button
-                          onClick={() => handleGateAction("SAT", "requestReview")}
-                          className="px-2 py-1 bg-orange-600 text-white text-xs rounded hover:bg-orange-700"
-                        >
-                          Request Review
-                        </button>
-                        <button
-                          onClick={() => handleGateAction("SAT", "approve")}
-                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                        >
-                          Approve SAT
-                        </button>
-                      </>
-                    )}
-                    {["TRADE_TM", "TRADE_LONG_JOB"].includes(activeLJRole) && (
-                      <button
-                        onClick={() => handleGateAction("SAT", "sendInvitation")}
-                        className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                      >
-                        Send Invitation
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {gate.GateType === "DrawingEngineering" && activeLJRole && (
-                  <>
-                    {["ESA_DO", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"].includes(activeLJRole) && (
-                      <>
-                        <button
-                          onClick={() => handleGateAction("DrawingEngineering", "requestReview")}
-                          className="px-2 py-1 bg-orange-600 text-white text-xs rounded hover:bg-orange-700"
-                        >
-                          Request Review
-                        </button>
-                        <button
-                          onClick={() => handleGateAction("DrawingEngineering", "approve")}
-                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                        >
-                          Approve Drawing
-                        </button>
-                      </>
-                    )}
-                    {["TRADE_TM", "TRADE_LONG_JOB"].includes(activeLJRole) && (
-                      <button
-                        onClick={() => handleGateAction("DrawingEngineering", "sendInvitation")}
-                        className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                      >
-                        Send Invitation
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {gate.GateType === "CIFMInventory" && activeLJRole && (
-                  <>
-                    {["ESA_IM", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"].includes(activeLJRole) && (
-                      <>
-                        <button
-                          onClick={() => handleGateAction("CIFMInventory", "requestReview")}
-                          className="px-2 py-1 bg-orange-600 text-white text-xs rounded hover:bg-orange-700"
-                        >
-                          Request Review
-                        </button>
-                        <button
-                          onClick={() => handleGateAction("CIFMInventory", "approve")}
-                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                        >
-                          Approve CIFM
-                        </button>
-                      </>
-                    )}
-                    {["TRADE_TM", "TRADE_LONG_JOB"].includes(activeLJRole) && (
-                      <button
-                        onClick={() => handleGateAction("CIFMInventory", "sendInvitation")}
-                        className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                      >
-                        Send Invitation
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Transition Button */}
-      {currentPercentage >= 50 && currentPercentage < 78 && requiredGates.length > 0 && (
-        <button
-          onClick={handleTechnicallyCompleted}
-          disabled={isReadOnly}
-          className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
-        >
-          Mark Technically Completed
-          {requiredGates.length === 0
-            ? " → 94% (All Acceptances Completed)"
-            : " → 78% (Work Ready for Approvals Cycle)"}
-        </button>
-      )}
-
-      {/* Summary */}
-      {isIn78To94Range && requiredGates.length > 0 && (
-        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-xs text-blue-800">
-            <strong>{approvedGates.length}</strong> of <strong>{requiredGates.length}</strong>{" "}
-            required gates approved.
-            {allGatesApproved && (
-              <span className="block mt-1">
-                All gates approved! Ready to transition to 94% (All Acceptances Completed).
-              </span>
-            )}
-          </p>
-        </div>
-      )}
+  return <section className="border rounded p-4 space-y-3">
+    <h3 className="font-semibold">78%–94% Acceptance Gates</h3>
+    <div className="space-y-1">
+      {gates.map((gate) => <label key={gate.type} className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={wr[gate.field]} disabled={isReadOnly || wr.Percentage >= 78}
+          onChange={(event) => onStatusChange(wr.Percentage, { [gate.field]: event.target.checked }, `${gate.title} requirement ${event.target.checked ? "enabled" : "disabled"}`)} />
+        {gate.field}
+      </label>)}
     </div>
-  );
+    {active && gates.filter((gate) => wr[gate.field]).map((gate) => {
+      const state = wr.AcceptanceGates.find((item) => item.GateType === gate.type);
+      return <div key={gate.type} className="border rounded p-3 space-y-2">
+        <div className="font-medium">{gate.title} — {state?.Status ?? "Pending"}</div>
+        {gate.type === "SAT" && wr.Percentage === 78 && !wr.PreSATApproved &&
+          <button type="button" disabled={!allowed(tradeRoles)} className="bg-blue-100 px-2 py-1 rounded disabled:opacity-40"
+            onClick={() => onStatusChange(79, { PreSATApproved: true, WorkRequestSubstatus: "Pre-SAT Performed" }, "Pre-SAT gave OK")}>Pre-SAT Give OK [TRADE_TM]</button>}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={!allowed(esaRoles) || state?.Status === "Approved"} onClick={() => updateGate(gate.type, "ReviewRequested")} className="bg-gray-100 px-2 py-1 rounded disabled:opacity-40">Request Review [ESA_TO / ESA_TM]</button>
+          <button type="button" disabled={!allowed(tradeRoles) || state?.Status === "Approved" || (gate.type === "SAT" && !wr.PreSATApproved)} onClick={() => updateGate(gate.type, "InvitationSent")} className="bg-blue-100 px-2 py-1 rounded disabled:opacity-40">Send Invitation [TRADE_TM]</button>
+          <button type="button" disabled={!allowed(gate.approvers) || state?.Status === "Approved" || (gate.type === "SAT" && !wr.PreSATApproved)} onClick={() => updateGate(gate.type, "Approved")} className="bg-green-100 px-2 py-1 rounded disabled:opacity-40">Give OK / Approve [{gate.approvers.join(" / ")}]</button>
+        </div>
+      </div>;
+    })}
+  </section>;
 }

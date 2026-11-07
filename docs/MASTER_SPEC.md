@@ -371,3 +371,55 @@ Do NOT use native `<select>` dropdowns for Building, Floor, Room, or Equipment o
    - **Cancel (Secondary Gray/Blue)**: Closes the modal and discards any selection changes made during that modal session.
    - **Unselect All (Warning Orange)**: Clears all staged equipment IDs and flips all visible buttons back to `Select` in-place.
    - **Reset Filter (on Technician Home / Filter Panel)**: Clears `selectedBuilding`, `selectedFloor`, `selectedRoom`, all date/text filters, AND empties `selectedEquipmentIds[]`.
+
+## 14. Checklist Favourable/Unfavourable Builder, Full Long Job Details & Action Bar, Team Leader 100% Overview & Unified WR Activity/Comment Timeline
+
+### 14.1 Checklist Step Favourable/Unfavourable Logic & Options Builder (All Input Types Except FreeText)
+Every checklist step (in Blueprint Builder, Checklist Executor, and Team Leader Overview) MUST explicitly define and visually badge **Favourable (Green/Pass)** vs. **Unfavourable (Red/Fail)** answers for all input types except `FreeText`:
+1. **`Boolean` (Yes / No)**:
+   - Author selects which answer is Favourable: **Default = `Yes` is Favourable** (`favourableBoolean: true`), or toggle to **`No` is Favourable** (`favourableBoolean: false`).
+   - Display a clear visual preview in the builder: e.g., `Favourable: YES (Green) | Unfavourable: NO (Red - triggers failure rule)`.
+2. **`SingleSelect` & `MultiSelect`**:
+   - When `SingleSelect` or `MultiSelect` is chosen in the Blueprint Builder, render an interactive **Options Manager** inside the step card:
+     * Button `+ Add Option` to add options (`optionId`, `label`, `isFavourable: boolean`).
+     * Each option row has a text input for the label, a green/red toggle button **`Favourable (Pass)` ↔ `Unfavourable (Fail)`**, and a delete button.
+     * Pre-populate 2 default options when switching a step to `SingleSelect` or `MultiSelect` so it is never empty by accident.
+3. **`Numeric`**:
+   - Render inputs for `Unit` (e.g., `bar`, `°C`, `V`), `MinThreshold` (Favourable minimum), and `MaxThreshold` (Favourable maximum). Values within `[MinThreshold, MaxThreshold]` are Favourable (Green); values outside are Unfavourable (Red).
+4. **Craftsperson & Team Leader Visibility + Team Leader 100% Closure**:
+   - Both the Craftsperson executing the checklist and the **Team Leader (`TeamLeader` role)** reviewing WRs must see each step's answer badged clearly as **GREEN `FAVOURABLE`** or **RED `UNFAVOURABLE`** (along with failure photos and comments).
+   - Provide a **Team Leader Overview / Approval Queue** across PM and FJ views where the Team Leader reviews `78% Technically Completed` WRs, inspects all checklist steps (highlighting any Unfavourable answers), and clicks **`Approve & Push to 100% (Completed)`** (or **`Reopen to 50%`** if rework is needed).
+
+### 14.2 Complete Long Job (LJ) Creation & Details Drawer (Never Hide Stage Buttons)
+1. **Create Long Job Modal**:
+   - **Process Track**: Select `RFQ (Request for Quotation)` or `RFW (Request for Work)`.
+   - **Trade**: Select from the 7 Classical Trades (`Mechanical`, `Civil`, `Electrical`, `MultiTechnic`, `Cleaning`, `HeavyGang`, `Catering`).
+   - **Equipment (Optional) & Auto-Location**: Picking an Equipment item automatically populates its `Building`, `Floor`, and `Room` fields. Clearing Equipment allows picking `Building`, `Building + Floor`, or `Building + Floor + Room` manually.
+   - **Auto-Retrieved Trade Roles Card**: Selecting a `Trade` automatically looks up and displays the assigned personnel for that Trade (with dropdowns to override):
+     * `ESA Trade Manager (ESA_TM)`
+     * `ESA Cost Centre Manager (ESA_CCM)`
+     * `Trade Manager (TRADE_TM)`
+     * `Trade Contract Manager (TRADE_CM)`
+     * Plus `ESA Technical Officer (ESA_TO)`, `Draftsman (ESA_DO)`, and `CIFM Inventory Admin (ESA_IM)`.
+2. **Long Job Details Drawer**:
+   - Must display ALL LJ information: Process (`RFQ`/`RFW`), Current Substatus (`0%`–`100%`) with visual progress bar, Trade, Location (`Building / Floor / Room`), Equipment, Estimated & Actual Cost (`EUR`), Key Dates (`Created`, `Start`, `Due`, `Margin`), Freeze status & controls, Escalation chain links (`ParentPM_WR_ID`, `OriginatingFJ_WR_ID`), Assigned Trade Roles (`ESA_TM`, `ESA_CCM`, `TRADE_TM`, `TRADE_CM`, `ESA_TO`, `ESA_DO`, `ESA_IM`), and Attached Files/Images (with upload & remove buttons).
+   - **Stage Transition Action Buttons (Always Visible & Testable)**:
+     * Render all valid next-stage transition buttons for the current substatus (`0%` through `100% archived`, e.g., `Submit to Trade -> 20%`, `In Progress -> 21%`, `Submit for Acceptance -> 25%`, `Accept & Convert to RFW -> 30%`, `Approve & Order -> 32%`, `Commit -> 40%`, `Start Execution -> 50%`, `Put On Hold -> 55%`, `Technically Completed -> 78% / 94%`, `78%–81% Acceptance Gate buttons`, `Completed -> 95%`, `Sign Yellow Page -> 96%`, `Approve Costs -> 97%`, `Final Approval -> 98%`, `Confirm Invoice -> 99%`, `Confirm Payment -> 100%`).
+     * Each button shows the permitted LJ Role badge (e.g., `[ESA_TO]`, `[TRADE_TM]`, `[ESA_DO]`). If `SiteAdministrator` is active or if the user enables the inline **"Role Simulator / Act As"** selector inside the drawer, allow clicking ANY valid next-stage button immediately and log the exact actor & role in the Activity Timeline.
+
+### 14.3 Unified Activity Log & Versioned Comment Section on EVERY WR (PM, FJ, LJ)
+Every Work Request (`PM`, `FJ`, and `LJ`) must include a unified **Activity & Comments Timeline (`WRActivityTimeline`)** in its detail drawer:
+1. **Three Filter Modes**:
+   - `All (Comments & Logs)` — unified chronological stream of human comments and automatic system logs.
+   - `Human Comments Only` — filters to only messages written by users.
+   - `Automatic Logs Only` — filters to only system-generated audit events.
+2. **Automatic System Event Logging (Who, When, What)**:
+   Automatically append an immutable log entry whenever any action happens on the WR:
+   - Status/Substatus transitions: e.g., `"WR was set to 78% (Technically Completed) by Thomas (MobileTechnician)"`, `"LJ was transformed from 10% to 20% (Submit to Trade) by Lidija (ESA_TM)"`, `"WR pushed from 78% to 100% (Completed) by Gregor (TeamLeader)"`.
+   - Checklist actions: e.g., `"Marko finished checklist (5/5 steps completed — 4 Favourable, 1 Unfavourable)"` or `"Step 2 marked Unfavourable by Marko"`.
+   - Acceptance Gates: e.g., `"Draftsman (ESA_DO) gave OK for Drawing/Engineering update"`, `"CIFM Inventory Admin (ESA_IM) gave OK for Inventory update"`.
+   - Attachments: e.g., `"Image 'valve_leak.png' was added by Marko"`, `"File 'old_quote.pdf' was removed by Lidija"`.
+3. **Editable Human Comments with Permanent Version History**:
+   - Any user can post a comment (`authorName`, `authorRole`, `createdAt`, `text`).
+   - A user can click **`Edit`** on their own comment to update the text.
+   - Editing a comment NEVER deletes or hides the old text: the previous text and its timestamp are pushed into `editHistory[]`, and the comment card displays an `(Edited)` badge with a visible/expandable **"Previous Versions"** history showing every prior version of that comment to all users.

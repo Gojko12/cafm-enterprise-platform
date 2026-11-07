@@ -21,21 +21,23 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
 
   const handleAddStep = () => {
     const newStep: PM_ScheduleStep = {
-      StepId: `step-${Date.now()}`,
+      StepId: crypto.randomUUID(),
       Title: "",
       Instructions: "",
       SortOrder: steps.length + 1,
       InputType: "Boolean",
+      favourableBoolean: true,
       Options: [],
       IsRequired: true,
       RequiresPhotoOnFailure: true,
       RequiresCommentOnFailure: true,
     };
     setSteps([...steps, newStep]);
+    setExpandedStep(newStep.StepId);
   };
 
   const handleRemoveStep = (stepId: string) => {
-    setSteps(steps.filter((s) => s.StepId !== stepId));
+    setSteps(steps.filter((s) => s.StepId !== stepId).map((step, index) => ({ ...step, SortOrder: index + 1 })));
   };
 
   const handleUpdateStep = (stepId: string, updates: Partial<PM_ScheduleStep>) => {
@@ -255,11 +257,20 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
                     </label>
                     <select
                       value={step.InputType}
-                      onChange={(e) =>
-                        handleUpdateStep(step.StepId, {
-                          InputType: e.target.value as any,
-                        })
-                      }
+                      onChange={(e) => {
+                        const inputType = e.target.value as PM_ScheduleStep["InputType"];
+                        const options = step.Options.length === 0 &&
+                          (inputType === "SingleSelect" || inputType === "MultiSelect")
+                          ? [1, 2].map((number) => ({
+                              OptionId: crypto.randomUUID(),
+                              Label: `Option ${number}`,
+                              Value: crypto.randomUUID(),
+                              SortOrder: number,
+                              TriggersFailure: number === 2,
+                            }))
+                          : step.Options;
+                        handleUpdateStep(step.StepId, { InputType: inputType, Options: options });
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="Boolean">Boolean (Pass/Fail)</option>
@@ -269,6 +280,53 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
                       <option value="FreeText">Free Text</option>
                     </select>
                   </div>
+
+                  {step.InputType === "Boolean" && (
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Favourable Answer
+                        <select
+                          value={String(step.favourableBoolean ?? true)}
+                          onChange={(e) => handleUpdateStep(step.StepId, { favourableBoolean: e.target.value === "true" })}
+                          className="mt-1 w-full px-3 py-2 border rounded-lg"
+                        >
+                          <option value="true">&quot;Yes&quot; is Favourable (Default)</option>
+                          <option value="false">&quot;No&quot; is Favourable</option>
+                        </select>
+                      </label>
+                      <div className="flex flex-wrap gap-2 text-sm font-medium">
+                        <span className="bg-green-100 text-green-800 rounded px-2 py-1">Favourable = Pass: {(step.favourableBoolean ?? true) ? "YES" : "NO"}</span>
+                        <span className="bg-red-100 text-red-800 rounded px-2 py-1">Unfavourable = Fail: {(step.favourableBoolean ?? true) ? "NO" : "YES"}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {(step.InputType === "SingleSelect" || step.InputType === "MultiSelect") && (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold">Select Options Builder</h4>
+                      {step.Options.map((option) => (
+                        <div key={option.OptionId} className="flex flex-wrap gap-2">
+                          <input aria-label="Option label" value={option.Label} onChange={(e) =>
+                            handleUpdateStep(step.StepId, { Options: step.Options.map((item) =>
+                              item.OptionId === option.OptionId ? { ...item, Label: e.target.value } : item) })}
+                            className="flex-1 min-w-[10rem] px-3 py-2 border rounded" />
+                          <button type="button" onClick={() =>
+                            handleUpdateStep(step.StepId, { Options: step.Options.map((item) =>
+                              item.OptionId === option.OptionId ? { ...item, TriggersFailure: !item.TriggersFailure } : item) })}
+                            className={`px-3 py-2 rounded text-sm ${option.TriggersFailure ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"}`}>
+                            {option.TriggersFailure ? "Unfavourable (Fail)" : "Favourable (Pass)"}
+                          </button>
+                          <button type="button" aria-label={`Delete ${option.Label}`} onClick={() =>
+                            handleUpdateStep(step.StepId, { Options: step.Options.filter((item) => item.OptionId !== option.OptionId) })}
+                            className="px-3 py-2 bg-red-100 text-red-800 rounded">Delete</button>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => handleUpdateStep(step.StepId, {
+                        Options: [...step.Options, { OptionId: crypto.randomUUID(), Label: `Option ${step.Options.length + 1}`,
+                          Value: crypto.randomUUID(), SortOrder: step.Options.length + 1, TriggersFailure: false }],
+                      })} className="px-3 py-2 bg-blue-100 text-blue-800 rounded">+ Add Option</button>
+                    </div>
+                  )}
 
                   {step.InputType === "Numeric" && (
                     <div className="grid grid-cols-3 gap-3">
@@ -288,7 +346,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Min Threshold
+                          Favourable Min Threshold
                         </label>
                         <input
                           type="number"
@@ -303,7 +361,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Max Threshold
+                          Favourable Max Threshold
                         </label>
                         <input
                           type="number"
