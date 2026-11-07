@@ -223,3 +223,18 @@ apps/web-portal/
 ## License
 
 © 2026 Enterprise CAFM. All rights reserved.
+# DXF room extraction
+
+Select a floor in Locations before uploading a DXF or generating the sample.
+The same controls are available in Floor Plans. Room boundaries use the `RM$`,
+`A-AREA-BOUNDARY`, `ROOM_POLYGONS`, or `BOUNDARIES` layers; labels use
+`ROOM_LABELS`, `TEXT`, or `0`. Set the drawing's `$INSUNITS` to feet,
+millimetres, centimetres, or metres. Unspecified units are rejected.
+
+The route invokes the CAD parser's `.venv` Python interpreter. Set
+`CAFM_CAD_PYTHON` to an alternate Python executable if needed. If the
+interpreter is unavailable, the limited ASCII DXF fallback supports straight,
+closed LWPOLYLINE room boundaries and TEXT labels; drawings with voids, desks,
+curves, or other unsupported room entities require Python. Desk coordinates are
+returned by the API but are not yet saved to the platform's desk registry.
+Room changes currently persist in browser storage, not on the server.

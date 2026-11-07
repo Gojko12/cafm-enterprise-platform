@@ -5,6 +5,7 @@ import { ZoomIn, ZoomOut, Info, AlertCircle } from "lucide-react";
 import { useApp } from "@/lib/hooks/useApp";
 import { useCafmStore } from "@/lib/cafm-store";
 import type { Room } from "@cafm/shared-schema";
+import { CadUpload } from "@/components/modules/CadUpload";
 
 export function FloorPlanViewer() {
   const { selectedFloor } = useApp();
@@ -24,9 +25,15 @@ export function FloorPlanViewer() {
     ? sampleData.rooms.filter(
         (r) =>
           r.bl_id === selectedFloor.bl_id &&
-          r.LevelName === selectedFloor.LevelName,
+          r.LevelName === selectedFloor.LevelName &&
+          r.SiteId === selectedFloor.SiteId,
       )
     : [];
+  const points = roomsInFloor.flatMap((room) => room.Polygon?.coordinates.flat() ?? []);
+  const minX = points.length ? Math.min(...points.map((point) => point[0])) : 0;
+  const minY = points.length ? Math.min(...points.map((point) => point[1])) : 0;
+  const width = points.length ? Math.max(...points.map((point) => point[0])) - minX : 500;
+  const height = points.length ? Math.max(...points.map((point) => point[1])) - minY : 500;
 
   // Mock work request data for maintenance mode color coding
   const getRoomColor = (room: Room) => {
@@ -86,6 +93,7 @@ export function FloorPlanViewer() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            <CadUpload floor={selectedFloor} />
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -148,6 +156,7 @@ export function FloorPlanViewer() {
         <svg
           ref={svgRef}
           className="w-full h-full cursor-grab active:cursor-grabbing"
+          viewBox={`${minX - width * 0.05} ${minY - height * 0.05} ${Math.max(width * 1.1, 1)} ${Math.max(height * 1.1, 1)}`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -181,9 +190,12 @@ export function FloorPlanViewer() {
 
               const isSelected = selectedRoomForInspection?.RoomCode === room.RoomCode;
               const fillColor = getRoomColor(room);
-              const coords = room.Polygon.coordinates[0]
-                .map((coord) => `${coord[0]},${coord[1]}`)
-                .join(" ");
+              const coords = room.Polygon.coordinates.map((ring) =>
+                ring.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${point[1]}`).join(" ") + " Z",
+              ).join(" ");
+              const ring = room.Polygon.coordinates[0];
+              const labelX = (Math.min(...ring.map((point) => point[0])) + Math.max(...ring.map((point) => point[0]))) / 2;
+              const labelY = (Math.min(...ring.map((point) => point[1])) + Math.max(...ring.map((point) => point[1]))) / 2;
 
               return (
                 <g
@@ -192,22 +204,19 @@ export function FloorPlanViewer() {
                   onClick={() => setSelectedRoomForInspection(room)}
                   style={{ cursor: "pointer" }}
                 >
-                  <polygon
-                    points={coords}
+                  <path
+                    d={coords}
+                    fillRule="evenodd"
                     fill={fillColor}
                     stroke={isSelected ? "#0066cc" : "#999"}
-                    strokeWidth={isSelected ? "2" : "1"}
+                    strokeWidth={Math.max(width, height) * (isSelected ? 0.005 : 0.002)}
                     opacity="0.7"
                     className="transition-all"
                   />
                   <text
-                    x={(room.Polygon.coordinates[0][0][0] +
-                      room.Polygon.coordinates[0][2][0]) /
-                      2}
-                    y={(room.Polygon.coordinates[0][0][1] +
-                      room.Polygon.coordinates[0][2][1]) /
-                      2}
-                    fontSize="8"
+                    x={labelX}
+                    y={labelY}
+                    fontSize={Math.max(width, height) * 0.025}
                     fontWeight="600"
                     fill="#000"
                     textAnchor="middle"

@@ -25,7 +25,7 @@ from xml.etree import ElementTree as ET
 
 import ezdxf
 from pydantic import BaseModel, Field, field_validator
-from shapely.geometry import Point, Polygon, LinearRing, MultiPolygon
+from shapely.geometry import Point, Polygon, LinearRing, MultiPolygon, mapping
 from shapely.ops import unary_union
 
 
@@ -133,33 +133,34 @@ class DXFAreaParser:
             if not room_code:
                 room_code = f"ROOM-{idx + 1:03d}"
 
-            net_area_m2 = self._calculate_net_area(boundary_geom, void_polylines)
+            intersecting_voids = [void for void in void_polylines if boundary_geom.intersects(void)]
+            net_geometry = boundary_geom.difference(unary_union(intersecting_voids)) if intersecting_voids else boundary_geom
+            if not isinstance(net_geometry, Polygon):
+                raise ValueError(f"Room {room_code} has a disconnected net geometry")
+            net_area_m2 = net_geometry.area
             if net_area_m2 < self.config.min_area_m2:
                 continue
 
-            centroid = boundary_geom.representative_point()
+            centroid = net_geometry.representative_point()
             label_anchor = (centroid.x, centroid.y)
             center_point = (centroid.x, centroid.y)
 
-            bounds = boundary_geom.bounds
+            bounds = net_geometry.bounds
             bounding_box = {
                 "type": "BBox",
                 "coordinates": [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
             }
 
-            geojson = {
-                "type": "Polygon",
-                "coordinates": [list(boundary_geom.exterior.coords)],
-            }
-            if boundary_geom.interiors:
-                for interior in boundary_geom.interiors:
-                    geojson["coordinates"].append(list(interior.coords))
+            geojson = mapping(net_geometry)
+
+            if room_code in rooms:
+                raise ValueError(f"Duplicate room code: {room_code}")
 
             rooms[room_code] = ExtractedRoom(
                 room_code=room_code,
                 room_name=room_name,
                 net_area_m2=net_area_m2,
-                geometry_wkt=boundary_geom.wkt,
+                geometry_wkt=net_geometry.wkt,
                 geometry_geojson=geojson,
                 label_anchor=label_anchor,
                 center_point=center_point,
@@ -183,11 +184,17 @@ class DXFAreaParser:
 
             if entity.dxftype() in ("LWPOLYLINE", "POLYLINE"):
                 coords = []
-                for point in entity.get_points():
+                if entity.dxftype() == "LWPOLYLINE" and entity.has_arc:
+                    raise ValueError("Curved room boundaries are not supported")
+                points = entity.get_points() if entity.dxftype() == "LWPOLYLINE" else [vertex.dxf.location for vertex in entity.vertices]
+                for point in points:
                     x, y = point[0] * unit_scale, point[1] * unit_scale
                     coords.append((x, y))
 
-                if len(coords) >= 4 and coords[0] == coords[-1]:
+                closed = entity.closed if entity.dxftype() == "LWPOLYLINE" else entity.is_closed
+                if len(coords) >= 3 and (closed or coords[0] == coords[-1]):
+                    if coords[0] != coords[-1]:
+                        coords.append(coords[0])
                     try:
                         poly = Polygon(coords[:-1])
                         if poly.is_valid:
@@ -245,7 +252,8 @@ class DXFAreaParser:
 
                     if label_text:
                         room_code = label_text.strip().upper()
-                        labels[room_code] = (x, y, label_text)
+                        scale = float(self.config.unit_scale.value)
+                        labels[room_code] = (x * scale, y * scale, label_text)
                 except (AttributeError, IndexError):
                     continue
         except Exception:
@@ -271,13 +279,8 @@ class DXFAreaParser:
         """
         Calculate net area by subtracting void islands (columns, shafts) from boundary.
         """
-        net_area = boundary.area
-
-        for void in void_islands:
-            if boundary.contains(void):
-                net_area -= void.area
-
-        return round(net_area, 2)
+        intersecting = [void for void in void_islands if boundary.intersects(void)]
+        return round(boundary.difference(unary_union(intersecting)).area, 2) if intersecting else round(boundary.area, 2)
 
     def export_geojson(self, rooms: dict[str, ExtractedRoom]) -> dict:
         """

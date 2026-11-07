@@ -12,6 +12,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
+import { CadUpload } from "@/components/modules/CadUpload";
 
 export function LocationHierarchyManager() {
   const {
@@ -32,24 +33,6 @@ export function LocationHierarchyManager() {
   }), [data.buildings, data.floors, data.rooms, activeSiteId]);
 
   const [showAddRoom, setShowAddRoom] = useState(false);
-  const [showUploadDwg, setShowUploadDwg] = useState(false);
-  const [dwgFile, setDwgFile] = useState<File | null>(null);
-
-  const handleDwgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setDwgFile(file);
-    
-    // Simulate dry-run extraction
-    console.log(`Dry-run: Processing ${file.name} for floor plan extraction`);
-    alert(
-      `Simulated CAD extraction: File "${file.name}" would extract ${3}-${5} rooms with net areas.\n\nIn production, this connects to the previewCadExtractionDryRun Cloud Function.`,
-    );
-    
-    setShowUploadDwg(false);
-  };
-
   return (
     <div className="p-6">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -130,60 +113,35 @@ export function LocationHierarchyManager() {
         <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <FileUp size={20} className="text-amber-600" />
-            Floor Plan CAD Upload (DWG/DXF)
+            Floor Plan CAD Upload (DXF)
           </h3>
 
           {selectedFloor ? (
             <div className="space-y-4">
               <p className="text-sm text-gray-600">
-                Upload DWG or DXF file for:{" "}
+                Upload a DXF file for:{" "}
                 <span className="font-semibold">
                   {selectedBuilding?.Name} › {selectedFloor.LevelName}
                 </span>
               </p>
 
-              {!showUploadDwg ? (
-                <button
-                  onClick={() => setShowUploadDwg(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-                >
-                  <FileUp size={18} />
-                  Choose CAD File
-                </button>
-              ) : (
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                  <input
-                    type="file"
-                    accept=".dwg,.dxf"
-                    onChange={handleDwgUpload}
-                    className="hidden"
-                    id="dwg-input"
-                  />
-                  <label
-                    htmlFor="dwg-input"
-                    className="cursor-pointer flex flex-col items-center gap-2"
-                  >
-                    <FileUp size={32} className="text-gray-400" />
-                    <span className="text-sm font-medium text-gray-600">
-                      Click to select or drag DWG/DXF file
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      Supported: .dwg, .dxf
-                    </span>
-                  </label>
-                </div>
-              )}
-
-              {dwgFile && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <p className="text-sm text-green-900">
-                    <span className="font-semibold">Selected:</span> {dwgFile.name}
-                  </p>
-                  <p className="text-xs text-green-600 mt-1">
-                    Dry-run preview shows extracted room boundaries and net areas.
-                  </p>
-                </div>
-              )}
+              <CadUpload floor={selectedFloor} />
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr><th>Room code</th><th>Name</th><th>Net area (m²)</th></tr>
+                  </thead>
+                  <tbody>
+                    {sampleData.rooms
+                      .filter((room) => room.bl_id === selectedFloor.bl_id && room.LevelName === selectedFloor.LevelName)
+                      .map((room) => (
+                        <tr key={room.RoomCode} className="border-t">
+                          <td>{room.RoomCode}</td><td>{room.Name}</td><td>{room.NetAreaM2 ?? "—"}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-gray-500 italic">
