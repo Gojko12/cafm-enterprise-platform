@@ -20,6 +20,51 @@ const ROLE_LABEL: Record<string, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "ESA_DO Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
+type MendixAction = {
+  id: string;
+  label: string;
+  source: number[];
+  target: number;
+  roles: LJRole[];
+  substatus: string;
+  tracks?: Array<"RFQ" | "RFW">;
+  handler?: "save" | "preSat" | "sendInvitation" | "requestReview" | "approveSat" | "approveDrawing" | "approveInventory" | "archive";
+};
+const LJ_ACTIONS: readonly MendixAction[] = [
+  { id: "save", label: "Save", source: [0, 10, 20, 21, 23, 25, 26, 27, 28, 29, 30, 31, 32, 40, 50, 55, 78, 79, 80, 81, 94, 95, 96, 97, 98, 99, 100], target: -1, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "TRADE_TM", "ESA_LONG_JOB", "TRADE_LONG_JOB", "ESA_CCM", "TRADE_CM", "ESA_DO", "ESA_IM"], substatus: "Saved", handler: "save" },
+  { id: "submit-trade", label: "Submit to Trade (20%) (0&10)", source: [0, 10], target: 20, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "ESA_LONG_JOB"], substatus: "Quotation Preparation Offer by Contractor", tracks: ["RFQ"] },
+  { id: "in-progress-21", label: "In Progress (21%)", source: [20, 23], target: 21, roles: ["TRADE_TM", "TRADE_LONG_JOB"], substatus: "Quotation Preparation Offer by Trade", tracks: ["RFQ"] },
+  { id: "review-23-rfq", label: "Request Review (23%) (25&26)", source: [25, 26], target: 23, roles: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "Quotation Not Accepted by ESA-TM. Review by Contractor", tracks: ["RFQ"] },
+  { id: "review-23-rfw", label: "Request Review (23%) (30&31)", source: [30, 31], target: 23, roles: ["ESA_TO"], substatus: "Request for Work Review", tracks: ["RFW"] },
+  { id: "accept-25-0-10", label: "Submit for Acceptance (25%) (0_10)", source: [0, 10], target: 25, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "ESA_LONG_JOB"], substatus: "Submitted for Acceptance", tracks: ["RFQ"] },
+  { id: "accept-25-20-23", label: "Submit for Acceptance (25%) (20_23)", source: [20, 23], target: 25, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "TRADE_TM", "ESA_LONG_JOB", "TRADE_LONG_JOB"], substatus: "Submitted for Acceptance", tracks: ["RFQ"] },
+  { id: "accept-25-21", label: "Submit for Acceptance (25%) (21)", source: [21], target: 25, roles: ["TRADE_TM", "TRADE_LONG_JOB"], substatus: "Submitted for Acceptance", tracks: ["RFQ"] },
+  { id: "user-acceptance", label: "Submit to User for Acceptance (26%) (25)", source: [25], target: 26, roles: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "Submitted to User for Acceptance", tracks: ["RFQ"] },
+  { id: "cancel", label: "Cancel (27%) (23,0,10)", source: [0, 10, 20, 21, 23], target: 27, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "ESA_LONG_JOB"], substatus: "Cancelled" },
+  { id: "accept-28", label: "Accept (28%) (25, 26)", source: [25, 26], target: 28, roles: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "Quotation Accepted", tracks: ["RFQ"] },
+  { id: "reject-29-rfq", label: "Reject (29%) (25, 26)", source: [25, 26], target: 29, roles: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "Quotation Rejected", tracks: ["RFQ"] },
+  { id: "reject-29-rfw", label: "Reject (29%) (30, 31)", source: [30, 31], target: 29, roles: ["ESA_TO"], substatus: "Request for Work Rejected", tracks: ["RFW"] },
+  { id: "convert-rfw", label: "Accept & Convert to RFW 30%", source: [25, 28, 0, 10], target: 30, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "ESA_LONG_JOB"], substatus: "Request for Work", tracks: ["RFQ", "RFW"] },
+  { id: "budget-hold", label: "On Hold for Budget (31%) (30)", source: [30, 31], target: 31, roles: ["ESA_TO"], substatus: "On Hold for Budget", tracks: ["RFW"] },
+  { id: "approve-order", label: "Approve & Order (32%) (30,31)", source: [30, 31], target: 32, roles: ["ESA_TO"], substatus: "Approved and Ordered", tracks: ["RFW"] },
+  { id: "commit", label: "Commit (40%) (32)", source: [32], target: 40, roles: ["TRADE_TM", "TRADE_LONG_JOB"], substatus: "Committed", tracks: ["RFW"] },
+  { id: "in-progress-50", label: "In Progress (50%) (40)", source: [40], target: 50, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "TRADE_TM", "ESA_LONG_JOB", "TRADE_LONG_JOB"], substatus: "Work In Progress", tracks: ["RFW"] },
+  { id: "on-hold-55", label: "On Hold (55%) (40_50)", source: [40, 50], target: 55, roles: ["ESA_TO", "ESA_TM", "ESA_LJM", "TRADE_TM", "ESA_LONG_JOB", "TRADE_LONG_JOB"], substatus: "On Hold for Access / Labor / Parts", tracks: ["RFW"] },
+  { id: "technical-complete", label: "Technically Completed (78_80_81_94%) (50_55)", source: [50, 55], target: 78, roles: ["TRADE_TM", "TRADE_LONG_JOB", "ESA_IM"], substatus: "Technically Completed", tracks: ["RFW"] },
+  { id: "approve-presat", label: "Approve Pre-SAT (79%) (78)", source: [78], target: 79, roles: ["TRADE_TM", "TRADE_LONG_JOB"], substatus: "Pre-SAT Approved", tracks: ["RFW"], handler: "preSat" },
+  { id: "send-invitation", label: "Send Invitation (80%) (78_79_81)", source: [78, 79, 81], target: 80, roles: ["TRADE_TM", "TRADE_LONG_JOB"], substatus: "Acceptance Invitation Sent", tracks: ["RFW"], handler: "sendInvitation" },
+  { id: "request-gate-review", label: "Request Review (78_79_80_81)", source: [78, 79, 80, 81], target: 78, roles: ["ESA_TO", "ESA_TM", "ESA_DO", "ESA_IM", "ESA_LONG_JOB"], substatus: "Acceptance Review Requested", tracks: ["RFW"], handler: "requestReview" },
+  { id: "approve-sat", label: "Approve SAT (81_94%) (79_80)", source: [79, 80], target: 81, roles: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "SAT Approved", tracks: ["RFW"], handler: "approveSat" },
+  { id: "approve-drawing", label: "Approve Drawing/Engineering (78_79_80_81 -> 94%)", source: [78, 79, 80, 81], target: 94, roles: ["ESA_DO", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "Drawing/Engineering Approved", tracks: ["RFW"], handler: "approveDrawing" },
+  { id: "approve-inventory", label: "Approve CIFM Inventory (78_79_80_81 -> 94%)", source: [78, 79, 80, 81], target: 94, roles: ["ESA_IM", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "CIFM Inventory Approved", tracks: ["RFW"], handler: "approveInventory" },
+  { id: "completed-95", label: "Completed (95%) (94)", source: [94], target: 95, roles: ["TRADE_TM", "TRADE_LONG_JOB"], substatus: "Completed", tracks: ["RFW"] },
+  { id: "sign-yellow", label: "Sign Yellow Page (96%) (95)", source: [95], target: 96, roles: ["TRADE_CM", "TRADE_LONG_JOB"], substatus: "Yellow Page Signed", tracks: ["RFW"] },
+  { id: "approve-costs", label: "Approve Costs (97%) (96)", source: [96], target: 97, roles: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"], substatus: "Costs Approved", tracks: ["RFW"] },
+  { id: "final-approval", label: "Final Approval (98%) (97)", source: [97], target: 98, roles: ["ESA_TO"], substatus: "Final Approval", tracks: ["RFW"] },
+  { id: "confirm-invoice", label: "Confirm Invoice Information (99%) (98)", source: [98], target: 99, roles: ["ESA_TO", "ESA_CCM", "ESA_LONG_JOB"], substatus: "Invoice Information Confirmed", tracks: ["RFW"] },
+  { id: "confirm-payment", label: "Confirm payment (100%) (99)", source: [99], target: 100, roles: ["TRADE_CM", "TRADE_TM", "TRADE_LONG_JOB"], substatus: "Payment Confirmed", tracks: ["RFW"] },
+  { id: "archive", label: "Manual Archiving (100% archived) (100)", source: [100], target: 100, roles: ["ESA_TO", "ESA_LJM", "ESA_LONG_JOB"], substatus: "100% archived", tracks: ["RFW"], handler: "archive" },
+];
 
 export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   workRequest: BaseWorkRequest;
@@ -27,17 +72,32 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   onNavigate: (id: string) => void;
 }) {
   const { data, setData } = useCafmStore();
-  const { activeSiteId, activeLJRole, setActiveLJRole, currentUser } = useSiteContext();
+  const { activeLJRole, setActiveLJRole, currentUser, activePerson } = useSiteContext();
   const [tab, setTab] = useState<Tab>(TABS[0]);
   const [role, setRole] = useState<LJRole>(activeLJRole ?? "ESA_TO");
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [actionsOpen, setActionsOpen] = useState(true);
+  const [showAllActions, setShowAllActions] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<"all" | "comment" | "log">("all");
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const actorId = currentUser?.UserId ?? "current-user";
-  const actorName = currentUser?.DisplayName ?? "Current user";
+  const actorId = currentUser?.UserId ?? activePerson;
+  const actorName = activePerson === "SiteAdmin" ? "SiteAdmin" : activePerson;
   const track = workRequest.ProcessTrack ?? (workRequest.Percentage >= 30 ? "RFW" : "RFQ");
+  const activeAssignments = data.siteRoleAssignments.filter((assignment) =>
+    assignment.SiteId === workRequest.SiteId &&
+    assignment.PersonName === activePerson &&
+    (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)) &&
+    (assignment.AssignmentLevel === "Main" || assignment.AssignmentLevel === "Deputy"));
+  const ljAssignments = data.siteRoleAssignments.filter((assignment) =>
+    assignment.SiteId === workRequest.SiteId &&
+    (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)));
+  const hasPermission = (allowedRoles: readonly LJRole[]) => activePerson === "SiteAdmin" ||
+    allowedRoles.some((allowedRole) => activeAssignments.some((assignment) => assignment.RoleCode === allowedRole));
+  const notificationRecipients = data.siteRoleAssignments.filter((assignment) =>
+    assignment.SiteId === workRequest.SiteId && assignment.ReceiveNotifications &&
+    (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)));
 
   const update = (change: (wr: BaseWorkRequest) => BaseWorkRequest, log?: string) => {
     const now = new Date().toISOString();
@@ -49,13 +109,13 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
       }] } : {}) };
     }) }));
   };
-  const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[]) => {
+  const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[], allowBackward = false) => {
     if (percentage < 0 || percentage > 100) return;
-    if (allowedRoles && !allowedRoles.includes(role)) {
-      window.alert(`This stage requires one of these LJ roles: ${allowedRoles.join(", ")}.`);
+    if (allowedRoles && !hasPermission(allowedRoles)) {
+      window.alert(`This stage requires an assigned role: ${allowedRoles.join(", ")}.`);
       return;
     }
-    if (percentage < workRequest.Percentage && !(percentage === 50 && workRequest.Percentage === 55)) {
+    if (percentage < workRequest.Percentage && !(percentage === 50 && workRequest.Percentage === 55) && !allowBackward) {
       window.alert("Long Job stages cannot be moved backwards.");
       return;
     }
@@ -127,10 +187,12 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   const gateState = (type: "SAT" | "DrawingEngineering" | "CIFMInventory") => gates.find((item) => item.GateType === type);
   const approveGate = (type: "SAT" | "DrawingEngineering" | "CIFMInventory") => {
     const approvers: Record<typeof type, LJRole[]> = {
-      SAT: ["ESA_TO", "ESA_TM"], DrawingEngineering: ["ESA_DO"], CIFMInventory: ["ESA_IM"],
+      SAT: ["ESA_TO", "ESA_TM", "ESA_LONG_JOB"],
+      DrawingEngineering: ["ESA_DO", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"],
+      CIFMInventory: ["ESA_IM", "ESA_TO", "ESA_TM", "ESA_LONG_JOB"],
     };
-    if (!approvers[type].includes(role)) {
-      window.alert(`${type} approval requires ${approvers[type].join(" or ")}.`);
+    if (!hasPermission(approvers[type])) {
+      window.alert(`${type} approval requires an assigned ${approvers[type].join(" or ")} role.`);
       return;
     }
     if (type === "SAT" && workRequest.RequiresSAT && !workRequest.PreSATApproved) {
@@ -150,14 +212,18 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
       (!workRequest.RequiresDrawingUpdate || next.some((gate) => gate.GateType === "DrawingEngineering" && gate.Status === "Approved")) &&
       (!workRequest.RequiresInventoryUpdate || next.some((gate) => gate.GateType === "CIFMInventory" && gate.Status === "Approved"));
     const percentage = complete ? 94 : type === "SAT" ? 81 : Math.max(79, workRequest.Percentage);
-    stage(percentage, complete ? "All Acceptances Completed" : `${type} approved`, { AcceptanceGates: next });
+    stage(percentage, complete ? "All Acceptances Completed" : `${type} approved`, { AcceptanceGates: next }, approvers[type]);
   };
   const gateAction = (type: "SAT" | "DrawingEngineering" | "CIFMInventory", status: "ReviewRequested" | "InvitationSent") => {
-    const assignees: Record<typeof type, LJRole[]> = {
-      SAT: ["ESA_TO", "ESA_TM"], DrawingEngineering: ["ESA_DO"], CIFMInventory: ["ESA_IM"],
+    const assignees: Record<typeof type, LJRole[]> = status === "InvitationSent" ? {
+      SAT: ["TRADE_TM", "TRADE_LONG_JOB"], DrawingEngineering: ["TRADE_TM", "TRADE_LONG_JOB"], CIFMInventory: ["TRADE_TM", "TRADE_LONG_JOB"],
+    } : {
+      SAT: ["ESA_TO", "ESA_TM", "ESA_DO", "ESA_IM", "ESA_LONG_JOB"],
+      DrawingEngineering: ["ESA_TO", "ESA_TM", "ESA_DO", "ESA_IM", "ESA_LONG_JOB"],
+      CIFMInventory: ["ESA_TO", "ESA_TM", "ESA_DO", "ESA_IM", "ESA_LONG_JOB"],
     };
-    if (!assignees[type].includes(role)) {
-      window.alert(`${type} actions require ${assignees[type].join(" or ")}.`);
+    if (!hasPermission(assignees[type])) {
+      window.alert(`${type} action requires an assigned ${assignees[type].join(" or ")} role.`);
       return;
     }
     if (type === "SAT" && !workRequest.PreSATApproved) {
@@ -165,14 +231,81 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
       return;
     }
     const next = [...gates.filter((item) => item.GateType !== type), { GateType: type, IsRequired: true, Status: status as "ReviewRequested" | "InvitationSent" }];
-    const percentage = type === "SAT" && status === "InvitationSent" ? 80 : Math.max(78, workRequest.Percentage);
-    stage(percentage, `${type}: ${status}`, { AcceptanceGates: next });
+    const percentage = status === "InvitationSent" ? 80 : Math.max(78, workRequest.Percentage);
+    stage(percentage, `${type}: ${status}`, { AcceptanceGates: next }, assignees[type]);
   };
+  const canUseAction = (action: MendixAction) => {
+    if (action.handler === "preSat" && !workRequest.RequiresSAT) return false;
+    if (action.handler === "preSat" && workRequest.PreSATApproved) return false;
+    if (action.handler === "approveSat" && !workRequest.RequiresSAT) return false;
+    if (action.handler === "approveSat" && gateState("SAT")?.Status !== "InvitationSent") return false;
+    if (action.handler === "approveDrawing" && !workRequest.RequiresDrawingUpdate) return false;
+    if (action.handler === "approveInventory" && !workRequest.RequiresInventoryUpdate) return false;
+    if (action.handler === "sendInvitation" || action.handler === "requestReview") {
+      const requestedStatus = action.handler === "sendInvitation" ? "InvitationSent" : "ReviewRequested";
+      const needsGate = (["SAT", "DrawingEngineering", "CIFMInventory"] as const).some((type) =>
+        (type === "SAT" ? workRequest.RequiresSAT : type === "DrawingEngineering" ? workRequest.RequiresDrawingUpdate : workRequest.RequiresInventoryUpdate) &&
+        (type !== "SAT" || workRequest.PreSATApproved) &&
+        gateState(type)?.Status !== "Approved" && gateState(type)?.Status !== requestedStatus);
+      if (!needsGate) return false;
+    }
+    if (action.id === "save") return action.source.includes(workRequest.Percentage) && hasPermission(action.roles);
+    if (action.id === "convert-rfw") {
+      const sourceMatches = track === "RFQ" ? [25, 28].includes(workRequest.Percentage) : [0, 10].includes(workRequest.Percentage);
+      return sourceMatches && hasPermission(action.roles);
+    }
+    if (action.id === "cancel") {
+      const sourceMatches = track === "RFQ" ? [0, 10, 20, 21, 23].includes(workRequest.Percentage) : [0, 10].includes(workRequest.Percentage);
+      return sourceMatches && hasPermission(action.roles);
+    }
+    const roles = action.id === "technical-complete" && workRequest.Percentage !== 50
+      ? action.roles.filter((item) => item !== "ESA_IM")
+      : action.roles;
+    return action.source.includes(workRequest.Percentage) &&
+      (!action.tracks || action.tracks.includes(track)) && hasPermission(roles);
+  };
+  const runAction = (action: MendixAction) => {
+    if (!canUseAction(action)) return;
+    if (action.handler === "save") {
+      update((wr) => wr, `Saved at ${workRequest.Percentage}% by ${actorName}`);
+      return;
+    }
+    if (action.handler === "preSat") {
+      stage(79, action.substatus, { PreSATApproved: true }, action.roles);
+      return;
+    }
+    if (action.handler === "sendInvitation" || action.handler === "requestReview") {
+      const status = action.handler === "sendInvitation" ? "InvitationSent" : "ReviewRequested";
+      const pendingGate = (["SAT", "DrawingEngineering", "CIFMInventory"] as const).find((type) =>
+        (type === "SAT" ? workRequest.RequiresSAT : type === "DrawingEngineering" ? workRequest.RequiresDrawingUpdate : workRequest.RequiresInventoryUpdate) &&
+        (type !== "SAT" || workRequest.PreSATApproved) &&
+        gateState(type)?.Status !== "Approved" && gateState(type)?.Status !== status);
+      if (!pendingGate) {
+        window.alert("There are no pending acceptance gates for this action.");
+        return;
+      }
+      gateAction(pendingGate, status);
+      return;
+    }
+    if (action.handler === "approveSat") { approveGate("SAT"); return; }
+    if (action.handler === "approveDrawing") { approveGate("DrawingEngineering"); return; }
+    if (action.handler === "approveInventory") { approveGate("CIFMInventory"); return; }
+    const target = action.id === "technical-complete" && !required ? 94 : action.target;
+    const targetTrack = action.id === "convert-rfw" ? "RFW" : track;
+    const roles = action.id === "technical-complete" && workRequest.Percentage !== 50
+      ? action.roles.filter((item) => item !== "ESA_IM")
+      : action.roles;
+    stage(target, action.substatus, {
+      ProcessTrack: targetTrack,
+      ...(action.handler === "archive" ? { ArchivedAt: new Date().toISOString() } : {}),
+      ...(target === 55 ? { IsFrozen: true, FreezeStartedAt: new Date().toISOString() } : {}),
+      ...(target === 50 && workRequest.IsFrozen ? { IsFrozen: false, FreezeEndedAt: new Date().toISOString() } : {}),
+    }, roles, target < workRequest.Percentage);
+  };
+  const visibleActions = showAllActions
+    ? LJ_ACTIONS
+    : LJ_ACTIONS.filter((action) => canUseAction(action));
   const roles = ASSIGNMENT_ROLES.filter((item) => ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"].includes(item));
-  const roleUsers = (key: typeof roles[number]) => data.users.filter((user) =>
-    (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
-    (user.LJRoles.includes(key) || user.SystemRole === key) &&
-    (["ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"].includes(key) || !workRequest.TradeId || !user.Trades.length || user.Trades.includes(workRequest.TradeId)));
   const printYellowPage = () => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) { window.alert("Allow pop-ups to print the Yellow Page."); return; }
@@ -214,10 +347,51 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === TABS[0] && <div className="space-y-4">
+          <section className="rounded border border-blue-200 bg-white shadow-sm">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 px-4 py-3">
+              <button type="button" aria-expanded={actionsOpen} onClick={() => setActionsOpen((open) => !open)} className="font-semibold text-blue-800">
+                Actions {actionsOpen ? "−" : "+"}
+              </button>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={showAllActions} onChange={(event) => setShowAllActions(event.target.checked)} />
+                Show All Mendix Action Buttons (Matrix View)
+              </label>
+            </header>
+            {actionsOpen && <div className="space-y-3 p-4">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded bg-slate-800 px-2 py-1 font-semibold text-white">{workRequest.SiteId} · {workRequest.TradeName ?? workRequest.TradeId ?? "No trade"}</span>
+                <span className="rounded bg-blue-100 px-2 py-1 font-semibold text-blue-800">Current stage: {workRequest.Percentage}%</span>
+                <span className="font-semibold text-slate-500">Notification recipients:</span>
+                {notificationRecipients.map((assignment) => <span key={assignment.AssignmentId} className="rounded bg-emerald-100 px-2 py-1 text-emerald-800">
+                  {assignment.PersonName} · {assignment.RoleCode} · {assignment.AssignmentLevel}
+                </span>)}
+                {!notificationRecipients.length && <span className="text-slate-500">None assigned</span>}
+                <span className="font-semibold text-slate-500">Main/Deputy:</span>
+                {ljAssignments.map((assignment) => <span key={`actor-${assignment.AssignmentId}`} className={`rounded px-2 py-1 ${assignment.AssignmentLevel === "Main" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
+                  {assignment.PersonName} · {assignment.RoleCode} · {assignment.AssignmentLevel}
+                </span>)}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {visibleActions.map((action) => {
+                  const available = canUseAction(action);
+                  return <button key={action.id} type="button" disabled={!available} onClick={() => runAction(action)}
+                    title={`${action.source.join(", ")}% → ${action.target}% · Roles: ${action.roles.join(", ")}${available ? "" : " · Not available for this stage/person"}`}
+                    className="rounded border border-blue-400 bg-white px-3.5 py-2 text-sm text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40">
+                    {action.label}
+                  </button>;
+                })}
+                {!visibleActions.length && <p className="text-sm text-slate-500">No actions are available for this stage and active person.</p>}
+              </div>
+              {showAllActions && <p className="text-xs text-slate-500">Disabled buttons are not available at this stage or the active person lacks a matching Main/Deputy assignment.</p>}
+            </div>}
+          </section>
           {group("Long Job Core", <>
             {field("WR ID", workRequest.WR_ID)}{field("Process (RFQ/RFW)", track)}{field("Work request status", workRequest.WorkRequestStatus)}
             {field("Current Substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}{field("Substatus Description", workRequest.WorkRequestSubstatus)}
             {field("Trade", workRequest.TradeName ?? workRequest.TradeId)}
+            {field("Cost Type", <select aria-label="Cost Type" value={workRequest.CostType ?? "Fixed"} onChange={(event) =>
+              update((wr) => ({ ...wr, CostType: event.target.value === "Ceiling" ? "Ceiling" : "Fixed" }))}
+              className="rounded border px-2 py-1"><option value="Fixed">Fixed Price</option><option value="Ceiling">Ceiling Price</option></select>)}
             {field("Estimated Cost (≥ 750 EUR)", <label className="flex items-center gap-2"><input aria-label="Estimated Cost (minimum 750 EUR)" type="number" min="750" step="0.01"
               value={workRequest.EstimatedCostEur ?? 750} onChange={(e) => {
                 const value = Number(e.target.value);
@@ -232,7 +406,12 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
           {group("Work Location & Equipment", <>{field("bl id", workRequest.bl_id)}{field("Level name", workRequest.LevelName)}{field("Room code", workRequest.RoomCode)}{field("Problem location", workRequest.ProblemLocation)}{field("Equipment", workRequest.EquipmentCodes.join(", "))}</>)}
           {group("Assigned Trade & ESA Roles", <>{roles.map((key) => <label key={key} className="text-sm">{ROLE_LABEL[key]} ({key})
             <select value={workRequest.AssignedRoles?.[key] ?? ""} onChange={(e) => changeAssignedRole(key, e.target.value)} className="mt-1 block w-full rounded border px-2 py-2">
-              <option value="">Unassigned</option>{roleUsers(key).map((user) => <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+              <option value="">Unassigned</option>{data.siteRoleAssignments.filter((assignment) =>
+                assignment.SiteId === workRequest.SiteId && assignment.RoleCode === key &&
+                (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)))
+                .map((assignment) => <option key={assignment.AssignmentId} value={assignment.PersonName}>
+                  {assignment.PersonName} · {assignment.AssignmentLevel}
+                </option>)}
             </select></label>)}</>)}
         </div>}
         {tab === TABS[1] && <section className="space-y-4 rounded border bg-white p-4">
@@ -260,12 +439,12 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
             {(["Access", "Labor", "Parts"] as const).map((reason) => <button key={reason} disabled={workRequest.Percentage !== 50} onClick={() => stage(55, `On Hold for ${reason}`, { IsFrozen: true, FreezeReason: reason, ActiveFreezeName: `Waiting for ${reason}`, PlannedFreezeText: `On Hold for ${reason}` }, ["TRADE_TM", "TRADE_LONG_JOB"])} className="rounded bg-amber-600 px-3 py-2 text-white disabled:opacity-40">55% On Hold for {reason}</button>)}
           </div>
           <label className="text-sm font-medium">Assign Craftperson<select aria-label="Assign Craftperson to Long Job" value="" onChange={(e) => {
-            const person = data.craftspeople.find((item) => item.id === e.target.value && item.SiteId === activeSiteId);
+            const person = data.craftspeople.find((item) => item.id === e.target.value && item.SiteId === workRequest.SiteId);
             if (!person || (workRequest.CraftpersonLabor ?? []).some((line) => line.craftpersonId === person.id)) return;
             update((wr) => ({ ...wr, CraftpersonLabor: [...(wr.CraftpersonLabor ?? []), {
               craftpersonId: person.id, hourlyRate: person.HourlyRate, workingTimeMinutes: 0, name: person.Name, lastName: person.LastName,
             }] }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
-          }} className="ml-3 rounded border px-3 py-2"><option value="">Select craftperson</option>{data.craftspeople.filter((item) => item.SiteId === activeSiteId).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} — {person.Trade}</option>)}</select></label>
+          }} className="ml-3 rounded border px-3 py-2"><option value="">Select craftperson</option>{data.craftspeople.filter((item) => item.SiteId === workRequest.SiteId).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} — {person.Trade}</option>)}</select></label>
           <div className="overflow-x-auto rounded border"><table className="w-full text-left text-sm"><thead className="bg-slate-50"><tr>{["Hourly rate", "Working time (minutes)", "Name", "LastName", "Action"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
             {(workRequest.CraftpersonLabor ?? []).map((person) => <tr key={person.craftpersonId} className="border-t">
               <td className="p-3"><input type="number" min="0" step="0.01" value={person.hourlyRate} onChange={(e) => update((wr) => ({ ...wr, CraftpersonLabor: (wr.CraftpersonLabor ?? []).map((line) => line.craftpersonId === person.craftpersonId ? { ...line, hourlyRate: Number(e.target.value) } : line) }))} className="w-24 rounded border px-2 py-1" /> EUR</td>
@@ -301,7 +480,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
             [99, "99% Confirm Invoice Information by ESA_TO/ESA_CCM"],
             [100, "100% Confirm Payment by TRADE_CM/TRADE_TM"],
           ] as const).map(([percent, label]) => <button key={percent} disabled={workRequest.Percentage !== percent - 1} onClick={() => stage(percent, label, {}, percent === 95 ? ["TRADE_TM"] : percent === 96 ? ["TRADE_CM"] : percent === 97 ? ["ESA_TO", "ESA_TM"] : percent === 98 ? ["ESA_TO"] : percent === 99 ? ["ESA_TO", "ESA_CCM"] : ["TRADE_CM", "TRADE_TM"])} className="rounded bg-slate-700 px-3 py-2 text-white disabled:opacity-40">{label}</button>)}
-            <button disabled={workRequest.Percentage !== 100 || Boolean(workRequest.ArchivedAt)} onClick={() => stage(100, "100% archived", { ArchivedAt: new Date().toISOString() })} className="rounded bg-amber-500 px-3 py-2 font-bold disabled:opacity-40">100% archived</button>
+            <button disabled={workRequest.Percentage !== 100 || Boolean(workRequest.ArchivedAt) || !hasPermission(["ESA_TO", "ESA_LJM", "ESA_LONG_JOB"])} onClick={() => stage(100, "100% archived", { ArchivedAt: new Date().toISOString() }, ["ESA_TO", "ESA_LJM", "ESA_LONG_JOB"])} className="rounded bg-amber-500 px-3 py-2 font-bold disabled:opacity-40">100% archived</button>
           </div>
           <article id="yellow-page" className="rounded border-2 border-amber-300 bg-amber-50 p-6 print:border-black print:bg-white">
             <h4 className="text-center text-xl font-bold">Official Yellow Page Preview</h4><dl className="mt-4 grid grid-cols-2 gap-3 text-sm">

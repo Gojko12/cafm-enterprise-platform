@@ -20,6 +20,9 @@ export const LJRoleEnum = z.enum([
 ]);
 export type LJRole = z.infer<typeof LJRoleEnum>;
 
+export const CostTypeSchema = z.enum(["Fixed", "Ceiling"]);
+export type CostType = z.infer<typeof CostTypeSchema>;
+
 export const WRStatusDefinitionSchema = z.object({
   WorkRequestStatus: z.string().min(1),
   WorkRequestSubstatus: z.string().min(1),
@@ -137,6 +140,7 @@ export const BaseWorkRequestSchema = z.object({
   FreezeReason: z.string().optional(),
   // Financial & Escalation Fields (for Phase 6)
   EstimatedCostEur: z.number().nonnegative().optional(),
+  CostType: CostTypeSchema.optional(),
   ActualCostEur: z.number().nonnegative().optional(),
   ParentPM_WR_ID: z.string().min(1).optional(),
   OriginatingFJ_WR_ID: z.string().min(1).optional(),

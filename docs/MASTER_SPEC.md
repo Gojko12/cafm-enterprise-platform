@@ -532,3 +532,88 @@ Replace the narrow side drawer for Long Jobs with a wide Mendix-style `LJ Detail
   * `+ New LJ Document` (quotations, redline CAD drawings, SAT protocols, invoices) with `Open` and `Delete` actions logged to `History`.
 - **Persistent Bottom `History` Accordion**:
   * `Message text` + `Post` button and unified timeline with `All`, `Human Comments Only` (with `Edit` and visible prior versions), and `Automatic Logs Only`.
+
+## 17. Dedicated Site Role Assignments Window (Main/Deputy & Notifications), Fixed/Ceiling Cost Type & Mendix LJ Action Button Matrix
+
+### 17.1 Separate `Site Role Assignments` Window (`/site-role-assignments`)
+Create a dedicated page in the main left sidebar (`Site Role Assignments` at `/site-role-assignments`) to manage and monitor exact combinations of:
+- `SiteId` (`SITE-01 ESOC Darmstadt`, `SITE-02 ESTEC Noordwijk`, `SITE-03 ESRIN Frascati`)
+- `PersonName` (e.g., `Mark`, `Yvonne`, `Claudia`, `Bastian`, `Lidija`, `Thomas`, `Stefan`, `Gregor`)
+- `RoleCode`:
+  * `ESA_TM` (ESA Trade Manager)
+  * `TRADE_TM` (Trade Manager)
+  * `ESA_CCM` (ESA Cost Centre Manager)
+  * `TRADE_CM` (Trade Contract Manager)
+  * `ESA_TO` (ESA Technical Officer)
+  * `ESA_LJM` (ESA Long Job Manager)
+  * `ESA_DO` (Draftsman / Drawing Engineering)
+  * `ESA_IM` (CIFM Inventory Admin)
+  * `ESA_LONG_JOB` (Simplified ESA Role)
+  * `TRADE_LONG_JOB` (Simplified Trade Role)
+- `Trade` (`Mechanical`, `Civil`, `Electrical`, `MultiTechnic`, `Cleaning`, `HeavyGang`, `Catering`, or `All` for site-wide roles)
+- `AssignmentLevel`: `'Main' | 'Deputy'`
+- `ReceiveNotifications`: `boolean` (`Yes` / `No`)
+
+#### Required Default Seeded Assignments (for SITE-01 ESOC Darmstadt):
+1. `Mark` | Role: `ESA Trade Manager (ESA_TM)` | Trade: `Mechanical` | Level: `Main` | Receive Notifications: `Yes`
+2. `Mark` | Role: `ESA Trade Manager (ESA_TM)` | Trade: `Electrical` | Level: `Deputy` | Receive Notifications: `No`
+3. `Yvonne` | Role: `ESA Trade Manager (ESA_TM)` | Trade: `Electrical` | Level: `Main` | Receive Notifications: `Yes`
+4. `Claudia` | Role: `Trade Manager (TRADE_TM)` | Trade: `Mechanical` | Level: `Main` | Receive Notifications: `Yes`
+5. `Bastian` | Role: `Trade Manager (TRADE_TM)` | Trade: `Mechanical` | Level: `Deputy` | Receive Notifications: `No`
+- Also seed Main/Deputy assignments for `Electrical`, `Civil`, `MultiTechnic`, `Cleaning`, `HeavyGang`, `Catering` and for `ESA_TO`, `ESA_LJM`, `ESA_CCM`, `TRADE_CM`, `ESA_DO`, and `ESA_IM` so all stages 0%–100% can be tested immediately.
+
+### 17.2 How `Site Role Assignments` Drive LJ Permissions, Auto-Population & Notifications
+1. **Auto-Population on LJ Creation**:
+   - When creating an LJ for a chosen `Site` and `Trade` (e.g., `Mechanical`), automatically assign the **`Main`** person for `ESA_TM` (`Mark`), `TRADE_TM` (`Claudia`), `ESA_CCM`, and `TRADE_CM`, while also listing any **`Deputy`** (`Bastian` for Mechanical `TRADE_TM`; `Mark` for Electrical `ESA_TM`) as authorized actors.
+   - Display a badge showing who will receive email/system notifications (`ReceiveNotifications == true`) when the LJ changes stage.
+2. **Active Person Switcher in Top Bar & LJ Action Authorization**:
+   - Add an **Active Person Switcher** in the top navigation bar (e.g., `Mark`, `Yvonne`, `Claudia`, `Bastian`, `Thomas [ESA_TO]`, `Draftsman [ESA_DO]`, `Inventory [ESA_IM]`, `SiteAdmin [All Override]`).
+   - A person is authorized to click an LJ stage button if they have a `Site Role Assignment` (`Main` OR `Deputy`) on that LJ's `SiteId` and `Trade` (or `All` trades) for ANY of the roles marked `'P'` in the Excel specification for that transition!
+   - For example:
+     * If `Mark` is selected, he can execute `ESA_TM` actions on **Mechanical** LJs (as `Main`, Notifications: Yes) AND on **Electrical** LJs (as `Deputy`, Notifications: No), but NOT on `Civil` LJs unless assigned.
+     * If `Claudia` (Main) or `Bastian` (Deputy) is selected, they can execute `TRADE_TM` actions on **Mechanical** LJs (`In Progress (21%)`, `Submit for Acceptance (25%)`, `Commit (40%)`, `Technically Completed (78_80_81_94%)`, `Completed (95%)`, `Confirm payment (100%)`).
+
+### 17.3 Long Job Cost Type (`Fixed` vs `Ceiling`)
+- Add `CostType: 'Fixed' | 'Ceiling'` (`Fixed Price` vs `Ceiling Price`) to `BaseWorkRequest` / Long Jobs.
+- Include the `Cost Type` (`Fixed` / `Ceiling`) selector in the **Create Long Job** modal and display/edit it in the **Long Job Details Popup**.
+
+### 17.4 Exact Mendix-Style `Actions` Panel & Stage Buttons inside `Long job New edit` Popup
+Inside the Long Job Popup (`WR` tab), render a prominent collapsible **`Actions`** panel at the top styled with clean white blue-bordered action buttons (`border border-blue-400 text-blue-600 bg-white hover:bg-blue-50 rounded px-3.5 py-2 text-sm`) matching the Mendix screenshot and `LONG_JOBS_All_Steps_summary_02072019_V7 (4).xls`:
+- `Save` (keeps current substatus, permitted per Excel `P` matrix)
+- `Submit to Trade (20%) (0&10)` (from RFQ `0%`, `10%` -> `20%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `ESA_LONG_JOB`)
+- `In Progress (21%)` (from RFQ `20%`, `23%` -> `21%` | Roles: `TRADE_TM`, `TRADE_LONG_JOB`)
+- `Request Review (23%) (25&26)` (from RFQ `25%`, `26%` -> `23%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+- `Request Review (23%) (30&31)` (from RFW `30%`, `31%` -> `23%` | Roles: `ESA_TO`)
+- `Submit for Acceptance (25%) (0_10)` (from RFQ `0%`, `10%` -> `25%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `ESA_LONG_JOB`)
+- `Submit for Acceptance (25%) (20_23)` (from RFQ `20%`, `23%` -> `25%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `TRADE_TM`, `ESA_LONG_JOB`, `TRADE_LONG_JOB`)
+- `Submit for Acceptance (25%) (21)` (from RFQ `21%` -> `25%` | Roles: `TRADE_TM`, `TRADE_LONG_JOB`)
+- `Submit to User for Acceptance (26%) (25)` (from RFQ `25%` -> `26%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+- `Cancel (27%) (23,0,10)` (from RFQ `0%`, `10%`, `20%`, `21%`, `23%` & RFW `0%`, `10%` -> `27%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `ESA_LONG_JOB`)
+- `Accept (28%) (25, 26)` (from RFQ `25%`, `26%` -> `28%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+- `Reject (29%) (25, 26)` (from RFQ `25%`, `26%` -> `29%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+- `Reject (29%) (30, 31)` (from RFW `30%`, `31%` -> `29%` | Roles: `ESA_TO`)
+- `Accept & Convert to RFW 30%` (from RFQ `25%`, `28%` -> `30% RFW` and RFW `0%`, `10%` `Submit for Approval (30%)` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `ESA_LONG_JOB`)
+- `On Hold for Budget (31%) (30)` (from RFW `30%`, `31%` -> `31%` | Roles: `ESA_TO`)
+- `Approve & Order (32%) (30,31)` (from RFW `30%`, `31%` -> `32%` | Roles: `ESA_TO`)
+- `Commit (40%) (32)` (from RFW `32%` -> `40%` | Roles: `TRADE_TM`, `TRADE_LONG_JOB`)
+- `In Progress (50%) (40)` (from RFW `40%`, `55%` -> `50%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `TRADE_TM`, `ESA_LONG_JOB`, `TRADE_LONG_JOB`)
+- `On Hold for Access / Labor / Parts (55%) (40_50)` (from RFW `40%`, `50%` -> `55%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LJM`, `TRADE_TM`, `ESA_LONG_JOB`, `TRADE_LONG_JOB`)
+- `Technically Completed (78_80_81_94%) (50_55)` (from RFW `40%`, `50%`, `55%` -> `78%` if any acceptance gate is required, else `94%` | Roles: `TRADE_TM`, `TRADE_LONG_JOB`, plus `ESA_IM` at `50%`)
+- `78%–81%` Acceptance Actions:
+  * `Approve Pre-SAT (79%) (78)` (`TRADE_TM`, `TRADE_LONG_JOB`)
+  * `Send Invitation (80%) (78_79_81)` (`TRADE_TM`, `TRADE_LONG_JOB` for SAT, Drawing, or CIFM Inventory)
+  * `Request Review (78_79_80_81)` (`ESA_TO`, `ESA_TM`, `ESA_DO`, `ESA_IM`, `ESA_LONG_JOB`)
+  * `Approve SAT (81_94%) (79_80)` (`ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+  * `Approve Drawing/Engineering (78_79_80_81 -> 94%)` (`ESA_DO`, `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+  * `Approve CIFM Inventory (78_79_80_81 -> 94%)` (`ESA_IM`, `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+- `Completed (95%) (94)` (from RFW `94%` -> `95%` | Roles: `TRADE_TM`, `TRADE_LONG_JOB`)
+- `Sign Yellow Page (96%) (95)` (from RFW `95%` -> `96%` | Roles: `TRADE_CM`, `TRADE_LONG_JOB`)
+- `Approve Costs (97%) (96)` (from RFW `96%` -> `97%` | Roles: `ESA_TO`, `ESA_TM`, `ESA_LONG_JOB`)
+- `Final Approval (98%) (97)` (from RFW `97%` -> `98%` | Roles: `ESA_TO`)
+- `Confirm Invoice Information (99%) (98)` (from RFW `98%` -> `99%` | Roles: `ESA_TO`, `ESA_CCM`, `ESA_LONG_JOB`)
+- `Confirm payment (100%) (99)` (from RFW `99%` -> `100%` | Roles: `TRADE_CM`, `TRADE_TM`, `TRADE_LONG_JOB`)
+- `Manual Archiving (100% archived) (100)` (from RFW `100%` -> `100% archived`)
+
+Include a toggle in the `Actions` header:
+1. **`Filter by Current Stage & Active Person's Role (Default)`**: Shows ONLY the buttons allowed at the current substatus for the active user's `Site Role Assignment` (`Main` or `Deputy` on that Site + Trade).
+2. **`Show All Mendix Buttons (Overview Mode)`**: Shows the entire Mendix button grid from the screenshot so the user can see all buttons and which stages/roles unlock them.

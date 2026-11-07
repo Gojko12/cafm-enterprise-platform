@@ -19,6 +19,8 @@ export interface SiteContextType {
   // Long Job Role
   activeLJRole: LJRole | null;
   setActiveLJRole: (role: LJRole | null) => void;
+  activePerson: string;
+  setActivePerson: (person: string) => void;
 
   // Helpers
   canSwitchSites: () => boolean;
@@ -32,6 +34,7 @@ export function SiteContextProvider({ children }: { children: ReactNode }) {
   const [availableSites, setAvailableSites] = useState<SiteId[]>(["SITE-01", "SITE-02", "SITE-03"]);
   const [currentUser, setCurrentUser] = useState<UserAccess | null>(null);
   const [activeLJRole, setActiveLJRole] = useState<LJRole | null>(null);
+  const [activePerson, setActivePerson] = useState("Mark");
   const [siteLoaded, setSiteLoaded] = useState(false);
 
   const canSwitchSites = useCallback(() => true, []);
@@ -72,6 +75,8 @@ export function SiteContextProvider({ children }: { children: ReactNode }) {
     setCurrentUser,
     activeLJRole,
     setActiveLJRole,
+    activePerson,
+    setActivePerson,
     canSwitchSites,
     isMultiSiteUser,
   };

@@ -57,6 +57,7 @@ export function LongJobDrawer({
   const [formData, setFormData] = useState<Partial<BaseWorkRequest>>({
     SiteId: activeSiteId,
     EstimatedCostEur: 0,
+    CostType: "Fixed",
     RequiresSAT: false,
     RequiresDrawingUpdate: false,
     RequiresInventoryUpdate: false,
@@ -245,6 +246,17 @@ export function LongJobDrawer({
                 </label>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
+                    Cost Type
+                    <select value={formData.CostType ?? "Fixed"} onChange={(e) =>
+                      setFormData({ ...formData, CostType: e.target.value === "Ceiling" ? "Ceiling" : "Fixed" })}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2">
+                      <option value="Fixed">Fixed Price</option>
+                      <option value="Ceiling">Ceiling Price</option>
+                    </select>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
                     Title
                   </label>
                   <input
@@ -263,10 +275,14 @@ export function LongJobDrawer({
                   Trade *
                   <select required value={formData.TradeId || ""} onChange={(e) => {
                     const trade = e.target.value;
-                    const mapping = data.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
-                    const siteMapping = data.siteRoleMappings.find((item) => item.SiteId === activeSiteId);
+                    const assignments = data.siteRoleAssignments.filter((item) =>
+                      item.SiteId === activeSiteId && (item.Trade === trade || item.Trade === "All"));
+                    const assignedRoles = Object.fromEntries(ASSIGNMENT_ROLES.map((assignmentRole) => [
+                      assignmentRole,
+                      assignments.find((item) => item.RoleCode === assignmentRole && item.AssignmentLevel === "Main")?.PersonName,
+                    ]));
                     setFormData({ ...formData, TradeId: trade, TradeName: trade,
-                      AssignedRoles: { ...mapping?.assignments, ...siteMapping?.assignments } });
+                      AssignedRoles: assignedRoles });
                   }}
                     className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg">
                     <option value="">Select trade</option>
@@ -274,17 +290,26 @@ export function LongJobDrawer({
                   </select>
                 </label>
                 {formData.TradeId && <div className="col-span-2 border rounded p-3 space-y-3">
-                  <h3 className="font-semibold">Trade and Site Role Assignments</h3>
+                  <h3 className="font-semibold">Main, Deputy and Notification Assignments</h3>
+                  <div className="space-y-1 text-xs">
+                    {data.siteRoleAssignments.filter((item) => item.SiteId === activeSiteId &&
+                      (item.Trade === formData.TradeId || item.Trade === "All")).map((assignment) =>
+                      <p key={assignment.AssignmentId}>
+                        {ROLE_LABELS[assignment.RoleCode as keyof typeof ROLE_LABELS] ?? assignment.RoleCode}: {assignment.PersonName}
+                        {" · "}{assignment.AssignmentLevel}
+                        {assignment.ReceiveNotifications && <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800">Notifications</span>}
+                      </p>)}
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     {ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm">{ROLE_LABELS[role]} ({role})
                       <select value={formData.AssignedRoles?.[role] ?? ""} className="block w-full border rounded p-2"
                         onChange={(event) => setFormData({ ...formData, AssignedRoles: { ...formData.AssignedRoles, [role]: event.target.value } })}>
                         <option value="">Unassigned</option>
-                        {data.users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
-                          (user.LJRoles.includes(role) || user.SystemRole === role) &&
-                          (SITE_ASSIGNMENT_ROLES.some((siteRole) => siteRole === role) ||
-                            user.Trades.length === 0 || user.Trades.includes(formData.TradeId ?? ""))).map((user) =>
-                            <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+                        {data.siteRoleAssignments.filter((assignment) => assignment.SiteId === activeSiteId &&
+                          assignment.RoleCode === role && (assignment.Trade === formData.TradeId || assignment.Trade === "All"))
+                          .map((assignment) => <option key={assignment.AssignmentId} value={assignment.PersonName}>
+                            {assignment.PersonName} · {assignment.AssignmentLevel}
+                          </option>)}
                       </select>
                     </label>)}
                   </div>
@@ -564,12 +589,15 @@ export function LongJobDrawer({
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   {[
                     ["Process", track], ["Trade", workRequest.TradeName],
+                    ["Cost Type", <select aria-label="Cost Type" value={workRequest.CostType ?? "Fixed"} onChange={(event) =>
+                      updateWorkRequest(workRequest.Percentage, { CostType: event.target.value === "Ceiling" ? "Ceiling" : "Fixed" }, "Cost type changed")}
+                      className="rounded border px-2 py-1"><option value="Fixed">Fixed Price</option><option value="Ceiling">Ceiling Price</option></select>],
                     ["Location", [workRequest.bl_id, workRequest.LevelName, workRequest.RoomCode].filter(Boolean).join(" / ")],
                     ["Equipment", workRequest.EquipmentCodes.join(", ")],
                     ["Actual cost", workRequest.ActualCostEur === undefined ? undefined : `${workRequest.ActualCostEur} EUR`],
                     ["Created", workRequest.CreatedDate], ["Start", workRequest.StartDate], ["Due", workRequest.DueDate],
                     ["Margin", workRequest.MarginDate],
-                  ].map(([label, value]) => <div key={label}><span className="font-semibold">{label}: </span>{value || "Not set"}</div>)}
+                  ].map(([label, value]) => <div key={String(label)}><span className="font-semibold">{label}: </span>{value || "Not set"}</div>)}
                 </div>
                 <div className="text-sm space-y-1">
                   {[["Originating FJ", workRequest.OriginatingFJ_WR_ID], ["Parent PM", workRequest.ParentPM_WR_ID]].map(([label, id]) =>

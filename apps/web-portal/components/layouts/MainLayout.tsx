@@ -11,6 +11,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LJRole, SiteId } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
+import type { SiteRoleAssignment } from "@cafm/shared-schema";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
     { href: "/work-requests#PM", label: "Preventive Maintenance", icon: Wrench },
     { href: "/work-requests#FJ", label: "Fast Jobs", icon: Wrench },
     { href: "/work-requests#LJ", label: "Long Jobs", icon: Wrench },
+    { href: "/site-role-assignments", label: "Site Role Assignments", icon: Lock },
     { href: "/smart-pm", label: "SmartPM", icon: Zap },
     { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
     { href: "/scheduler", label: "Scheduler", icon: Calendar },
@@ -126,8 +128,8 @@ export function Sidebar() {
 
 export function TopBar() {
   const { currentRole, setCurrentRole, setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
-  const { activeSiteId, setActiveSiteId, activeLJRole, setActiveLJRole } = useSiteContext();
-  const { reset } = useCafmStore();
+  const { activeSiteId, setActiveSiteId, activeLJRole, setActiveLJRole, activePerson, setActivePerson } = useSiteContext();
+  const { data: storeData, reset } = useCafmStore();
   const roles = ["SiteAdministrator", "ESA_LongJobManager", "PM_Planner", "QA_Inspector", "MobileTechnician", "TeamLeader", "StandardEmployee"];
 
   const getRoleBadgeColor = (role: string) => {
@@ -144,10 +146,31 @@ export function TopBar() {
     };
     return siteNames[siteId];
   };
+  const activeAssignments: SiteRoleAssignment[] = storeData.siteRoleAssignments.filter((assignment) =>
+    assignment.SiteId === activeSiteId && assignment.PersonName === activePerson);
+  const people = ["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "SiteAdmin"];
 
   return (
-    <div className="h-20 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
+    <div className="min-h-20 h-auto bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between">
       <div className="flex items-center gap-4">
+        <div className="text-right">
+          <label className="text-xs font-medium text-gray-600" htmlFor="active-person">Active Person</label>
+          <select id="active-person" aria-label="Active Person" value={activePerson} onChange={(event) => setActivePerson(event.target.value)}
+            className="ml-2 max-w-40 rounded border border-gray-300 bg-white px-2 py-1 text-sm">
+            {people.map((person) => <option key={person} value={person}>
+              {person === "SiteAdmin" ? "SiteAdmin (All Override)" : person === "Thomas" ? "Thomas (ESA_TO)" :
+                person === "Draftsman" ? "Draftsman (ESA_DO)" : person === "Inventory Admin" ? "Inventory Admin (ESA_IM)" : person}
+            </option>)}
+          </select>
+          <div className="mt-1 flex max-w-[32rem] flex-wrap justify-end gap-1">
+            {activePerson === "SiteAdmin" ? <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">All Override</span> :
+              activeAssignments.map((assignment) => <span key={assignment.AssignmentId}
+                className={`rounded px-2 py-0.5 text-xs font-semibold ${assignment.AssignmentLevel === "Main" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
+                {assignment.SiteId} · {assignment.Trade} · {assignment.RoleCode} · {assignment.AssignmentLevel}
+              </span>)}
+            {!activeAssignments.length && activePerson !== "SiteAdmin" && <span className="text-xs text-gray-500">No assignments at this site</span>}
+          </div>
+        </div>
         {/* Site Context Switcher */}
         <div className="flex items-center gap-2">
           <Globe size={18} className="text-gray-600" />

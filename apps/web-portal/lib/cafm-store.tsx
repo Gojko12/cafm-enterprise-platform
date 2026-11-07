@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
-import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId, UserAccess } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
 import {
   ESOC_BUILDINGS, ESOC_EQUIPMENT, ESOC_FLOORS, ESOC_ROOMS,
   ESTEC_BUILDINGS, ESTEC_EQUIPMENT, ESTEC_FLOORS, ESTEC_ROOMS,
@@ -41,12 +41,62 @@ interface DemoData {
   craftspeople: { id: string; Name: string; LastName: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number }[];
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
+  siteRoleAssignments: SiteRoleAssignment[];
 }
 
 const STORAGE_KEY = "cafm-demo-data-v1";
 
 function seedData(): DemoData {
   const sites: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
+  const trades: SiteRoleAssignmentTrade[] = [...CLASSICAL_TRADES, "All"];
+  const stageRoles: LJRole[] = ["ESA_TM", "TRADE_TM", "ESA_CCM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM", "ESA_LONG_JOB", "TRADE_LONG_JOB"];
+  const peopleByRole: Record<LJRole, { main: string; deputy: string }> = {
+    ESA_TM: { main: "Yvonne", deputy: "Bastian" },
+    TRADE_TM: { main: "Claudia", deputy: "Bastian" },
+    ESA_CCM: { main: "Gregor", deputy: "Lidija" },
+    TRADE_CM: { main: "Stefan", deputy: "Gregor" },
+    ESA_TO: { main: "Thomas", deputy: "Lidija" },
+    ESA_LJM: { main: "Gregor", deputy: "Stefan" },
+    ESA_DO: { main: "Draftsman", deputy: "Stefan" },
+    ESA_IM: { main: "Inventory Admin", deputy: "Lidija" },
+    ESA_LONG_JOB: { main: "Thomas", deputy: "Yvonne" },
+    TRADE_LONG_JOB: { main: "Claudia", deputy: "Bastian" },
+  };
+  const siteRoleAssignments: SiteRoleAssignment[] = [];
+  for (const site of sites) {
+    for (const role of stageRoles) {
+      const roleTrades: SiteRoleAssignmentTrade[] = ["ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"].includes(role)
+        ? ["All"]
+        : trades.filter((trade) => trade !== "All");
+      for (const trade of roleTrades) {
+        for (const level of ["Main", "Deputy"] as const) {
+          const names = peopleByRole[role];
+          siteRoleAssignments.push({
+            AssignmentId: `${site}-${role}-${trade}-${level}`,
+            SiteId: site,
+            PersonName: names[level === "Main" ? "main" : "deputy"],
+            RoleCode: role,
+            Trade: trade,
+            AssignmentLevel: level,
+            ReceiveNotifications: level === "Main",
+          });
+        }
+      }
+    }
+  }
+  const setSeed = (person: string, role: LJRole, trade: SiteRoleAssignmentTrade, level: "Main" | "Deputy", notify: boolean) => {
+    const assignment = siteRoleAssignments.find((item) =>
+      item.SiteId === "SITE-01" && item.RoleCode === role && item.Trade === trade && item.AssignmentLevel === level);
+    if (assignment) {
+      assignment.PersonName = person;
+      assignment.ReceiveNotifications = notify;
+    }
+  };
+  setSeed("Mark", "ESA_TM", "Mechanical", "Main", true);
+  setSeed("Mark", "ESA_TM", "Electrical", "Deputy", false);
+  setSeed("Yvonne", "ESA_TM", "Electrical", "Main", true);
+  setSeed("Claudia", "TRADE_TM", "Mechanical", "Main", true);
+  setSeed("Bastian", "TRADE_TM", "Mechanical", "Deputy", false);
   const users: UserAccess[] = sites.flatMap((site) => ASSIGNMENT_ROLES.map((role) => ({
     UserId: `${site}-${role}`, DisplayName: `${ROLE_LABELS[role]} (${site})`,
     SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
@@ -68,6 +118,7 @@ function seedData(): DemoData {
     siteRoleMappings: sites.map((site) => ({
       SiteId: site, assignments: Object.fromEntries(SITE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
     })),
+    siteRoleAssignments,
   };
 }
 
@@ -94,6 +145,7 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
             (("users" in parsed) && !Array.isArray((parsed as Record<string, unknown>).users)) ||
             (("tradeRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).tradeRoleMappings)) ||
             (("siteRoleMappings" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleMappings)) ||
+            (("siteRoleAssignments" in parsed) && !Array.isArray((parsed as Record<string, unknown>).siteRoleAssignments)) ||
             (("craftspeople" in parsed) && !Array.isArray((parsed as Record<string, unknown>).craftspeople))) {
           throw new Error("Stored demo data has an invalid format.");
         }
@@ -110,6 +162,7 @@ export function CafmStoreProvider({ children }: { children: React.ReactNode }) {
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
         setData({ ...defaults, ...savedData, tradeRoleMappings, siteRoleMappings,
+          siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople });
       }
     } catch (error) {
