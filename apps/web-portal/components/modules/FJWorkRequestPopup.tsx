@@ -9,6 +9,8 @@ import { WR_Statuses } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
+import { ResizableHistory } from "@/components/common/ResizableHistory";
+import { newestFirst } from "@/lib/history-order";
 
 type Tab = "Work request details" | "Labor, parts & Completion" | "Attached Documents" | "AuditLog & QA";
 
@@ -189,18 +191,19 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           </div>
         </section>}
       </main>
-      <section className="shrink-0 border-t bg-white">
+      <ResizableHistory>
         <button aria-expanded={historyOpen} onClick={() => setHistoryOpen((open) => !open)} className="flex w-full items-center justify-between px-5 py-3 font-semibold">History <span>{historyOpen ? "−" : "+"}</span></button>
-        {historyOpen && <div className="max-h-64 space-y-3 overflow-y-auto px-5 pb-4">
+        {historyOpen && <div className="space-y-3 px-5 pb-4">
           <div className="flex flex-wrap gap-2">{([["all", "All"], ["comment", "Human Comments Only"], ["log", "Automatic Logs Only"]] as const).map(([key, label]) => <button key={key} aria-pressed={historyFilter === key} onClick={() => setHistoryFilter(key)} className={`rounded px-3 py-1 text-sm ${historyFilter === key ? "bg-blue-700 text-white" : "bg-slate-100"}`}>{label}</button>)}</div>
-          {(workRequest.Activity ?? []).filter((entry) => historyFilter === "all" || entry.kind === historyFilter).slice().reverse().map((entry) => <article key={entry.id} className="border-b pb-2 text-sm">
+          <div className="flex gap-2"><input aria-label="Write a comment" placeholder="Write a comment..." value={message} onChange={(e) => setMessage(e.target.value)} className="min-w-0 flex-1 rounded border p-1" /><button onClick={post} disabled={!message.trim()} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-50">Post</button></div>
+          {newestFirst((workRequest.Activity ?? []).filter((entry) => historyFilter === "all" || entry.kind === historyFilter), (entry) => entry.createdAt).map((entry) => <article key={entry.id} className="border-b pb-2 text-sm">
             <div className="text-xs text-slate-500">{entry.actorName} · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
             {editing === entry.id ? <><textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="mt-2 w-full rounded border p-2" /><button onClick={() => saveEdit(entry.id)} className="text-blue-700">Save</button></> : <p>{entry.text}</p>}
             {entry.kind === "comment" && entry.actorId === actorId && editing !== entry.id && <button onClick={() => { setEditing(entry.id); setDraft(entry.text); }} className="text-blue-700">Edit</button>}
-            {!!entry.editHistory?.length && <details><summary>Prior versions</summary>{entry.editHistory.map((version, index) => <p key={`${entry.id}-${index}`} className="border-l pl-2 text-slate-600">{new Date(version.timestamp).toLocaleString()} — {version.text}</p>)}</details>}
+            {!!entry.editHistory?.length && <details><summary>Prior versions</summary>{newestFirst(entry.editHistory, (version) => version.timestamp).map((version, index) => <p key={`${entry.id}-${index}`} className="border-l pl-2 text-slate-600">{new Date(version.timestamp).toLocaleString()} — {version.text}</p>)}</details>}
           </article>)}
         </div>}
-      </section>
+      </ResizableHistory>
     </section>
   </div>;
 }

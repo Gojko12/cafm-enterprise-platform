@@ -14,6 +14,8 @@ import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { assignPerson } from "@/lib/dispatch";
+import { ResizableHistory } from "@/components/common/ResizableHistory";
+import { newestFirst } from "@/lib/history-order";
 
 const TABS = [
   "Work request details",
@@ -104,7 +106,7 @@ export function PMWorkRequestPopup({
     item.percentage === workRequest.Percentage &&
     (item.percentage !== 55 || ("reason" in item && workRequest.WorkRequestSubstatus.includes(item.reason))),
   );
-  const auditRows = useMemo(() => [
+  const auditRows = useMemo(() => newestFirst([
     ...(workRequest.StepAuditLogs ?? []).map((entry) => ({
       id: entry.AuditLogId,
       timestamp: entry.OccurredAt,
@@ -121,8 +123,8 @@ export function PMWorkRequestPopup({
       stepReference: "",
       details: entry.text,
     })),
-  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp)), [workRequest.Activity, workRequest.StepAuditLogs]);
-  const checklistHistory = useMemo(() => [
+  ], (entry) => entry.timestamp), [workRequest.Activity, workRequest.StepAuditLogs]);
+  const checklistHistory = useMemo(() => newestFirst([
     ...(workRequest.ChecklistHistory ?? []),
     ...(workRequest.StepAuditLogs ?? []).map((entry) => ({
       id: entry.AuditLogId,
@@ -132,7 +134,7 @@ export function PMWorkRequestPopup({
       stepReference: entry.StepInstanceId,
       details: entry.Action,
     })),
-  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp)), [workRequest.ChecklistHistory, workRequest.StepAuditLogs]);
+  ], (entry) => entry.timestamp), [workRequest.ChecklistHistory, workRequest.StepAuditLogs]);
 
   const updateWorkRequest = (
     change: (current: BaseWorkRequest) => BaseWorkRequest,
@@ -546,9 +548,9 @@ export function PMWorkRequestPopup({
     </details>
   );
 
-  const visibleHistory = (workRequest.Activity ?? []).filter((entry) =>
+  const visibleHistory = newestFirst((workRequest.Activity ?? []).filter((entry) =>
     historyFilter === "all" || entry.kind === historyFilter,
-  );
+  ), (entry) => entry.createdAt);
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-2 sm:p-5" role="presentation">
@@ -929,8 +931,49 @@ export function PMWorkRequestPopup({
           </section>}
         </main>
 
-        <footer className="max-h-[36vh] shrink-0 overflow-y-auto border-t bg-white px-4 py-3">
-          <section className="border-b pb-3">
+        <ResizableHistory>
+          <footer className="px-4 py-3">
+          <section>
+            <button type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)}
+              className="flex w-full items-center justify-between py-2 text-left font-semibold">
+              <span>History</span><span>{historyOpen ? "−" : "+"}</span>
+            </button>
+            {historyOpen && <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ["all", "All"],
+                  ["comment", "Human Comments Only"],
+                  ["log", "Automatic Logs Only"],
+                ] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={historyFilter === value}
+                  onClick={() => setHistoryFilter(value)}
+                  className={`rounded px-3 py-1 text-xs ${historyFilter === value ? "bg-blue-700 text-white" : "bg-slate-100 text-slate-700"}`}>{label}</button>)}
+              </div>
+              <div className="flex gap-2"><input aria-label="Write a comment" placeholder="Write a comment..." value={message} onChange={(event) => setMessage(event.target.value)} className="min-w-0 flex-1 rounded border p-1" /><button type="button" disabled={!message.trim()} onClick={addComment} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-50">Post</button></div>
+              <div className="space-y-2">
+                {visibleHistory.map((entry) => <article key={entry.id} className="rounded border p-2 text-xs">
+                  <div className="text-slate-500">{entry.actorName} ({entry.actorRole}) · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
+                  {editingComment === entry.id
+                    ? <div className="mt-2 space-y-2">
+                      <textarea aria-label="Edit history comment" value={commentDraft}
+                        onChange={(event) => setCommentDraft(event.target.value)} className="w-full rounded border p-2" />
+                      <button type="button" onClick={() => saveCommentEdit(entry.id)} className="text-blue-700">Save</button>
+                      <button type="button" onClick={() => setEditingComment(null)} className="ml-3">Cancel</button>
+                    </div>
+                    : <p className="whitespace-pre-wrap">{entry.text}</p>}
+                  {entry.kind === "comment" && entry.actorId === actorId && editingComment !== entry.id &&
+                    <button type="button" onClick={() => { setEditingComment(entry.id); setCommentDraft(entry.text); }} className="mt-1 text-blue-700">Edit</button>}
+                  {(entry.editHistory?.length ?? 0) > 0 && <details className="mt-1">
+                    <summary className="cursor-pointer text-slate-600">(Edited) Previous Versions</summary>
+                    {newestFirst(entry.editHistory ?? [], (version) => version.timestamp).map((version, index) => <div key={`${entry.id}-${index}`} className="mt-1 border-t pt-1">
+                      <span className="text-slate-500">{new Date(version.timestamp).toLocaleString()}</span>
+                      <p className="whitespace-pre-wrap">{version.text}</p>
+                    </div>)}
+                  </details>}
+                </article>)}
+              </div>
+            </div>}
+          </section>
+          <section className="border-t pt-3">
             <button type="button" aria-expanded={checklistHistoryOpen} onClick={() => setChecklistHistoryOpen((value) => !value)}
               className="flex w-full items-center justify-between py-2 text-left font-semibold">
               <span>Checklist history</span><span>{checklistHistoryOpen ? "−" : "+"}</span>
@@ -967,47 +1010,8 @@ export function PMWorkRequestPopup({
               </div>
             </div>}
           </section>
-
-          <section className="pt-2">
-            <button type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)}
-              className="flex w-full items-center justify-between py-2 text-left font-semibold">
-              <span>History</span><span>{historyOpen ? "−" : "+"}</span>
-            </button>
-            {historyOpen && <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ["all", "All"],
-                  ["comment", "Human Comments Only"],
-                  ["log", "Automatic Logs Only"],
-                ] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={historyFilter === value}
-                  onClick={() => setHistoryFilter(value)}
-                  className={`rounded px-3 py-1 text-xs ${historyFilter === value ? "bg-blue-700 text-white" : "bg-slate-100 text-slate-700"}`}>{label}</button>)}
-              </div>
-              <div className="max-h-48 space-y-2 overflow-auto">
-                {visibleHistory.map((entry) => <article key={entry.id} className="rounded border p-2 text-xs">
-                  <div className="text-slate-500">{entry.actorName} ({entry.actorRole}) · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
-                  {editingComment === entry.id
-                    ? <div className="mt-2 space-y-2">
-                      <textarea aria-label="Edit history comment" value={commentDraft}
-                        onChange={(event) => setCommentDraft(event.target.value)} className="w-full rounded border p-2" />
-                      <button type="button" onClick={() => saveCommentEdit(entry.id)} className="text-blue-700">Save</button>
-                      <button type="button" onClick={() => setEditingComment(null)} className="ml-3">Cancel</button>
-                    </div>
-                    : <p className="whitespace-pre-wrap">{entry.text}</p>}
-                  {entry.kind === "comment" && entry.actorId === actorId && editingComment !== entry.id &&
-                    <button type="button" onClick={() => { setEditingComment(entry.id); setCommentDraft(entry.text); }} className="mt-1 text-blue-700">Edit</button>}
-                  {(entry.editHistory?.length ?? 0) > 0 && <details className="mt-1">
-                    <summary className="cursor-pointer text-slate-600">(Edited) Previous Versions</summary>
-                    {entry.editHistory?.map((version, index) => <div key={`${entry.id}-${index}`} className="mt-1 border-t pt-1">
-                      <span className="text-slate-500">{new Date(version.timestamp).toLocaleString()}</span>
-                      <p className="whitespace-pre-wrap">{version.text}</p>
-                    </div>)}
-                  </details>}
-                </article>)}
-              </div>
-            </div>}
-          </section>
         </footer>
+        </ResizableHistory>
       </section>
 
       {assignModalOpen && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-4">

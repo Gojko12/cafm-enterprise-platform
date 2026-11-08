@@ -9,6 +9,7 @@ import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { resolveEquipmentLocation } from "@/lib/equipment-locator";
 import { equipmentChangeDescriptions } from "@/lib/equipment-activity";
+import { newestFirst } from "@/lib/history-order";
 import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "./FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
@@ -240,10 +241,10 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
       <label className="block">Comment<textarea className="block w-full rounded border p-2" value={comment} onChange={(event) => setComment(event.target.value)} /></label>
       <button className="rounded bg-blue-700 px-3 py-1 text-white" onClick={submitComment}>{editing ? "Save edit" : "Add comment"}</button>
       {editing && <button className="ml-2 underline" onClick={() => { setEditing(null); setComment(""); }}>Cancel edit</button>}
-      {(item.Activity ?? []).filter((entry) => activityFilter === "All" || (activityFilter === "Human Comments Only" ? entry.kind === "comment" : entry.kind === "log")).slice().reverse().map((entry) => <article key={entry.id} className="border-t py-2">
+      {newestFirst((item.Activity ?? []).filter((entry) => activityFilter === "All" || (activityFilter === "Human Comments Only" ? entry.kind === "comment" : entry.kind === "log")), (entry) => entry.createdAt).map((entry) => <article key={entry.id} className="border-t py-2">
         <div className="font-semibold">{entry.actorName} · {entry.kind === "log" ? "Automatic log" : "Comment"} · {entry.createdAt}</div><p className="whitespace-pre-wrap">{entry.text}</p>
         {entry.kind === "comment" && entry.actorId === activePerson && <button className="text-blue-700 underline" onClick={() => { setEditing(entry.id); setComment(entry.text); }}>Edit</button>}
-        {!!entry.editHistory?.length && <details><summary className="cursor-pointer">Edited - View Previous Versions</summary>{entry.editHistory.map((version, index) => <p key={`${version.timestamp}-${index}`}>{version.timestamp}: {version.text}</p>)}</details>}
+        {!!entry.editHistory?.length && <details><summary className="cursor-pointer">Edited - View Previous Versions</summary>{newestFirst(entry.editHistory, (version) => version.timestamp).map((version, index) => <p key={`${version.timestamp}-${index}`}>{version.timestamp}: {version.text}</p>)}</details>}
       </article>)}
     </div>}
     {actual?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={actual} onClose={() => setOpenWR(null)} onNavigate={(id) => setOpenWR(data.workRequests.find((wr) => wr.SiteId === item.SiteId && wr.WR_ID === id) ?? null)} onEscalateToLJ={() => { setOpenWR(null); setError("Create the Long Job from the work request overview."); }} />}

@@ -60,6 +60,19 @@ describe("hourly dispatch timeline", () => {
     fireEvent.click(screen.getByTitle("Remove from calendar (Unschedule)"));
     expect(onRemove).toHaveBeenCalledWith(wr.WR_ID, person.id);
   });
+  it("shows a clipped freeze band and highlights only affected assignments", () => {
+    const freeze = { id: "freeze", siteId: "SITE-01" as const, buildingId: wr.bl_id!, title: "Works", description: "Repairs", responsiblePerson: "Mark", startDateTime: "2026-11-09T08:30", endDateTime: "2026-11-09T10:00", allowPM: false, allowFJ: false, allowLJ: false };
+    render(<HourlyTimeline {...props} freezes={[freeze]} />);
+    const band = screen.getByRole("button", { name: /Location freeze Works/ });
+    expect(band.style.left).toBe("90px");
+    expect(band.style.width).toBe("54px");
+    fireEvent.mouseEnter(band);
+    expect(screen.getByRole("button", { name: new RegExp(wr.WR_ID + ".*Planned in Freeze Period") }).parentElement!.className).toContain("ring-cyan-500");
+    fireEvent.click(band);
+    expect(screen.getByRole("status").textContent).toContain("Responsible: Mark");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
   it("hydrates server-rendered timeline markup without recoverable errors", async () => {
     const container = document.createElement("div");
     container.innerHTML = renderToString(<HourlyTimeline {...props} />);

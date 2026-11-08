@@ -36,6 +36,8 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
 }) {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [hoverFreeze, setHoverFreeze] = useState<string | null>(null);
+  const [selectedFreeze, setSelectedFreeze] = useState<string | null>(null);
   const cleanup = useRef<(() => void) | null>(null);
   const target = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
@@ -44,6 +46,11 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
     if (spotlight && target.current && typeof target.current.scrollIntoView === "function") target.current.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
   }, [spotlight, collapsed, dates, firstHour, lastHour]);
   const width = (lastHour - firstHour) * HOUR_WIDTH;
+  const visibleFreezes = freezes.filter((freeze) => freeze.siteId === site && dates.some((day) => {
+    const start = wallMinutes(`${day}T00:00`) + firstHour * 60;
+    return wallMinutes(freeze.startDateTime) < start + (lastHour - firstHour) * 60 && wallMinutes(freeze.endDateTime) > start;
+  }));
+  const focusFreeze = visibleFreezes.find((freeze) => freeze.id === (hoverFreeze ?? selectedFreeze));
   const weeks: Array<{ label: string; count: number }> = [];
   for (const day of dates) {
     const label = weekLabel(day), last = weeks[weeks.length - 1];
@@ -82,8 +89,19 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
     window.addEventListener("mouseup", up);
   };
   return <div className="min-w-0 flex-1 overflow-auto rounded border bg-white">
-    <table className="border-separate border-spacing-0 text-xs"><thead><tr><th rowSpan={2} className="sticky left-0 z-20 min-w-48 border-r bg-white p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900">Craftsperson</th>{weeks.map((week, index) => <th key={`${week.label}-${index}`} colSpan={week.count} className="border-l">{week.label}</th>)}</tr><tr>
-      {dates.map((day) => <th key={day} className="border-l" style={{ minWidth: width }}><div>{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][new Date(`${day}T00:00:00Z`).getUTCDay()]} {day.slice(8)}</div><div className="flex font-normal">{Array.from({ length: lastHour - firstHour }, (_, i) => <span key={i} style={{ width: HOUR_WIDTH }} className="shrink-0 border-l">{String(firstHour + i).padStart(2, "0")}</span>)}</div></th>)}</tr></thead>
+    <table className="border-separate border-spacing-0 text-xs"><thead className="sticky top-0 z-30 bg-white"><tr><th rowSpan={2} className="sticky left-0 z-20 min-w-48 border-r bg-white p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900">Craftsperson</th>{weeks.map((week, index) => <th key={`${week.label}-${index}`} colSpan={week.count} className="border-l">{week.label}</th>)}</tr><tr>
+      {dates.map((day) => <th key={day} className="border-l" style={{ minWidth: width }}><div>{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][new Date(`${day}T00:00:00Z`).getUTCDay()]} {day.slice(8)}</div><div className="flex font-normal">{Array.from({ length: lastHour - firstHour }, (_, i) => <span key={i} style={{ width: HOUR_WIDTH }} className="shrink-0 border-l">{String(firstHour + i).padStart(2, "0")}</span>)}</div></th>)}</tr>
+      {(visibleFreezes.length ? visibleFreezes : [null]).map((freeze, index) => <tr key={freeze?.id ?? "empty"} className="h-7 bg-white">
+        <th className="sticky left-0 z-20 border-r bg-white px-2 text-left">{index === 0 ? "❄ Location Freezes" : ""}</th>
+        {dates.map((day) => {
+          const start = wallMinutes(`${day}T00:00`) + firstHour * 60, end = start + (lastHour - firstHour) * 60;
+          const left = freeze ? Math.max(start, wallMinutes(freeze.startDateTime)) : start;
+          const right = freeze ? Math.min(end, wallMinutes(freeze.endDateTime)) : start;
+          const allowed = freeze ? (["PM", "FJ", "LJ"] as const).filter((type) => freeze[`allow${type}`]).join(", ") || "none" : "";
+          const detail = freeze ? `What is happening: ${freeze.description}\nResponsible person: ${freeze.responsiblePerson}\nLocations: ${[freeze.buildingId, freeze.floorId, freeze.roomId].filter(Boolean).join(" / ")}\n${freeze.startDateTime} – ${freeze.endDateTime}\nAllowed: ${allowed}` : "";
+          return <td key={day} className="border-l"><div className="relative h-7" style={{ width }}>{freeze && right > left && <button type="button" title={detail} aria-label={`Location freeze ${freeze.title}: ${detail}`} onMouseEnter={() => setHoverFreeze(freeze.id)} onMouseLeave={() => setHoverFreeze(null)} onFocus={() => setHoverFreeze(freeze.id)} onBlur={() => setHoverFreeze(null)} onClick={() => setSelectedFreeze((current) => current === freeze.id ? null : freeze.id)} className="absolute top-0 h-7 truncate rounded border border-cyan-400 bg-cyan-100/90 px-2 text-left text-[11px] font-medium text-cyan-950" style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH }}>❄ {freeze.title} ({[freeze.buildingId, freeze.floorId, freeze.roomId].filter(Boolean).join(" / ")}) • Allowed: {allowed}</button>}</div></td>;
+        })}
+      </tr>)}</thead>
       <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => <React.Fragment key={trade}>
         <tr className="bg-slate-100"><th className="sticky left-0 z-20 border-r bg-slate-100 p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th>{dates.length > 0 && <td colSpan={dates.length} />}</tr>
         {!collapsed.includes(trade) && people.filter((person) => person.Trade === trade).map((person) => <tr key={person.id}>
@@ -129,7 +147,8 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}`;
                 const editable = ![27, 78, 100].includes(wr.Percentage);
                 const highlighted = spotlight?.id === wr.WR_ID && spotlight.person === person.id && spotlight.day === day;
-                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={title} draggable={editable} onDragStart={(event) => startRequestDrag(event, wr, person.id)} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${highlighted ? "z-10 animate-pulse bg-amber-200 shadow-lg ring-4 ring-amber-400" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
+                const affected = !!focusFreeze && getActiveFreezeConflictsForWR({ ...wr, AssignedCraftpersonIds: [person.id], CraftpersonAssignments: [interval], StartDate_DateToPerform: undefined }, [focusFreeze]).length > 0;
+                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={title} draggable={editable} onDragStart={(event) => startRequestDrag(event, wr, person.id)} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${highlighted ? "z-10 animate-pulse bg-amber-200 shadow-lg ring-4 ring-amber-400" : affected ? "z-10 ring-2 ring-cyan-500" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
                   {editable && left === wallMinutes(interval.assignedStartDateTime) && <span role="separator" aria-label="Resize start" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "start")} />}
                   <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_ID}{conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
                   {editable && <button aria-label={`Edit time for ${wr.WR_ID}`} onClick={() => onEdit(wr, person.id)}>✎</button>}
@@ -141,5 +160,9 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
           })}
         </tr>)}
       </React.Fragment>)}</tbody></table>
+    {selectedFreeze && visibleFreezes.filter((freeze) => freeze.id === selectedFreeze).map((freeze) => <div key={freeze.id} role="status" className="sticky bottom-0 left-0 z-30 w-fit max-w-full rounded border border-cyan-400 bg-cyan-50 p-2 text-cyan-950">
+      <strong>❄ {freeze.title}</strong> · {freeze.description} · Responsible: {freeze.responsiblePerson} · Locations: {[freeze.buildingId, freeze.floorId, freeze.roomId].filter(Boolean).join(" / ")} · {freeze.startDateTime} – {freeze.endDateTime} · Allowed: {(["PM", "FJ", "LJ"] as const).filter((type) => freeze[`allow${type}`]).join(", ") || "none"}
+      <button type="button" className="ml-2 underline" onClick={() => setSelectedFreeze(null)}>Close</button>
+    </div>)}
   </div>;
 }

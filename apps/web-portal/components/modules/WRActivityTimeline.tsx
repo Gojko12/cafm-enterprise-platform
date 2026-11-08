@@ -5,6 +5,7 @@ import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
+import { newestFirst } from "@/lib/history-order";
 
 export function WRActivityTimeline({ workRequest, actingRole }: { workRequest: BaseWorkRequest; actingRole?: string }) {
   const { setData } = useCafmStore();
@@ -85,8 +86,12 @@ export function WRActivityTimeline({ workRequest, actingRole }: { workRequest: B
         <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}
           className={`px-3 py-2 rounded text-sm ${filter === value ? "bg-blue-600 text-white" : "bg-gray-100"}`}>{label}</button>)}
     </div>
+    <label className="block text-sm">Add comment
+      <textarea placeholder="Write a comment..." value={text} onChange={(event) => setText(event.target.value)} className="block w-full border rounded p-2" />
+    </label>
+    <button type="button" disabled={!text.trim()} onClick={addComment} className="bg-blue-600 text-white px-3 py-2 rounded disabled:opacity-50">Post Comment</button>
     <div className="space-y-3">
-      {(workRequest.Activity ?? []).filter((entry) => filter === "all" || entry.kind === filter).map((entry) =>
+      {newestFirst((workRequest.Activity ?? []).filter((entry) => filter === "all" || entry.kind === filter), (entry) => entry.createdAt).map((entry) =>
         <article key={entry.id} className="border rounded p-3 text-sm">
           <div className="text-gray-600">{entry.actorName} ({entry.actorRole}) · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "log" ? "Automatic log" : "Comment"}</div>
           {editing === entry.id ? <div className="space-y-2">
@@ -98,16 +103,12 @@ export function WRActivityTimeline({ workRequest, actingRole }: { workRequest: B
             <button type="button" onClick={() => { setEditing(entry.id); setDraft(entry.text); }} className="text-blue-700">Edit</button>}
           {(entry.editHistory?.length ?? 0) > 0 && <details>
             <summary>(Edited - View History)</summary>
-            {entry.editHistory?.map((version, index) => <div key={index} className="border-t mt-2 pt-2">
+            {newestFirst(entry.editHistory ?? [], (version) => version.timestamp).map((version, index) => <div key={index} className="border-t mt-2 pt-2">
               <span className="text-gray-500">{new Date(version.timestamp).toLocaleString()}</span>
               <p className="whitespace-pre-wrap">{version.text}</p>
             </div>)}
           </details>}
         </article>)}
     </div>
-    <label className="block text-sm">Add comment
-      <textarea value={text} onChange={(event) => setText(event.target.value)} className="block w-full border rounded p-2" />
-    </label>
-    <button type="button" disabled={!text.trim()} onClick={addComment} className="bg-blue-600 text-white px-3 py-2 rounded disabled:opacity-50">Post Comment</button>
   </section>;
 }
