@@ -3,7 +3,9 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CraftpersonAbsenceSchema, LocationFreezeSchema, QAInspectorAssignmentSchema } from "@cafm/shared-schema";
+import { CraftpersonAbsenceSchema, LocationFreezeSchema } from "@cafm/shared-schema";
+// Bypass Next's optimized barrel cache, which can retain an outdated export table.
+import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +57,19 @@ const maxBytes = 32 * 1024 * 1024;
 
 function reply(request: Request, body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: cors(request) });
+}
+
+function unavailableSharedSchemas() {
+  return Object.entries({ CraftpersonAbsenceSchema, LocationFreezeSchema, QAInspectorAssignmentSchema })
+    .filter(([, schema]) => !schema || typeof schema.safeParse !== "function")
+    .map(([name]) => name);
+}
+
+function schemaUnavailableReply(request: Request) {
+  const unavailable = unavailableSharedSchemas();
+  if (unavailable.length === 0) return null;
+  console.error("CAFM state schema unavailable:", unavailable.join(", "));
+  return reply(request, { error: "CAFM state validation is unavailable. Rebuild the shared schema and restart the server." }, 503);
 }
 
 function scope(request: Request) {
@@ -141,6 +156,8 @@ export async function GET(request: Request) {
   const site = scope(request);
   if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
+  const schemaError = schemaUnavailableReply(request);
+  if (schemaError) return schemaError;
   try {
     const data = await load();
     return reply(request, data.sites[site] ?? { revision: 0, state: null });
@@ -154,6 +171,8 @@ export async function POST(request: Request) {
   const site = scope(request);
   if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
+  const schemaError = schemaUnavailableReply(request);
+  if (schemaError) return schemaError;
   let lock: Awaited<ReturnType<typeof open>> | undefined;
   let temporary: string | undefined;
   try {

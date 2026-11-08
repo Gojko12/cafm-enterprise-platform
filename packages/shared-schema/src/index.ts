@@ -6,4 +6,5 @@ export * from "./operations.js";
 export * from "./rbac.js";
 export * from "./site-role-assignments.js";
 export * from "./dispatch.js";
-export * from "./qa-inspector.js";
+export { QAInspectorAssignmentSchema } from "./qa-inspector.js";
+export type { QAInspectorAssignment } from "./qa-inspector.js";

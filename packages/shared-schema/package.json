@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./qa-inspector": {
+      "types": "./dist/qa-inspector.d.ts",
+      "import": "./dist/qa-inspector.js"
     }
   },
   "files": [
