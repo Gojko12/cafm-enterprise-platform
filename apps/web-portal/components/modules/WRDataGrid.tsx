@@ -61,7 +61,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "margin": return wr.MarginDate ?? "";
       case "created": return wr.CreatedDate;
       case "disputes": return (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.label).join(", ");
-      case "qa": return wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? "⚠ QA REWORK REQUIRED" : wr.QA_AuditStatus ?? "None";
+      case "qa": return wr.WR_Type === "LJ" ? "—" : wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? "⚠ QA REWORK REQUIRED" : wr.QA_AuditStatus ?? "None";
     }
   };
   const config = useTableColumns(`work-requests-${requestType}`, columns.map(({ key, label }) => ({ id: key, label, value: (wr: BaseWorkRequest) => key === "cost" ? wr.EstimatedCostEur : key === "percentage" ? wr.Percentage : value(wr, key) })));

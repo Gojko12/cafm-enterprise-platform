@@ -10,9 +10,9 @@ export const DEFAULT_QA_FAILURE_REASONS = [
 ];
 
 export function canInspectWR(person: string, wr: BaseWorkRequest, assignments: QAInspectorAssignment[] = []) {
-  return assignments.some((entry) => entry.siteId === wr.SiteId && entry.personName === person &&
+  return wr.WR_Type !== "LJ" && assignments.some((entry) => entry.siteId === wr.SiteId && entry.personName === person &&
     !!wr.TradeName && entry.trades.includes(wr.TradeName) && entry.wrTypes.includes(wr.WR_Type));
 }
 export function hasOpenQARework(wr: BaseWorkRequest) {
-  return wr.QA_AuditStatus === "QA_Failed_ActionRequired" || wr.QA_AuditStatus === "QA_Corrected";
+  return wr.WR_Type !== "LJ" && (wr.QA_AuditStatus === "QA_Failed_ActionRequired" || wr.QA_AuditStatus === "QA_Corrected");
 }

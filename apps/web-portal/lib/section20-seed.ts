@@ -229,9 +229,10 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         wr.CraftpersonAssignments = [{ craftpersonId: person.id, assignedStartDateTime: `${disputeDay}T08:00`, assignedEndDateTime: `${disputeDay}T10:00` }];
       });
     }
-    const qaCandidates = (["PM", "FJ", "LJ"] as const).map((type) =>
+    workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === "LJ").forEach((wr) => { wr.QA_AuditStatus = "None"; });
+    const qaCandidates = (["PM", "FJ"] as const).map((type) =>
       workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === type && (wr.Percentage === 78 || wr.Percentage === 100)));
-    const qaExamples = [qaCandidates[0][0], qaCandidates[1][0], qaCandidates[2][0], qaCandidates[0][1], qaCandidates[1][1]]
+    const qaExamples = [qaCandidates[0][0], qaCandidates[1][0], qaCandidates[0][1], qaCandidates[1][1], qaCandidates[0][2]]
       .filter((wr): wr is BaseWorkRequest => !!wr);
     const statuses = ["SelectedForAudit", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"] as const;
     qaExamples.forEach((wr, index) => {

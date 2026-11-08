@@ -40,13 +40,12 @@ export function useQAActions() {
       if (!ids.length || ids.some((id) => !wrs.some((wr) => wr.WR_ID === id))) throw new Error("One or more selected work requests are unavailable.");
       return wrs.map((wr) => { if (!ids.includes(wr.WR_ID)) return wr; requireInspector(wr); return transitionAudit(wr, action, actor); });
     }),
-    submitQAVerdict: (id: string, verdict: "Pass" | "Fail" | "SubmitCorrection" | "VerifyClose", payload: Parameters<typeof qaVerdict>[3] & { followUpType?: "FJ" | "LJ" }) => commit((wrs) => {
+    submitQAVerdict: (id: string, verdict: "Pass" | "Fail" | "SubmitCorrection" | "VerifyClose", payload: Parameters<typeof qaVerdict>[3] & { spawnFollowUp?: boolean }) => commit((wrs) => {
       const parent = wrs.find((wr) => wr.WR_ID === id);
       if (!parent) throw new Error("Work request is no longer available.");
       if (verdict !== "SubmitCorrection") requireInspector(parent);
-      if (verdict === "Fail" && !(data.qaFailureReasons ?? []).some((reason) => payload.issue === reason || payload.issue?.startsWith(`${reason} — `))) throw new Error("Select a predefined failure reason.");
       let updated = qaVerdict(parent, verdict, actor, payload);
-      if (verdict !== "Fail" || !payload.followUpType) return wrs.map((wr) => wr.WR_ID === id ? updated : wr);
+      if (verdict !== "Fail" || !payload.spawnFollowUp) return wrs.map((wr) => wr.WR_ID === id ? updated : wr);
       const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
       if (!issued) throw new Error("The 50% corrective maintenance status is not configured.");
       const now = new Date().toISOString();
@@ -61,7 +60,7 @@ export function useQAActions() {
       const entry = { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `Created QA corrective follow-up ${followId}.` };
       updated = { ...updated, Activity: [...(updated.Activity ?? []), entry] };
       const followUp: BaseWorkRequest = {
-        WR_ID: followId, WR_Type: payload.followUpType,
+        WR_ID: followId, WR_Type: "FJ",
         Description: `QA Rework Follow-Up for ${id}: ${payload.issue!.trim()}`,
         ProblemLocation: parent.ProblemLocation, TradeId: parent.TradeId, TradeName: parent.TradeName,
         SiteId: parent.SiteId, bl_id: parent.bl_id, LevelName: parent.LevelName, RoomCode: parent.RoomCode,
@@ -92,6 +91,15 @@ export function useQAActions() {
       requireInspector(wr);
       const now = new Date().toISOString();
       return wrs.map((item) => item.WR_ID !== id ? item : { ...item, UpdatedAt: now, QA_AuditPhotos: [...(item.QA_AuditPhotos ?? []), photo], Activity: [...(item.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `QA audit photo added: ${photo.name}` }] });
+    }),
+    removeAuditPhoto: (id: string, photoId: string) => commit((wrs) => {
+      const wr = wrs.find((item) => item.WR_ID === id);
+      if (!wr || !wr.QA_AuditStatus || wr.QA_AuditStatus === "None") throw new Error("The audit is no longer available.");
+      requireInspector(wr);
+      const photo = wr.QA_AuditPhotos?.find((item) => item.id === photoId);
+      if (!photo) throw new Error("The audit photo is no longer available.");
+      const now = new Date().toISOString();
+      return wrs.map((item) => item.WR_ID !== id ? item : { ...item, UpdatedAt: now, QA_AuditPhotos: (item.QA_AuditPhotos ?? []).filter((entry) => entry.id !== photoId), Activity: [...(item.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `QA audit photo removed: ${photo.name}` }] });
     }),
   };
 }

@@ -6,8 +6,9 @@ import { canInspectWR } from "./qa-settings";
 export type QAMode = "ManualInspectorPick" | "QRScanOnSite" | "ComputerRandom5Percent";
 export type QAOptions = { dateFrom?: string; dateTo?: string; wrTypes?: Array<BaseWorkRequest["WR_Type"]>; buildingIds?: string[]; trades?: string[]; targetCount?: number };
 type Actor = { name: string; role: UserRole };
-export const isQACompleted = (wr: BaseWorkRequest) => wr.Percentage === 78 || wr.Percentage === 100;
-export const isQAQuotaCompleted = (wr: BaseWorkRequest) => isQACompleted(wr) || (!!wr.QA_CompletionDate && ["QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(wr.QA_AuditStatus ?? ""));
+export const isQAEligibleType = (wr: BaseWorkRequest) => wr.WR_Type === "PM" || wr.WR_Type === "FJ";
+export const isQACompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (wr.Percentage === 78 || wr.Percentage === 100);
+export const isQAQuotaCompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (isQACompleted(wr) || (!!wr.QA_CompletionDate && ["QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(wr.QA_AuditStatus ?? "")));
 export const qaStatus = (wr: BaseWorkRequest) => wr.QA_AuditStatus ?? "None";
 export function qaDate(wr: BaseWorkRequest) { return (wr.QA_CompletionDate || wr.UpdatedAt || wr.CreatedDate).slice(0, 10); }
 export function qaMatches(wr: BaseWorkRequest, options: QAOptions) {
@@ -21,7 +22,7 @@ function log(wr: BaseWorkRequest, text: string, actor: Actor): BaseWorkRequest {
   return { ...wr, UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text }] };
 }
 export function selectAudit(wr: BaseWorkRequest, mode: QAMode, actor: Actor): BaseWorkRequest {
-  if ((wr.Percentage !== 78 && wr.Percentage !== 100) || qaStatus(wr) !== "None") throw new Error(`${wr.WR_ID}: only 78% or 100% completed, unselected work requests can be selected.`);
+  if (!isQACompleted(wr) || qaStatus(wr) !== "None") throw new Error(`${wr.WR_ID}: only completed, unselected PM or FJ work requests can be selected.`);
   return log({ ...wr, QA_CompletionDate: qaDate(wr), QA_AuditStatus: "SelectedForAudit", QA_SelectionMode: mode }, `Selected for QA audit (${mode}).`, actor);
 }
 export function selectRandomAudits(requests: BaseWorkRequest[], options: QAOptions, actor: Actor, assignments: QAInspectorAssignment[]): BaseWorkRequest[] {
@@ -46,6 +47,7 @@ export function selectRandomAudits(requests: BaseWorkRequest[], options: QAOptio
   return requests.map((wr) => chosen.get(wr.WR_ID) ?? wr);
 }
 export function transitionAudit(wr: BaseWorkRequest, action: "confirm" | "unselect" | "direct", actor: Actor): BaseWorkRequest {
+  if (!isQAEligibleType(wr)) throw new Error("QA audits apply only to PM and FJ work requests.");
   const status = qaStatus(wr);
   if (action === "direct") {
     const selected = selectAudit(wr, "ManualInspectorPick", actor);
@@ -57,13 +59,14 @@ export function transitionAudit(wr: BaseWorkRequest, action: "confirm" | "unsele
 }
 export function swapAudit(requests: BaseWorkRequest[], id: string, actor: Actor): BaseWorkRequest[] {
   const wr = requests.find((item) => item.WR_ID === id);
-  if (!wr || qaStatus(wr) !== "SelectedForAudit" || wr.QA_SelectionMode !== "ComputerRandom5Percent") throw new Error("Only a pending random audit can be swapped.");
+  if (!wr || !isQAEligibleType(wr) || qaStatus(wr) !== "SelectedForAudit" || wr.QA_SelectionMode !== "ComputerRandom5Percent") throw new Error("Only a pending PM or FJ random audit can be swapped.");
   const candidates = requests.filter((item) => item.WR_ID !== id && item.WR_Type === wr.WR_Type && isQACompleted(item) && qaStatus(item) === "None").map((item) => ({ item, score: Number(item.RoomCode !== wr.RoomCode) + Number(!item.AssignedCraftpersonIds.some((person) => wr.AssignedCraftpersonIds.includes(person))), random: Math.random() })).sort((a, b) => b.score - a.score || a.random - b.random);
   if (!candidates.length) throw new Error("No replacement completed work request is available.");
   const replacement = selectAudit(candidates[0].item, "ComputerRandom5Percent", actor);
   return requests.map((item) => item.WR_ID === id ? log({ ...item, QA_AuditStatus: "None", QA_SelectionMode: undefined }, `Random audit swapped for ${replacement.WR_ID}.`, actor) : item.WR_ID === replacement.WR_ID ? replacement : item);
 }
 export function qaVerdict(wr: BaseWorkRequest, verdict: "Pass" | "Fail" | "SubmitCorrection" | "VerifyClose", actor: Actor, payload: { issue?: string; correction?: string; photos?: NonNullable<BaseWorkRequest["QA_AuditPhotos"]>; reopen?: boolean }): BaseWorkRequest {
+  if (!isQAEligibleType(wr)) throw new Error("QA audits apply only to PM and FJ work requests.");
   const status = qaStatus(wr), now = new Date().toISOString();
   if ((verdict === "Pass" || verdict === "Fail") && status !== "ToBeInspected") throw new Error("Confirm the work request for inspection before recording a verdict.");
   if (verdict === "Fail" && !payload.issue?.trim()) throw new Error("An issue description is required.");
