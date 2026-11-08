@@ -5,7 +5,7 @@ import { WRPreviewCard } from "./WRPreviewCard";
 interface TechnicianHomeProps {
   myWRs: BaseWorkRequest[];
   unassignedWRs: BaseWorkRequest[];
-  onClaimWR?: (wrId: string) => void;
+  onClaimWR?: (wrId: string) => Promise<void>;
   onOpenWR?: (wrId: string) => void;
 }
 
@@ -16,19 +16,21 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   onOpenWR,
 }) => {
   const [activeTab, setActiveTab] = useState<"my-wrs" | "unassigned">("my-wrs");
+  const [type, setType] = useState<"All" | "PM" | "FJ" | "LJ">("All");
   const [showClaimToast, setShowClaimToast] = useState(false);
   const [claimMessage, setClaimMessage] = useState("");
 
-  const handleClaimWR = (wrId: string) => {
+  const handleClaimWR = async (wrId: string) => {
     if (onClaimWR) {
-      onClaimWR(wrId);
+      try { await onClaimWR(wrId); }
+      catch (error) { alert(error instanceof Error ? error.message : "Could not claim the work request."); return; }
       setClaimMessage(`WR ${wrId} claimed successfully`);
       setShowClaimToast(true);
       setTimeout(() => setShowClaimToast(false), 3000);
     }
   };
 
-  const displayWRs = activeTab === "my-wrs" ? myWRs : unassignedWRs;
+  const displayWRs = (activeTab === "my-wrs" ? myWRs : unassignedWRs).filter((wr) => type === "All" || wr.WR_Type === type);
   const isEmptyState = displayWRs.length === 0;
 
   return (
@@ -59,6 +61,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
             Unassigned ({unassignedWRs.length})
           </button>
         </div>
+        <div className="flex gap-2 bg-white px-4 py-2">{(["All", "PM", "FJ", "LJ"] as const).map((item) => <button key={item} aria-pressed={type === item} onClick={() => setType(item)} className={`rounded-full px-3 py-1 text-sm ${type === item ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>{item}</button>)}</div>
       </div>
 
       {/* Content Area */}
@@ -90,7 +93,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                 {/* Claim Button for Unassigned */}
                 {activeTab === "unassigned" && (
                   <button
-                    onClick={() => handleClaimWR(wr.WR_ID || "")}
+                    onClick={() => void handleClaimWR(wr.WR_ID || "")}
                     className="absolute bottom-4 right-4 px-4 py-2 bg-green-500 text-white text-xs font-bold rounded hover:bg-green-600 transition-colors"
                     aria-label={`Claim ${wr.WR_ID}`}
                   >

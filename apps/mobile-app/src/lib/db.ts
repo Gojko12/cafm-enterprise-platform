@@ -149,7 +149,7 @@ export interface MobileAppDB extends DBSchema {
   syncMetadata: {
     key: string;
     value: {
-      key: "lastSyncTime" | "syncInProgress" | "conflictCount";
+      key: string;
       value: string;
       updatedAt: string;
     };

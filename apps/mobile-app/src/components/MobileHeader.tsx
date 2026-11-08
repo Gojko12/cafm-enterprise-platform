@@ -9,6 +9,9 @@ interface MobileHeaderProps {
   onSyncNow?: () => Promise<SyncStatus>;
   isSimulatedOffline?: boolean;
   onToggleOfflineMode?: (isOffline: boolean) => void;
+  technicianId: string;
+  technicians: Array<{ id: string; Name: string; LastName: string; Trade: string }>;
+  onTechnicianChange: (id: string) => void;
 }
 
 export const MobileHeader: React.FC<MobileHeaderProps> = ({
@@ -17,6 +20,9 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   onSyncNow,
   isSimulatedOffline = false,
   onToggleOfflineMode,
+  technicianId,
+  technicians,
+  onTechnicianChange,
 }) => {
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -56,7 +62,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
       <div className="max-w-full px-4 py-3">
         {/* Row 1: Site Badge and Status Indicator */}
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
               <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
               <select aria-label="Active site" value={activeSiteId} onChange={(event) => {
@@ -68,6 +74,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
                 <option value="SITE-03">SITE-03</option>
               </select>
             </div>
+            <label className="mb-1 block text-xs">Technician <select aria-label="Active technician" value={technicianId} onChange={(e) => onTechnicianChange(e.target.value)} className="ml-1 max-w-[75%] rounded border p-1">{!technicians.some((person) => person.id === technicianId) && <option value={technicianId}>{technicianId || "Select technician"}</option>}{technicians.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}</select></label>
 
             {/* Online/Offline Toggle */}
             <button

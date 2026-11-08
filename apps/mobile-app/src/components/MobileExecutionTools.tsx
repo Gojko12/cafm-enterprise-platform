@@ -4,7 +4,7 @@ import type { BaseWorkRequest } from "@cafm/shared-schema";
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 type Session = NonNullable<BaseWorkRequest["timeSessions"]>[number];
 
-function laborFor(current: BaseWorkRequest, sessions: Session[], technician: string, modifiedAt: string) {
+function laborFor(current: BaseWorkRequest, sessions: Session[], technician: string, modifiedAt: string, person?: { Name: string; LastName: string; Trade: string; HourlyRate: number }) {
   const existing = current.laborEntries?.find((entry) => entry.craftpersonId === technician);
   const legacy = current.CraftpersonLabor?.find((entry) => entry.craftpersonId === technician);
   const assignment = current.CraftpersonAssignments?.find((entry) => entry.craftpersonId === technician);
@@ -13,12 +13,15 @@ function laborFor(current: BaseWorkRequest, sessions: Session[], technician: str
   const recorded = ownSessions.length || older.length ? ownSessions.reduce((sum, session) => sum + session.durationMinutes, 0) + older.reduce((sum, session) => sum + session.TotalTimeMinutes, 0) : existing?.recordedTimerMinutes ?? legacy?.recordedTimerMinutes ?? assignment?.recordedTimerMinutes ?? legacy?.workingTimeMinutes ?? 0;
   const opinion = existing?.technicianOpinionMinutes ?? legacy?.technicianOpinionMinutes ?? assignment?.technicianOpinionMinutes;
   const override = existing?.teamLeaderOverrideMinutes ?? legacy?.teamLeaderOverrideMinutes ?? assignment?.teamLeaderOverrideMinutes;
-  return { ...existing, craftpersonId: technician, name: existing?.name ?? legacy?.name ?? assignment?.name ?? technician, lastName: existing?.lastName ?? legacy?.lastName ?? assignment?.lastName ?? "", trade: existing?.trade ?? legacy?.trade ?? assignment?.trade, hourlyRate: existing?.hourlyRate ?? legacy?.hourlyRate ?? assignment?.hourlyRate ?? 0, recordedTimerMinutes: recorded, technicianOpinionMinutes: opinion, teamLeaderOverrideMinutes: override, effectiveMinutes: override ?? opinion ?? recorded, lastModifiedBy: technician, lastModifiedAt: modifiedAt };
+  return { ...existing, craftpersonId: technician, name: existing?.name ?? legacy?.name ?? assignment?.name ?? person?.Name ?? technician, lastName: existing?.lastName ?? legacy?.lastName ?? assignment?.lastName ?? person?.LastName ?? "", trade: existing?.trade ?? legacy?.trade ?? assignment?.trade ?? person?.Trade, hourlyRate: existing?.hourlyRate ?? legacy?.hourlyRate ?? assignment?.hourlyRate ?? person?.HourlyRate ?? 0, recordedTimerMinutes: recorded, technicianOpinionMinutes: opinion, teamLeaderOverrideMinutes: override, effectiveMinutes: override ?? opinion ?? recorded, lastModifiedBy: technician, lastModifiedAt: modifiedAt };
 }
 
-export function MobileExecutionTools({ wr, technician, save }: {
+export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save }: {
   wr: BaseWorkRequest;
   technician: string;
+  technicianName: string;
+  person?: { Name: string; LastName: string; Trade: string; HourlyRate: number };
+  mode?: "timer" | "todo";
   save: (change: (current: BaseWorkRequest) => BaseWorkRequest, message: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -43,7 +46,7 @@ export function MobileExecutionTools({ wr, technician, save }: {
   const start = () => void execute((current) => {
     if ((current.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt)) throw new Error("A timer is already running on this work request.");
     const startedAt = new Date().toISOString();
-    return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technician, startedAt, durationMinutes: 0 }] };
+    return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt, durationMinutes: 0 }] };
   }, "Started work timer.");
   const stop = () => void execute((current) => {
     const running = (current.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
@@ -52,30 +55,37 @@ export function MobileExecutionTools({ wr, technician, save }: {
     if (!Number.isFinite(startTime) || end < startTime) throw new Error("The timer timestamps are invalid; the session was not stopped.");
     const minutes = Math.round((end - startTime) / 60000);
     const sessions = (current.timeSessions ?? []).map((session) => session.id === running.id ? { ...session, endedAt: new Date(end).toISOString(), durationMinutes: minutes } : session);
-    const entry = laborFor(current, sessions, technician, new Date(end).toISOString());
+    const entry = laborFor(current, sessions, technician, new Date(end).toISOString(), person);
     return { ...current, timeSessions: sessions, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), entry], TotalTimeMinutes: current.TotalTimeMinutes + minutes };
   }, "Stopped work timer.");
   const elapsed = active ? Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000)) : 0;
+  const completedSessions = (wr.timeSessions ?? []).filter((item) => item.craftpersonId === technician && item.endedAt);
+  const total = completedSessions.reduce((sum, item) => sum + item.durationMinutes, 0);
+  const clock = [Math.floor(elapsed / 3600), Math.floor(elapsed / 60) % 60, elapsed % 60].map((n) => String(n).padStart(2, "0")).join(":");
   return <section className="space-y-3 rounded border bg-white p-4">
+    {mode === "timer" && <>
     <h2 className="font-bold">Work timer</h2>
-    <p>{active ? `Running: ${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : "Timer stopped"}</p>
-    <button disabled={busy} className="rounded bg-blue-700 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={active ? stop : start}>{active ? "Stop Timing" : "Start Timing"}</button>
+    <p className="font-mono text-3xl font-semibold">{clock}</p>
+    <div className="flex gap-2"><button disabled={busy || !!active} className="rounded bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={start}>▶ Start Timing</button><button disabled={busy || !active} className="rounded bg-rose-700 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={stop}>⏹ Stop Timing</button></div>
+    <p className="rounded bg-blue-50 p-2 text-sm">Total Recorded: {Math.floor(total / 60)}h {total % 60}m across {completedSessions.length} sessions</p>
+    {completedSessions.map((session) => <p key={session.id} className="text-xs text-slate-600">{new Date(session.startedAt).toLocaleString()} – {new Date(session.endedAt!).toLocaleString()} · {session.durationMinutes} min</p>)}
     {wr.Percentage === 78 && <div><label className="block">Technician opinion time (minutes)<input className="ml-2 w-24 rounded border p-1" type="number" min="0" step="1" value={opinion} onChange={(e) => setOpinion(e.target.value)} /></label><button disabled={busy} className="mt-2 rounded border px-3 py-1" onClick={() => {
       const value = Number(opinion);
       if (!opinion.trim() || !Number.isInteger(value) || value < 0) { setError("Enter non-negative whole minutes."); return; }
       void execute((current) => {
         if (current.Percentage !== 78) throw new Error("The work request is no longer at 78%.");
-        const entry = laborFor(current, current.timeSessions ?? [], technician, new Date().toISOString());
+        const entry = laborFor(current, current.timeSessions ?? [], technician, new Date().toISOString(), person);
         return { ...current, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), { ...entry, technicianOpinionMinutes: value, effectiveMinutes: entry.teamLeaderOverrideMinutes ?? value }] };
       }, `Technician opinion time recorded: ${value} minutes.`);
     }}>Save opinion time</button></div>}
+    </>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
-    {wr.WR_Type !== "PM" && <><h2 className="font-bold">Technician To-Do</h2>{!(wr.todoSteps ?? []).length && <p>No steps have been assigned yet.</p>}{[...(wr.todoSteps ?? [])].sort((a, b) => a.order - b.order).map((step) => <TodoStep key={step.id} step={step} disabled={busy} save={(changes) => execute((current) => {
+    {mode === "todo" && wr.WR_Type !== "PM" && <><h2 className="font-bold">Technician To-Do</h2>{!(wr.todoSteps ?? []).length && <p>No steps have been assigned yet.</p>}{[...(wr.todoSteps ?? [])].sort((a, b) => a.order - b.order).map((step) => <TodoStep key={step.id} step={step} disabled={busy} save={(changes) => execute((current) => {
       const currentStep = (current.todoSteps ?? []).find((item) => item.id === step.id);
       if (!currentStep) throw new Error("This step no longer exists.");
       if (JSON.stringify(currentStep) !== JSON.stringify(step)) throw new Error("This step changed while you were editing it. Reopen the work request and try again.");
       return { ...current, todoSteps: (current.todoSteps ?? []).map((item) => item.id === step.id ? { ...item, ...changes } : item) };
-    }, `Updated technician step: ${step.title}.`)} technician={technician} />)}</>}
+    }, `Updated technician step: ${step.title}.`)} technician={technicianName} />)}</>}
   </section>;
 }
 

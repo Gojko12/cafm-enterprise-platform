@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Building, Equipment, Floor, Room } from "@cafm/shared-schema";
+import { Building, Equipment, Floor, Room, CLASSICAL_TRADES } from "@cafm/shared-schema";
 import { FilterCriteria } from "@/lib/store";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
 
@@ -121,15 +121,14 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
 
             <div>
               <label className="text-xs font-medium text-gray-700 block mb-1">Trade</label>
-              <input
-                type="text"
-                placeholder="e.g. Electrical"
+              <select
+                aria-label="Trade"
                 value={currentFilters.trade || ""}
                 onChange={(e) =>
                   onFiltersChange({ ...currentFilters, trade: e.target.value || undefined })
                 }
                 className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-              />
+              ><option value="">All Trades</option>{CLASSICAL_TRADES.map((trade) => <option key={trade} value={trade}>{trade}</option>)}</select>
             </div>
 
             <div className="grid grid-cols-2 gap-2">

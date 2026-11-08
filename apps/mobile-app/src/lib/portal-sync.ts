@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema,
   PM_ChecklistStandardSchema, PM_ScheduleSchema,
+  LocationFreezeSchema, SiteIdSchema,
 } from "@cafm/shared-schema";
 import type {
   BaseWorkRequest, Building, Floor, Room, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId,
@@ -19,6 +20,8 @@ const stateSchema = z.object({
   blueprints: z.array(z.custom<PM_ChecklistStandard>((value) => PM_ChecklistStandardSchema.safeParse(value).success)),
   schedules: z.array(z.custom<PM_Schedule>((value) => PM_ScheduleSchema.safeParse(value).success)),
   workRequests: z.array(workRequestSchema),
+  craftspeople: z.array(z.object({ id: z.string().min(1), Name: z.string().min(1), LastName: z.string(), Trade: z.string(), HourlyRate: z.number().nonnegative(), SiteId: SiteIdSchema }).passthrough()).optional(),
+  locationFreezes: z.array(LocationFreezeSchema).optional(),
   mobileMutationIds: z.array(z.string()).optional(),
 }).passthrough();
 const responseSchema = z.object({ revision: z.number().int().nonnegative(), state: stateSchema.nullable() });
@@ -93,6 +96,8 @@ export async function synchronizePortal(
       state.equipment.some((item) => item.SiteId !== site) ||
       state.schedules.some((item) => item.SiteId !== site) ||
       state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site) ||
+      state.craftspeople?.some((item) => item.SiteId !== site) ||
+      state.locationFreezes?.some((item) => item.siteId !== site) ||
       state.workRequests.some((item) => item.SiteId !== site)) {
     throw new Error("The portal returned records belonging to another site.");
   }
@@ -115,17 +120,18 @@ export async function synchronizePortal(
     if (itemSite === site) selectedPhotos.push(photo);
   }
 
-  for (const item of selected.filter((entry) => entry.MutationType === "WR_UPDATE")) {
+  const updates = selected.filter((entry) => entry.MutationType === "WR_UPDATE");
+  while (updates.length) {
+    const index = updates.findIndex((entry) => {
+      if (applied.has(entry.QueueId)) return true;
+      const current = state.workRequests.find((wr) => wr.WR_ID === entry.Payload.WR_ID);
+      return entry.BaseWorkRequest !== undefined && stable(current ?? null) === stable(entry.BaseWorkRequest);
+    });
+    if (index < 0) throw new Error(`Work request ${String(updates[0].Payload.WR_ID)} changed on the portal; its local changes were retained.`);
+    const [item] = updates.splice(index, 1);
     if (applied.has(item.QueueId)) continue;
     const parsed = workRequestSchema.safeParse(item.Payload);
     if (!parsed.success || parsed.data.SiteId !== site) throw new Error(`Invalid queued work request ${item.QueueId}.`);
-    const existing = state.workRequests.find((wr) => wr.WR_ID === parsed.data.WR_ID);
-    if (item.BaseWorkRequest === undefined && existing) {
-      throw new Error(`Work request ${parsed.data.WR_ID} has no recorded sync baseline; its changes were retained.`);
-    }
-    if (stable(existing ?? null) !== stable(item.BaseWorkRequest ?? null)) {
-      throw new Error(`Work request ${parsed.data.WR_ID} changed on the portal; its local changes were retained.`);
-    }
     replaceRequest(state, parsed.data);
     applied.add(item.QueueId);
   }
@@ -247,6 +253,7 @@ export async function synchronizePortal(
   for (const item of selected) await tx.objectStore("syncQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   for (const item of selectedPhotos) await tx.objectStore("photoQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: "lastSyncTime", value: syncedAt, updatedAt: syncedAt });
+  await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], locationFreezes: state.locationFreezes ?? [] }), updatedAt: syncedAt });
   await tx.done;
   const pending = pendingNow.filter((item) => item.SyncStatus === "PENDING" && !confirmed.has(item.QueueId)).length +
     pendingPhotosNow.filter((item) => item.SyncStatus === "PENDING" && !confirmedPhotos.has(item.QueueId)).length;

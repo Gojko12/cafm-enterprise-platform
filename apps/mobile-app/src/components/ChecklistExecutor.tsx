@@ -5,6 +5,7 @@ export interface PM_StepDefinition {
   StepId: string;
   StepNumber: number;
   StepTitle: string;
+  Instruction?: string;
   InputType: "Boolean" | "Numeric" | "SingleSelect" | "MultiSelect" | "FreeText";
   IsRequired?: boolean;
   favourableBoolean?: boolean;
@@ -30,7 +31,6 @@ interface ChecklistExecutorProps {
   steps: PM_StepDefinition[];
   onStepComplete?: (stepValues: PM_StepExecutionValue[]) => void | Promise<void>;
   onOpenFollowUpFJ?: () => void;
-  onEscalateLJ?: () => void;
   onClose?: () => void;
 }
 
@@ -39,7 +39,6 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
   steps,
   onStepComplete,
   onOpenFollowUpFJ,
-  onEscalateLJ,
   onClose,
 }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -440,12 +439,6 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
                 className="flex-1 px-4 py-2 bg-green-500 text-white text-sm font-medium rounded hover:bg-green-600 transition-colors"
               >
                 📋 Follow-Up FJ
-              </button>
-              <button
-                onClick={onEscalateLJ}
-                className="flex-1 px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded hover:bg-orange-600 transition-colors"
-              >
-                🚀 Escalate to LJ
               </button>
             </div>
           </div>

@@ -5,11 +5,9 @@ import {
   MobileHeader,
   TechnicianHome,
   AdvancedFilterPanel,
-  ChecklistExecutor,
   QRScanner,
   EquipmentInspectionView,
   PM_StepDefinition,
-  PM_StepExecutionValue,
 } from "./components";
 import {
   BaseWorkRequest,
@@ -19,17 +17,30 @@ import {
   Equipment,
   SiteId,
   WR_Statuses,
+  LocationFreezeSchema,
 } from "@cafm/shared-schema";
+import type { LocationFreeze } from "@cafm/shared-schema";
+import { z } from "zod";
 import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
-import { MobileExecutionTools } from "./components/MobileExecutionTools";
+import { MobileChecklist } from "./components/MobileChecklist";
+import { ExecutionHub } from "./components/ExecutionHub";
+import { stable } from "./lib/portal-sync";
 
-type AppView = "home" | "checklist" | "scanner" | "inspection" | "qa-spot-check";
+type AppView = "home" | "hub" | "checklist" | "followup" | "scanner" | "inspection" | "qa-spot-check";
+const siteContextSchema = z.object({
+  craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
+  locationFreezes: z.array(LocationFreezeSchema),
+});
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
   const [activeSiteId, setActiveSiteId] = useState<SiteId>("SITE-01");
-  const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("TECH-001");
+  const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("");
+  const [technicians, setTechnicians] = useState<z.infer<typeof siteContextSchema>["craftspeople"]>([]);
+  const [freezes, setFreezes] = useState<LocationFreeze[]>([]);
+  const [followUpDescription, setFollowUpDescription] = useState("");
+  const [creatingFollowUp, setCreatingFollowUp] = useState(false);
   const activeSelection = useRef({ activeSiteId, currentTechnicianId });
   activeSelection.current = { activeSiteId, currentTechnicianId };
 
@@ -56,9 +67,9 @@ export default function App() {
 
   const refreshData = useCallback(async () => {
     const db = await getDB();
-    const [storedBuildings, storedFloors, storedRooms, storedEquipment, storedRequests] = await Promise.all([
+    const [storedBuildings, storedFloors, storedRooms, storedEquipment, storedRequests, context] = await Promise.all([
       db.getAll("buildings"), db.getAll("floors"), db.getAll("rooms"),
-      db.getAll("equipment"), db.getAll("workRequests"),
+      db.getAll("equipment"), db.getAll("workRequests"), db.get("syncMetadata", `siteContext:${activeSiteId}`),
     ]);
     if (activeSelection.current.activeSiteId !== activeSiteId ||
         activeSelection.current.currentTechnicianId !== currentTechnicianId) return;
@@ -67,9 +78,16 @@ export default function App() {
     setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId));
     setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId));
     const siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
+    const siteContext = context ? siteContextSchema.parse(JSON.parse(context.value)) : { craftspeople: [], locationFreezes: [] };
+    const people = siteContext.craftspeople.filter((item) => item.SiteId === activeSiteId);
+    setTechnicians(people);
+    setFreezes(siteContext.locationFreezes.filter((item) => item.siteId === activeSiteId));
+    const technician = people.find((item) => item.id === currentTechnicianId);
+    if (!technician && people.length) { setCurrentTechnicianId(people[0].id); return; }
     setSiteWRs(siteRequests);
-    setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId)));
-    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length));
+    setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId) || wr.AssignedCraftpersonIds.includes(currentTechnicianId)));
+    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length && !wr.AssignedCraftpersonIds.length && !!technician && (wr.TradeName === technician.Trade || wr.TradeId === technician.Trade)));
+    setSelectedWR((current) => current ? siteRequests.find((wr) => wr.WR_ID === current.WR_ID) ?? current : null);
   }, [activeSiteId, currentTechnicianId]);
 
   useEffect(() => {
@@ -104,11 +122,11 @@ export default function App() {
     const claimed = unassignedWRs.find((wr) => wr.WR_ID === wrId);
     if (!claimed || !engine) return;
     try {
-      await engine.saveWorkRequest({ ...claimed, AssignedUserIds: [currentTechnicianId] }, claimed);
+      await engine.saveWorkRequest({ ...claimed, AssignedCraftpersonIds: [...(claimed.AssignedCraftpersonIds ?? []), currentTechnicianId], AssignedUserIds: [...(claimed.AssignedUserIds ?? []), currentTechnicianId] }, claimed);
       await refreshData();
     } catch (error) {
       console.error("Could not claim work request:", error);
-      alert("Could not save the work request assignment.");
+      throw error;
     }
   };
 
@@ -122,9 +140,9 @@ export default function App() {
         favourableBoolean: step.favourableBoolean, MinThreshold: step.MinThreshold, MaxThreshold: step.MaxThreshold, Unit: step.Unit,
         RequiresPhotoOnFailure: step.RequiresPhotoOnFailure, RequiresCommentOnFailure: step.RequiresCommentOnFailure,
         IsRequired: "IsRequired" in step ? step.IsRequired : true,
-        Options: step.Options.map((option) => ({ OptionId: option.OptionId, OptionValue: option.Value, TriggersFailure: option.TriggersFailure })),
+        Options: (step.Options ?? []).map((option) => ({ OptionId: option.OptionId, OptionValue: option.Value, TriggersFailure: option.TriggersFailure })),
       })));
-      setCurrentView("checklist");
+      setCurrentView("hub");
     }
   };
 
@@ -143,7 +161,8 @@ export default function App() {
       throw new Error("The offline work request store is not ready yet.");
     }
     await engine.saveWorkRequest(request, null);
-    setMyWRs((current) => [...current, request]);
+    setSiteWRs((current) => [...current, request]);
+    if (request.AssignedCraftpersonIds.includes(currentTechnicianId) || request.AssignedUserIds.includes(currentTechnicianId)) setMyWRs((current) => [...current, request]);
   };
 
   const handleCreateMobileFJ = async (job: {
@@ -235,120 +254,64 @@ export default function App() {
   const handleApplyFilters = () => {
     setAppliedFilters(useFilterStore.getState().filters);
   };
+  const person = technicians.find((item) => item.id === currentTechnicianId);
+  const technicianName = person ? `${person.Name} ${person.LastName}` : currentTechnicianId;
+  const saveSelected = async (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => {
+    if (!engine || !selectedWR) throw new Error("Offline storage or work request is not ready.");
+    const current = await engine.getWorkRequest(selectedWR.WR_ID);
+    if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
+    const changed = change(current), now = new Date().toISOString();
+    const updated: BaseWorkRequest = { ...changed, UpdatedAt: now, Activity: [...(changed.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: message }] };
+    await engine.saveWorkRequest(updated, current);
+    setSelectedWR(updated);
+    setSiteWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+    setMyWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+    setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+  };
+  const createFollowUp = async () => {
+    if (!selectedWR || !followUpDescription.trim()) throw new Error("Enter a follow-up description.");
+    const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
+    if (!issued) throw new Error("Issued status configuration is missing.");
+    const now = new Date().toISOString();
+    const request: BaseWorkRequest = { WR_ID: `FJ-${crypto.randomUUID()}`, WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}.` }] };
+    await persistCreatedRequest(request);
+    setCurrentView("hub");
+    alert(`Follow-up ${request.WR_ID} saved offline.`);
+  };
 
   // Render based on current view
   const renderContent = () => {
     switch (currentView) {
+      case "hub":
+        return selectedWR ? <ExecutionHub wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} equipment={equipment} freezes={freezes} save={saveSelected} back={() => { setCurrentView("home"); setSelectedWR(null); }} checklist={() => setCurrentView("checklist")} followUp={() => { setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `); setCurrentView("followup"); }} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
-        return selectedWR ? (
-          <>
-          <div className="px-4 pt-40"><button className="mb-2 text-blue-700" onClick={() => { setCurrentView("home"); setSelectedWR(null); }}>← Back to work requests</button>
-            <h1 className="mb-2 font-bold">{selectedWR.WR_ID} · {selectedWR.Description}</h1>
-            <MobileExecutionTools key={`${selectedWR.WR_ID}-${currentTechnicianId}`} wr={selectedWR} technician={currentTechnicianId} save={async (change, message) => {
-              if (!engine) throw new Error("Offline storage is not ready.");
-              const current = await engine.getWorkRequest(selectedWR.WR_ID);
-              if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
-              const changed = change(current), now = new Date().toISOString();
-              const updated: BaseWorkRequest = { ...changed, UpdatedAt: now, Activity: [...(changed.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: currentTechnicianId, actorRole: "MobileTechnician", createdAt: now, text: message }] };
-              await engine.saveWorkRequest(updated, current);
-              setSelectedWR(updated);
-              setSiteWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
-              setMyWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
-              setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
-            }} />
-          </div>
-          {selectedWR.WR_Type === "PM" && (checklistSteps.length ? (
-          <ChecklistExecutor
-            wr={selectedWR}
-            steps={checklistSteps}
-            onStepComplete={async (stepValues: PM_StepExecutionValue[]) => {
-              if (!engine) throw new Error("Offline storage is not ready. Please try again.");
-              const now = new Date().toISOString();
-              const actorName = currentTechnicianId;
-              const checklistResults = stepValues.map((result) => ({
-                stepId: result.StepId,
-                value: typeof result.Value === "boolean" ? String(result.Value) : result.Value,
-                passed: result.Passed,
-                completedAt: result.Timestamp,
-                ...(result.PhotoUrl ? { photoPaths: [result.PhotoUrl] } : {}),
-                ...(result.TechnicianComment ? { comment: result.TechnicianComment } : {}),
-              }));
-              const completedInstances = selectedWR.ChecklistInstances?.map((instance) => {
-                const answer = stepValues.find((item) => item.StepId === instance.StepId);
-                if (!answer) return instance;
-                const values = Array.isArray(answer.Value) ? answer.Value : [answer.Value];
-                return {
-                  ...instance,
-                  ValueBoolean: instance.InputType === "Boolean" && typeof answer.Value === "boolean" ? answer.Value : undefined,
-                  ValueNumeric: instance.InputType === "Numeric" && typeof answer.Value === "number" ? answer.Value : undefined,
-                  ValueText: instance.InputType === "FreeText" && typeof answer.Value === "string" ? answer.Value : undefined,
-                  SelectedOptionIds: instance.InputType === "SingleSelect" || instance.InputType === "MultiSelect"
-                    ? values.map((value) => instance.Options.find((option) => option.Value === String(value))?.OptionId)
-                      .filter((id): id is string => id !== undefined)
-                    : undefined,
-                  PhotoIds: answer.PhotoUrl
-                    ? [...instance.PhotoIds, `ChecklistResults/${instance.StepId}/${now}`]
-                    : instance.PhotoIds,
-                  TechnicianComment: answer.TechnicianComment,
-                  IsFailed: !answer.Passed,
-                  IsCompleted: true,
-                  CompletedBy: currentTechnicianId,
-                  CompletedAt: now,
-                };
-              });
-              const savedWR: BaseWorkRequest = {
-                ...selectedWR,
-                ChecklistCompleted: true,
-                ChecklistResults: checklistResults,
-                ChecklistInstances: completedInstances,
-                StepAuditLogs: [
-                  ...(selectedWR.StepAuditLogs ?? []),
-                  ...(completedInstances ?? []).filter((step) => step.IsCompleted).map((step) => ({
-                    AuditLogId: crypto.randomUUID(),
-                    StepInstanceId: step.StepInstanceId,
-                    WR_ID: selectedWR.WR_ID,
-                    ActorId: currentTechnicianId,
-                    Action: "completed" as const,
-                    OccurredAt: now,
-                  })),
-                ],
-                ChecklistHistory: [
-                  ...(selectedWR.ChecklistHistory ?? []),
-                  {
-                    id: crypto.randomUUID(),
-                    timestamp: now,
-                    performedBy: actorName,
-                    actionType: "Checklist completed",
-                    details: `${checklistResults.length} of ${checklistSteps.length} steps answered`,
-                  },
-                ],
-                UpdatedAt: now,
-                Activity: [
-                  ...(selectedWR.Activity ?? []),
-                  {
-                    id: crypto.randomUUID(),
-                    kind: "log",
-                    actorId: currentTechnicianId,
-                    actorName,
-                    actorRole: "MobileTechnician",
-                    createdAt: now,
-                    text: `Checklist finished by ${actorName}`,
-                  },
-                ],
-              };
-              await engine.saveWorkRequest(savedWR, selectedWR);
-              setMyWRs((current) => current.map((wr) => wr.WR_ID === savedWR.WR_ID ? savedWR : wr));
-              setUnassignedWRs((current) => current.map((wr) => wr.WR_ID === savedWR.WR_ID ? savedWR : wr));
-              setCurrentView("home");
-              setSelectedWR(null);
-            }}
-            onClose={() => {
-              setCurrentView("home");
-              setSelectedWR(null);
-            }}
-          />) : <p className="p-4 text-amber-700">No PM checklist is available on this work request.</p>)}
-          </>
-        ) : null;
+        if (!selectedWR) return null;
+        if (selectedWR.WR_Type === "PM") return <MobileChecklist key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} followUp={() => { setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `); setCurrentView("followup"); }} save={async (results, baseline) => saveSelected((current) => {
+          const now = new Date().toISOString();
+          const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
+          for (const result of changed) {
+            if (stable(current.ChecklistResults?.find((item) => item.stepId === result.stepId)) !== stable(baseline.find((item) => item.stepId === result.stepId))) throw new Error(`Step ${result.stepId} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
+          }
+          return { ...current, ChecklistResults: [...(current.ChecklistResults ?? []).filter((item) => !changed.some((result) => result.stepId === item.stepId)), ...changed], ChecklistHistory: [...(current.ChecklistHistory ?? []), ...changed.map((result) => ({ id: crypto.randomUUID(), timestamp: now, performedBy: technicianName, actionType: "Mobile checklist updated", stepReference: result.stepId, details: `Answer: ${String(result.value)}; ${result.passed ? "favourable" : "unfavourable"}${result.comment ? `; ${result.comment}` : ""}` }))], StepAuditLogs: [...(current.StepAuditLogs ?? []), ...changed.flatMap((result) => { const instance = current.ChecklistInstances?.find((item) => item.StepId === result.stepId); return instance ? [{ AuditLogId: crypto.randomUUID(), StepInstanceId: instance.StepInstanceId, WR_ID: current.WR_ID, ActorId: currentTechnicianId, Action: "modified" as const, PreviousValue: baseline.find((item) => item.stepId === result.stepId)?.value, NewValue: result.value, OccurredAt: now }] : []; })] };
+        }, "Checklist progress saved.")} />;
+        {
+          const todo = selectedWR.todoSteps ?? [];
+          const todoSteps: PM_StepDefinition[] = [...todo].sort((a, b) => a.order - b.order).map((step) => ({ StepId: step.id, StepNumber: step.order, StepTitle: step.title, Instruction: step.instruction, InputType: "Boolean", favourableBoolean: true, RequiresPhotoOnFailure: false, RequiresCommentOnFailure: false }));
+          const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? String(step.isFavourable ?? true) : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
+          return <MobileChecklist key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} followUp={() => { setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `); setCurrentView("followup"); }} save={async (results, baseline) => saveSelected((current) => {
+            const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
+            if (changed.some((result) => !(current.todoSteps ?? []).some((step) => step.id === result.stepId))) throw new Error("A technician step was removed elsewhere. Your edits have not been saved.");
+            return { ...current, todoSteps: (current.todoSteps ?? []).map((step) => {
+              const result = changed.find((item) => item.stepId === step.id);
+              if (!result) return step;
+              const before = baseline.find((item) => item.stepId === step.id);
+              if (step.completed !== (!!before && before.value !== "") || (before && ((step.isFavourable ?? true) !== before.passed || step.technicianComment !== before.comment || stable(step.photoUrls) !== stable(before.photoPaths)))) throw new Error(`Step ${step.id} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
+              return { ...step, completed: result.value !== "", completedBy: technicianName, completedAt: result.completedAt, technicianComment: result.comment, photoUrls: result.photoPaths, isFavourable: result.passed };
+            }) };
+          }, "Technician task progress saved.")} />;
+        }
+      case "followup":
+        return selectedWR ? <div className="space-y-3 p-4 pt-48"><button disabled={creatingFollowUp} onClick={() => setCurrentView("hub")}>← Back to WR Overview</button><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} /><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); void createFollowUp().catch((error: unknown) => alert(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button></div> : null;
 
       case "scanner":
         return (
@@ -420,12 +383,15 @@ export default function App() {
       {/* Header */}
       <MobileHeader
         activeSiteId={activeSiteId}
+        technicianId={currentTechnicianId}
+        technicians={technicians}
+        onTechnicianChange={(id) => { if (currentView !== "home") { alert("Return to the work request list before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
         onSiteChange={(site) => {
           if (currentView !== "home") {
             alert("Return to the work request list before switching sites.");
             return;
           }
-          setActiveSiteId(site);
+          setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setTechnicians([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
         }}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}
@@ -433,7 +399,7 @@ export default function App() {
       />
 
       {/* Main Content */}
-      <main className="h-screen overflow-hidden flex flex-col">{renderContent()}</main>
+      <main className="h-screen overflow-y-auto flex flex-col">{renderContent()}</main>
 
       {/* Bottom Navigation Tabs */}
       {currentView === "home" && (
