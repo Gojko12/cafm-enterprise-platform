@@ -23,7 +23,7 @@ import {
 import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
 
-type AppView = "home" | "checklist" | "scanner" | "inspection";
+type AppView = "home" | "checklist" | "scanner" | "inspection" | "qa-spot-check";
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
@@ -37,6 +37,7 @@ export default function App() {
   const [isSimulatedOffline, setIsSimulatedOffline] = useState(false);
   const [myWRs, setMyWRs] = useState<BaseWorkRequest[]>([]);
   const [unassignedWRs, setUnassignedWRs] = useState<BaseWorkRequest[]>([]);
+  const [siteWRs, setSiteWRs] = useState<BaseWorkRequest[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -65,6 +66,7 @@ export default function App() {
     setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId));
     setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId));
     const siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
+    setSiteWRs(siteRequests);
     setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId)));
     setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length));
   }, [activeSiteId, currentTechnicianId]);
@@ -370,12 +372,21 @@ export default function App() {
             equipmentList={equipment}
             onCreateFJ={handleCreateMobileFJ}
             onCreateLJ={handleCreateMobileLJ}
+            onLogTechnicalAudit={() => setCurrentView("qa-spot-check")}
             onClose={() => {
               setCurrentView("home");
               setSelectedEquipment(null);
             }}
           />
         ) : null;
+
+      case "qa-spot-check":
+        return selectedEquipment ? <div className="space-y-3 p-4 pt-40"><h2 className="text-xl font-bold">QA spot-check · {selectedEquipment.EquipmentCode}</h2><button onClick={() => setCurrentView("inspection")}>Back to equipment</button>{siteWRs.filter((wr) => wr.EquipmentCodes.includes(selectedEquipment.EquipmentCode) && (wr.Percentage === 78 || wr.Percentage === 100 || /completed|closed/i.test(wr.WorkRequestStatus))).map((wr) => <div key={wr.WR_ID} className="rounded border bg-white p-3"><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p>QA: {wr.QA_AuditStatus ?? "None"}</p><button disabled={!!wr.QA_AuditStatus && wr.QA_AuditStatus !== "None"} onClick={() => {
+          if (!engine) { alert("Offline engine is not ready."); return; }
+          const now = new Date().toISOString();
+          const next: BaseWorkRequest = { ...wr, QA_CompletionDate: (wr.UpdatedAt ?? wr.CreatedDate).slice(0, 10), QA_AuditStatus: "SelectedForAudit", QA_SelectionMode: "QRScanOnSite", UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: currentTechnicianId, actorRole: "MobileTechnician", createdAt: now, text: "Selected for QA audit by equipment QR spot-check." }] };
+          void engine.saveWorkRequest(next, wr).then(refreshData).then(() => alert("Selected for audit. Sync to the web portal when online.")).catch((error: unknown) => alert(error instanceof Error ? error.message : "Could not select audit."));
+        }}>Inspect This WR (QR Spot-Check)</button></div>)}</div> : null;
 
       case "home":
       default:

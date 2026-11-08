@@ -177,7 +177,7 @@ export default function WorkRequestsPage() {
       case "inspection": return wr.Percentage === 78 && qaStatus !== "Passed" && qaStatus !== "ToBeCorrected" &&
         wr.AuditInspectionStatus !== "Passed Inspected" && wr.AuditInspectionStatus !== "PM WRs to be corrected";
       case "passed": return wr.Percentage === 78 && (qaStatus === "Passed" || wr.AuditInspectionStatus === "Passed Inspected");
-      case "corrected": return qaStatus === "ToBeCorrected" || wr.AuditInspectionStatus === "PM WRs to be corrected";
+      case "corrected": return wr.QA_AuditStatus === "QA_Failed_ActionRequired" || qaStatus === "ToBeCorrected" || wr.AuditInspectionStatus === "PM WRs to be corrected";
       case "completed": return wr.Percentage === 100;
       case "cancelled": return wr.Percentage === 27;
     }
@@ -573,7 +573,7 @@ export default function WorkRequestsPage() {
                   <div className="mt-3 space-y-2 border-t border-gray-200 pt-3">
                     <p className="text-sm"><strong>QA_IssueDescription:</strong> {wr.QA_IssueDescription || "No issue description recorded."}</p>
                     <p className="text-sm"><strong>QA_CorrectionComment:</strong> {wr.QA_CorrectionComment || "No correction comment recorded."}</p>
-                    <label className="block text-sm">Correction performed / re-submission comment
+                    {wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? <p>Open the work request to submit the correction in the QA audit panel.</p> : <><label className="block text-sm">Correction performed / re-submission comment
                       <textarea value={correctionDrafts[wr.WR_ID] ?? ""} onChange={(event) => setCorrectionDrafts((value) => ({ ...value, [wr.WR_ID]: event.target.value }))}
                         className="mt-1 block w-full rounded border p-2" rows={2} />
                     </label>
@@ -593,7 +593,7 @@ export default function WorkRequestsPage() {
                         } : item,
                       ) }));
                       setCorrectionDrafts((value) => ({ ...value, [wr.WR_ID]: "" }));
-                    }} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Correction Complete &amp; Re-submit</button>
+                    }} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Correction Complete &amp; Re-submit</button></>}
                   </div>
                 )}
 

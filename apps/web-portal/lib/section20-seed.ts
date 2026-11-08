@@ -229,6 +229,21 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         wr.CraftpersonAssignments = [{ craftpersonId: person.id, assignedStartDateTime: `${disputeDay}T08:00`, assignedEndDateTime: `${disputeDay}T10:00` }];
       });
     }
+    const qaCandidates = (["PM", "FJ", "LJ"] as const).map((type) =>
+      workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === type && (wr.Percentage === 78 || wr.Percentage === 100)));
+    const qaExamples = [qaCandidates[0][0], qaCandidates[1][0], qaCandidates[2][0], qaCandidates[0][1], qaCandidates[1][1]]
+      .filter((wr): wr is BaseWorkRequest => !!wr);
+    const statuses = ["SelectedForAudit", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"] as const;
+    qaExamples.forEach((wr, index) => {
+      wr.QA_AuditStatus = statuses[index];
+      wr.QA_SelectionMode = "ComputerRandom5Percent";
+      wr.QA_CompletionDate = (wr.UpdatedAt ?? wr.CreatedDate).slice(0, 10);
+      if (index > 0) { wr.QA_InspectedBy = "Thomas"; wr.QA_InspectedDate = "2026-10-14T09:00:00Z"; }
+      if (index >= 2) wr.QA_IssueDescription = "Filter on VRF unit was marked cleaned, but inspection found heavy dust buildup and a loose housing cover.";
+      if (index >= 3) { wr.QA_CorrectionComment = "Cleaned the filter and secured the housing cover."; wr.QA_CorrectedDate = "2026-10-15T10:00:00Z"; }
+      if (index === 2) { wr.QA_InspectionStatus = "ToBeCorrected"; wr.AuditInspectionStatus = "PM WRs to be corrected"; }
+      if (index === 1 || index === 4) { wr.QA_InspectionStatus = "Passed"; wr.AuditInspectionStatus = "Passed Inspected"; }
+    });
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };
 }

@@ -7,6 +7,7 @@ import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
+import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
@@ -111,6 +112,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        <QAAuditPanel wr={workRequest} />
         {tab === "Work request details" && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
           {group("Fast Job Details", <>
@@ -177,7 +179,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           <h3 className="font-semibold">Attached Documents</h3><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New WR Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
           {(workRequest.Attachments ?? []).map((doc) => <div key={doc.id} className="flex items-center justify-between border-b py-3"><span>{doc.name}</span><div className="flex gap-3"><a href={doc.dataUrl} target="_blank" rel="noreferrer" onClick={() => update((wr) => wr, `Document '${doc.name}' opened by ${actorName}`)} className="text-blue-700 underline">Open</a><button onClick={() => update((wr) => ({ ...wr, Attachments: (wr.Attachments ?? []).filter((item) => item.id !== doc.id) }), `Document '${doc.name}' deleted by ${actorName}`)} className="text-red-700">Delete</button></div></div>)}
         </section>}
-        {tab === "AuditLog & QA" && <section className="space-y-4 rounded border bg-white p-4">
+        {tab === "AuditLog & QA" && (!workRequest.QA_AuditStatus || workRequest.QA_AuditStatus === "None") && <section className="space-y-4 rounded border bg-white p-4">
           <h3 className="font-semibold">QA inspection status &amp; notes</h3>
           <p>Inspection status: <strong>{workRequest.QA_InspectionStatus ?? "Pending"}</strong></p>
           <textarea aria-label="QA inspection notes" value={workRequest.QA_IssueDescription ?? ""} onChange={(e) => update((wr) => ({ ...wr, QA_IssueDescription: e.target.value }))} placeholder="QA inspection notes" className="block w-full rounded border p-3" rows={3} />

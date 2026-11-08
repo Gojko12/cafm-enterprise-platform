@@ -12,8 +12,9 @@ import { ResizeHandle, useTableColumns } from "@/components/common/TableColumns"
 import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
 import { mapWRDisputes } from "@/lib/disputes";
 import type { DisputeViewMode } from "@/lib/disputes";
+import { useQAActions } from "@/lib/use-qa-actions";
 
-type Column = "id" | "description" | "status" | "percentage" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes";
+type Column = "id" | "description" | "status" | "percentage" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes" | "qa";
 const columns: { key: Column; label: string }[] = [
   { key: "id", label: "WR ID" }, { key: "description", label: "Title / Description" },
   { key: "status", label: "Status" }, { key: "percentage", label: "Substatus %" },
@@ -21,13 +22,14 @@ const columns: { key: Column; label: string }[] = [
   { key: "floor", label: "Floor" }, { key: "room", label: "Room" }, { key: "equipment", label: "Equipment" },
   { key: "cost", label: "Estimated Cost (EUR)" }, { key: "costType", label: "Cost Type" },
   { key: "craftperson", label: "Assigned Craftperson" }, { key: "due", label: "Due Date" },
-  { key: "margin", label: "Margin Date" }, { key: "created", label: "Created" }, { key: "disputes", label: "Disputes" },
+  { key: "margin", label: "Margin Date" }, { key: "created", label: "Created" }, { key: "disputes", label: "Disputes" }, { key: "qa", label: "QA Audit Status" },
 ];
 
 export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, requestType }: { requests: BaseWorkRequest[]; onOpen: (wr: BaseWorkRequest) => void; grouped?: boolean; onFilterCount?: (count: number) => void; requestType: "PM" | "FJ" | "LJ" }) {
   const { data, setData } = useCafmStore();
   const { activePerson, activeSiteId } = useSiteContext();
   const { currentRole } = useApp();
+  const qa = useQAActions();
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [collapsed, setCollapsed] = useState<string[]>([]);
@@ -59,6 +61,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "margin": return wr.MarginDate ?? "";
       case "created": return wr.CreatedDate;
       case "disputes": return (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.label).join(", ");
+      case "qa": return wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? "⚠ QA REWORK REQUIRED" : wr.QA_AuditStatus ?? "None";
     }
   };
   const config = useTableColumns(`work-requests-${requestType}`, columns.map(({ key, label }) => ({ id: key, label, value: (wr: BaseWorkRequest) => key === "cost" ? wr.EstimatedCostEur : key === "percentage" ? wr.Percentage : value(wr, key) })));
@@ -118,6 +121,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
     {error && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
     {selected.length > 0 && <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded border bg-white p-2 text-xs shadow">
       <strong>{selected.length} selected ({selected.filter((id) => !displayed.some((wr) => wr.WR_ID === id)).length} hidden) · Bulk Actions</strong>
+      <button onClick={() => { setError(""); void qa.manualSelectForQAAudit(selected, "ManualInspectorPick").then(() => setSelected([])).catch((problem: unknown) => setError(problem instanceof Error ? problem.message : "Could not select QA audits.")); }}>+ Add Selected to QA Audit</button>
       <select aria-label="Bulk status" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}><option value="">Status</option>{[50, 55, 78, 100, 27].map((n) => <option key={n} value={n}>{n}%</option>)}</select>
       <button disabled={!bulkStatus} onClick={() => apply((wr) => gridStatusChange(wr, Number(bulkStatus), currentRole), `Bulk status changed to ${bulkStatus}%`)}>Apply status</button>
       <select aria-label="Bulk trade" value={bulkTrade} onChange={(e) => setBulkTrade(e.target.value)}><option value="">Trade</option>{CLASSICAL_TRADES.map((trade) => <option key={trade}>{trade}</option>)}</select>

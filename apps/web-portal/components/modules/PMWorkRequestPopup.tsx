@@ -9,6 +9,7 @@ import {
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { useCafmStore } from "@/lib/cafm-store";
+import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
@@ -578,6 +579,7 @@ export function PMWorkRequestPopup({
         </nav>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <QAAuditPanel wr={workRequest} />
           {activeTab === "Work request details" && <div className="space-y-4">
             <WRDetailsEditor workRequest={workRequest} />
             {renderGroup("Work Request",
@@ -810,6 +812,7 @@ export function PMWorkRequestPopup({
           </section>}
 
           {activeTab === "AuditLog" && <section className="space-y-4 rounded border bg-white p-4">
+            {(!workRequest.QA_AuditStatus || workRequest.QA_AuditStatus === "None") && <>
             <h3 className="font-semibold">QA inspection controls</h3>
             <p className="text-sm">QA status: <strong>{workRequest.QA_InspectionStatus ?? "Pending"}</strong></p>
             <label className="block text-sm">QA_IssueDescription
@@ -861,6 +864,7 @@ export function PMWorkRequestPopup({
               <span className="rounded bg-green-100 px-2 py-1">Passed Inspected</span>
               <span className="rounded bg-red-100 px-2 py-1">PM WRs to be corrected</span>
             </div>
+            </>}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-left text-sm">
                 <thead className="bg-slate-50"><tr><th className="p-3">Timestamp</th><th className="p-3">Performed by</th><th className="p-3">Action</th><th className="p-3">Step reference</th><th className="p-3">Details</th></tr></thead>
