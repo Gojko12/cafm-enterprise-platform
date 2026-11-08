@@ -22,6 +22,7 @@ import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
 import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
 import { isOutsideShift } from "@/lib/craftperson-shifts";
 import { CraftpersonShiftWorkspace } from "@/components/modules/CraftpersonShiftWorkspace";
+import type { DisputeNavigation } from "@/components/modules/CraftpersonShiftWorkspace";
 import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
 import { getWRDisputes, mapWRDisputes } from "@/lib/disputes";
 import type { DisputeViewMode } from "@/lib/disputes";
@@ -85,6 +86,7 @@ function SchedulerContent() {
   }, [spotlight]);
   const changeTab = (next: typeof tab) => {
     const url = new URL(window.location.href);
+    ["focusWrId", "focusCraftpersonId", "focusDate", "focusStart", "disputeMode", "isolateWr"].forEach((key) => url.searchParams.delete(key));
     if (next === "dispatch") url.searchParams.delete("tab"); else url.searchParams.set("tab", next);
     window.history.pushState(null, "", url);
     setTab(next);
@@ -155,12 +157,15 @@ function SchedulerContent() {
       setDate(calendarDate(new Date(year, month - 1 + direction, 1, 12)));
     } else setDate(addDays(date, direction * days));
   };
-  const locate = (wr: BaseWorkRequest, personId: string) => {
+  const locate = (wr: BaseWorkRequest, personId: string, focusDate?: string) => {
     const person = people.find((item) => item.id === personId);
     const interval = intervalFor(wr, personId);
     if (!person || !interval) { setShowChoices(null); setError("The scheduled craftsperson or assignment is no longer available."); return; }
     if (!CLASSICAL_TRADES.some((trade) => trade === person.Trade)) { setError("The craftsperson's trade has no calendar lane."); setShowChoices(null); return; }
-    const result = revealAssignment(wr, interval, person.Trade, { dates, weekends, firstHour, lastHour, people: selectedPeople, trades, buildings, availability, types });
+    const requestedDay = focusDate && /^\d{4}-\d{2}-\d{2}$/.test(focusDate) && interval.assignedStartDateTime < `${addDays(focusDate, 1)}T00:00` && interval.assignedEndDateTime > `${focusDate}T00:00` ? focusDate : interval.assignedStartDateTime.slice(0, 10);
+    const clipped = { ...interval, assignedStartDateTime: interval.assignedStartDateTime < `${requestedDay}T00:00` ? `${requestedDay}T00:00` : interval.assignedStartDateTime,
+      assignedEndDateTime: interval.assignedEndDateTime > `${addDays(requestedDay, 1)}T00:00` ? `${addDays(requestedDay, 1)}T00:00` : interval.assignedEndDateTime };
+    const result = revealAssignment(wr, clipped, person.Trade, { dates, weekends, firstHour, lastHour, people: selectedPeople, trades, buildings, availability, types });
     setWeekends(result.weekends);
     setFirstHour(result.firstHour);
     setLastHour(result.lastHour);
@@ -170,10 +175,19 @@ function SchedulerContent() {
     setAvailability("All");
     setTypes(result.types);
     setDate(result.day);
+    if (focusDate) setView("day");
     setShowChoices(null);
     setError("");
-    setNotice(result.changed.length ? `Calendar adjusted: ${result.changed.join(", ")}.` : "Showing selected assignment.");
+    setNotice(focusDate && focusDate !== requestedDay ? "The assignment has moved; showing its current scheduled time." : result.changed.length ? `Calendar adjusted: ${result.changed.join(", ")}.` : "Showing selected assignment.");
     setSpotlight({ id: wr.WR_ID, person: personId, day: result.day, trade: person.Trade, token: Date.now() });
+  };
+  const navigateDispute = (target: DisputeNavigation) => {
+    const wr = siteRequests.find((item) => item.WR_ID === target.wrId);
+    if (!wr || !intervalFor(wr, target.craftpersonId)) { setError("The disputed assignment is no longer available."); return; }
+    changeTab("dispatch");
+    setIsolateWrId(null);
+    setDisputeMode("highlight");
+    locate(wr, target.craftpersonId, target.date);
   };
   const showRequest = (id: string) => {
     const wr = siteRequests.find((item) => item.WR_ID === id);
@@ -199,7 +213,9 @@ function SchedulerContent() {
     }
     focusHandled.current = key;
     setIsolateWrId(searchParams.get("isolateWr") === "true" ? id : null);
-    locate(wr, person);
+    if (searchParams.get("disputeMode") === "highlight") setDisputeMode("highlight");
+    setTab("dispatch");
+    locate(wr, person, searchParams.get("focusDate") ?? undefined);
     if (searchParams.get("focusStart") && searchParams.get("focusStart") !== intervalFor(wr, person)?.assignedStartDateTime) setNotice("The assignment has moved; showing its current scheduled time.");
   });
   const removeAssignment = (id: string, person: string) => {
@@ -238,7 +254,7 @@ function SchedulerContent() {
       <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
-    {tab === "availability" && <CraftpersonShiftWorkspace key={activeSiteId} />}
+    {tab === "availability" && <CraftpersonShiftWorkspace key={activeSiteId} onNavigateToDisputeInCalendar={navigateDispute} />}
     {showChoices && (() => { const wr = siteRequests.find((item) => item.WR_ID === showChoices); return wr ? <AssignmentLocatorDialog request={wr} people={people} onSelect={(id) => locate(wr, id)} onClose={() => setShowChoices(null)} /> : null; })()}
     {quickAssign && <div role="dialog" aria-modal="true" aria-label="Assign work request" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: quickAssign, person: quickPerson, date: quickDate }); }}><h2 className="font-bold">Assign {quickAssign}</h2><select required className="block border p-1" value={quickPerson} onChange={(event) => setQuickPerson(event.target.value)}><option value="">Select craftsperson</option>{people.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}</select><input required type="date" className="block border p-1" value={quickDate} onChange={(event) => setQuickDate(event.target.value)} /><button className={button}>Assign</button> <button type="button" className={button} onClick={() => setQuickAssign(null)}>Cancel</button></form></div>}
     {editTime && <div role="dialog" aria-modal="true" aria-label="Edit assignment time" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: editTime.id, person: editTime.person, from: editTime.person, date: editTime.start.slice(0, 10), start: editTime.start, end: editTime.end }); }}><h2 className="font-bold">Edit {editTime.id}</h2><label className="block">Start <input required type="datetime-local" value={editTime.start} onChange={(event) => setEditTime({ ...editTime, start: event.target.value })} /></label><label className="block">End <input required type="datetime-local" value={editTime.end} onChange={(event) => setEditTime({ ...editTime, end: event.target.value })} /></label><button className={button}>Save</button> <button type="button" className={button} title="Remove from calendar (Unschedule)" onClick={() => removeAssignment(editTime.id, editTime.person)}>✕ Unschedule</button> <button type="button" className={button} onClick={() => setEditTime(null)}>Cancel</button></form></div>}
