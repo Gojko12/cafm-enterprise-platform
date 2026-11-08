@@ -30,7 +30,7 @@ describe("work request source panel", () => {
   it("persists view and field selections and permits list row drag and opening", () => {
     const onOpen = vi.fn();
     const view = render(<WRSourcePanel {...props} onOpen={onOpen} />);
-    fireEvent.click(screen.getByText("Fields ⚙️"));
+    fireEvent.click(screen.getByText("Columns / Fields ⚙️"));
     fireEvent.click(screen.getByLabelText("Margin Date"));
     expect(screen.getAllByText(/Margin Date:/).length).toBe(2);
     fireEvent.click(screen.getByRole("button", { name: "List View" }));
@@ -47,6 +47,23 @@ describe("work request source panel", () => {
     render(<WRSourcePanel {...props} />);
     expect(screen.getByRole("button", { name: "List View" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("columnheader", { name: /Margin Date/ })).toBeTruthy();
+  });
+  it("persists field order and widths across card and list views", () => {
+    const view = render(<WRSourcePanel {...props} />);
+    fireEvent.click(screen.getByText("Columns / Fields ⚙️"));
+    fireEvent.click(screen.getByRole("button", { name: "Move WR Type (PM/FJ/LJ) left" }));
+    const firstCard = screen.getByText("Pump").closest("article")!;
+    expect(firstCard.querySelector("p")?.textContent).toContain("WR Type");
+    fireEvent.click(screen.getByRole("button", { name: "List View" }));
+    fireEvent.mouseDown(screen.getByRole("separator", { name: "Resize WR ID" }), { clientX: 100 });
+    fireEvent.mouseMove(window, { clientX: 160 });
+    fireEvent.mouseUp(window);
+    expect(screen.getByRole("columnheader", { name: /WR ID/ }).closest("table")?.querySelectorAll("col")[1].style.width).toBe("204px");
+    view.unmount();
+    render(<WRSourcePanel {...props} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("columnheader")[0].textContent).toContain("WR Type");
+    expect(table.querySelectorAll("col")[1].style.width).toBe("204px");
   });
   it("filters by due date and ignores out-of-range and missing due dates", () => {
     render(<WRSourcePanel {...props} requests={[{ ...pm, DueDate: "2026-11-10" }, { ...lj, DueDate: undefined }]} />);

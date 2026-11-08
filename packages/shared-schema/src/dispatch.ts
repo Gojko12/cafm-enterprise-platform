@@ -5,12 +5,20 @@ export const CalendarDateSchema = z.iso.date();
 export const LocalTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const LocalDateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/)
   .refine((value) => CalendarDateSchema.safeParse(value.slice(0, 10)).success, "Invalid local date and time");
-export const LocationFreezeSchema = z.object({
+export const LocationFreezeSchema = z.preprocess((value) => {
+  if (value && typeof value === "object" && "buildingIds" in value && Array.isArray(value.buildingIds) && !("buildingId" in value)) {
+    return { ...value, buildingId: value.buildingIds[0] };
+  }
+  return value;
+}, z.object({
   id: z.string().min(1),
   siteId: SiteIdSchema,
   buildingId: z.string().min(1),
   floorId: z.string().min(1).optional(),
   roomId: z.string().min(1).optional(),
+  buildingIds: z.array(z.string().min(1)).min(1).optional(),
+  floorIds: z.array(z.string().min(1)).optional(),
+  roomIds: z.array(z.string().min(1)).optional(),
   title: z.string().trim().min(1),
   description: z.string().trim().min(1),
   responsiblePerson: z.string().trim().min(1),
@@ -21,8 +29,10 @@ export const LocationFreezeSchema = z.object({
   allowLJ: z.boolean(),
 }).superRefine((entry, context) => {
   if (entry.roomId && !entry.floorId) context.addIssue({ code: "custom", path: ["roomId"], message: "A room requires a floor." });
+  if (entry.buildingIds && !entry.buildingIds.includes(entry.buildingId)) context.addIssue({ code: "custom", path: ["buildingId"], message: "The legacy building must be included in the selected buildings." });
+  if (entry.roomIds?.length && !entry.floorIds?.length) context.addIssue({ code: "custom", path: ["floorIds"], message: "Selected rooms require their parent floors." });
   if (entry.endDateTime <= entry.startDateTime) context.addIssue({ code: "custom", path: ["endDateTime"], message: "End must be after start." });
-});
+}));
 export type LocationFreeze = z.infer<typeof LocationFreezeSchema>;
 export const CraftpersonAbsenceSchema = z.object({
   id: z.string().min(1),

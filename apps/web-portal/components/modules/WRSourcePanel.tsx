@@ -9,6 +9,7 @@ import { tradeColor } from "../../lib/trade-colors";
 import { intervalFor } from "../../lib/dispatch";
 import { MultiSelectFilter } from "../common/MultiSelectFilter";
 import { startRequestDrag } from "../../lib/drag-preview";
+import { ResizeHandle } from "../common/TableColumns";
 
 type Person = DemoData["craftspeople"][number];
 const fields = [
@@ -31,6 +32,8 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
   const [expanded, setExpanded] = useState(true);
   const [mode, setMode] = useState<"card" | "list">("card");
   const [shown, setShown] = useState<Field[]>(defaults);
+  const [order, setOrder] = useState<Field[]>(fields.map(([id]) => id));
+  const [widths, setWidths] = useState<Partial<Record<Field, number>>>({});
   const [loaded, setLoaded] = useState(false);
   const [storageError, setStorageError] = useState("");
   const [types, setTypes] = useState<string[]>(["PM", "FJ", "LJ"]);
@@ -52,15 +55,24 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
         if (!value || typeof value !== "object" || !("mode" in value) || (value.mode !== "card" && value.mode !== "list") || !("fields" in value) || !Array.isArray(value.fields) || !value.fields.every((item: unknown) => fields.some(([id]) => id === item))) throw new Error("Invalid saved preferences");
         setMode(value.mode);
         setShown(value.fields);
+        const valid = (item: unknown): item is Field => fields.some(([id]) => id === item);
+        if ("order" in value && Array.isArray(value.order) && value.order.every(valid)) setOrder([...new Set([...value.order, ...fields.map(([id]) => id)])]);
+        if ("widths" in value && value.widths && typeof value.widths === "object") setWidths(Object.fromEntries(Object.entries(value.widths).filter(([id, width]) => valid(id) && typeof width === "number" && Number.isFinite(width) && width >= 60 && width <= 800)));
       }
     } catch { setStorageError("Could not load source panel preferences. Defaults are being used."); }
     setLoaded(true);
   }, []);
   useEffect(() => {
     if (!loaded) return;
-    try { localStorage.setItem(preferenceKey, JSON.stringify({ mode, fields: shown })); }
+    try { localStorage.setItem(preferenceKey, JSON.stringify({ mode, fields: shown, order, widths })); }
     catch { setStorageError("Could not save source panel preferences."); }
-  }, [loaded, mode, shown]);
+  }, [loaded, mode, shown, order, widths]);
+  const ordered = order.map((id) => fields.find(([field]) => field === id)!).filter(([id]) => shown.includes(id));
+  const moveField = (id: Field, direction: number) => setOrder((current) => {
+    const next = [...current], index = next.indexOf(id), target = index + direction;
+    if (index >= 0 && target >= 0 && target < next.length) [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
   const values = (wr: BaseWorkRequest): Record<Field, string> => ({
     id: wr.WR_ID, type: wr.WR_Type, description: wr.Description, trade: wr.TradeName ?? "",
     status: `${wr.Percentage}% ${wr.WorkRequestStatus} / ${wr.WorkRequestSubstatus}`,
@@ -85,7 +97,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
     <button className={button} onClick={() => setExpanded(!expanded)}>{expanded ? "▶ Pool" : "◀"}</button>
     {expanded && <div className="space-y-2">
       <div className="flex flex-wrap gap-1"><button className={button} aria-pressed={mode === "card"} onClick={() => setMode("card")}>Card View</button><button className={button} aria-pressed={mode === "list"} onClick={() => setMode("list")}>List View</button>
-        <details className="relative"><summary className={`${button} cursor-pointer`}>Fields ⚙️</summary><div className="absolute right-0 z-30 max-h-80 w-60 overflow-auto rounded border bg-white p-2 shadow-lg">{fields.map(([id, label]) => <label key={id} className="block"><input type="checkbox" checked={shown.includes(id)} onChange={(event) => toggle(setShown, id, event.target.checked)} /> {label}</label>)}</div></details>
+        <details className="relative"><summary className={`${button} cursor-pointer`}>Columns / Fields ⚙️</summary><div className="absolute right-0 z-30 max-h-80 w-64 overflow-auto rounded border bg-white p-2 shadow-lg">{order.map((id, index) => { const label = fields.find(([field]) => field === id)![1]; return <div key={id} className="flex items-center gap-1"><label className="flex-1"><input type="checkbox" checked={shown.includes(id)} onChange={(event) => toggle(setShown, id, event.target.checked)} /> {label}</label><button type="button" aria-label={`Move ${label} left`} disabled={index === 0} onClick={() => moveField(id, -1)}>↑</button><button type="button" aria-label={`Move ${label} right`} disabled={index === order.length - 1} onClick={() => moveField(id, 1)}>↓</button></div>; })}</div></details>
       </div>
       {storageError && <p role="alert" className="text-red-700">{storageError}</p>}
       <details open><summary className="cursor-pointer font-bold">Filter</summary>
@@ -101,11 +113,11 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
       </details>
       <div className="max-h-[65vh] overflow-auto">
         {mode === "card" ? rows.map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)}`}>
-          {fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <p key={id} className="truncate" title={`${label}: ${values(wr)[id]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
+          {ordered.map(([id, label]) => <p key={id} className="truncate" title={`${label}: ${values(wr)[id]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
           {getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄ Freeze Active at Location</span>}
           <div><button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button> <button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button> {wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</div>
-        </article>) : <table className="w-full table-fixed text-left" style={{ minWidth: `${shown.length * 144 + 230}px` }}><thead><tr>{fields.filter(([id]) => shown.includes(id)).map(([id, label]) => <th key={id} className="w-36"><button className="truncate" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button></th>)}<th className="w-56">Actions</th></tr></thead><tbody>
-          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{fields.filter(([id]) => shown.includes(id)).map(([id]) => <td key={id} className="truncate p-1" title={values(wr)[id]}>{cell(wr, id)}</td>)}<td>{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
+        </article>) : <table className="table-fixed text-left" style={{ width: ordered.reduce((total, [id]) => total + (widths[id] ?? 144), 230) }}><colgroup>{ordered.map(([id]) => <col key={id} style={{ width: widths[id] ?? 144 }} />)}<col style={{ width: 230 }} /></colgroup><thead><tr>{ordered.map(([id, label]) => <th key={id} className="relative"><div className="flex min-w-0"><button className="min-w-0 flex-1 truncate text-left" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button><button type="button" aria-label={`Move ${label} left in header`} onClick={() => moveField(id, -1)}>‹</button><button type="button" aria-label={`Move ${label} right in header`} onClick={() => moveField(id, 1)}>›</button></div><ResizeHandle label={label} width={widths[id] ?? 144} onResize={(width) => setWidths((current) => ({ ...current, [id]: width }))} /></th>)}<th>Actions</th></tr></thead><tbody>
+          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{ordered.map(([id]) => <td key={id} className="overflow-hidden p-1" title={values(wr)[id]}><div className="truncate whitespace-nowrap">{cell(wr, id)}</div></td>)}<td className="whitespace-nowrap">{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
         </tbody></table>}
         {!rows.length && <p className="p-2">No matching work requests.</p>}
       </div>

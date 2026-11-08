@@ -716,4 +716,11 @@ Include a toggle in the `Actions` header:
 
 - PM, FJ and LJ history panels start at 190 pixels and can be resized using the top drag handle or keyboard, or expanded to 75% of the popup height and restored. A comment composer is available at the top of each history panel on every tab. Activity, checklist history, and equipment comments are displayed newest first by timestamp, including prior comment versions.
 - The dispatch calendar includes a sticky Location Freezes band with hour-clipped bars for existing single-location freezes at the active site. Hovering, focusing or selecting a bar highlights affected scheduled assignments; selection shows details and allowed work-request types.
-- Multi-location freeze storage, editing and overlap evaluation are not implemented. The requested craftsperson overview/detail workspace, shift presets, roster, overnight capacity and audit package also remain unimplemented; the seed version has not been bumped.
+- Multi-location freezes are supported as described in Section 30. The requested craftsperson overview/detail workspace, shift presets, roster, overnight capacity and audit package remain unimplemented; the seed version has not been bumped.
+
+## 30. Multi-location Freezes and Pool Columns (partial)
+
+- Freeze records may specify `buildingIds`, `floorIds`, and `roomIds`; legacy single-location records retain their original hierarchical matching and can be edited without changing their scope. The location pickers allow multi-selection, parent inclusion, top-down filtering and cascading removal. Multi-location freezes match any listed building ID, floor name or room code at the same site, as requested. Floor names and room codes are not globally unique in the location hierarchy, and including parent buildings makes the freeze apply to those whole buildings; the editor warns about this broad scope.
+- The calendar freeze band and location warning surfaces display the selected locations. The state API validates selected locations within the site before accepting updates.
+- The WR pool supports persistent field visibility, order and list-column widths, shared between card and list views. List headers offer ordering, sorting and resize controls.
+- The unified craftsperson shift workspace and its date-specific/overnight scheduling behavior have not been implemented. Existing scheduler and SmartPM workforce views remain in place.

@@ -30,4 +30,15 @@ describe("location freeze conflicts", () => {
     expect(getCurrentLocationFreezes(unassigned, [freeze], "2026-11-09T10:00")).toHaveLength(0);
     expect(getCurrentLocationFreezes(unassigned, [{ ...freeze, floorId: "other" }], "2026-11-09T09:00")).toHaveLength(0);
   });
+  it("matches any selected multi-location value while preserving legacy hierarchy", () => {
+    const multiple = { ...freeze, buildingIds: [freeze.buildingId, "another-building"], floorIds: ["other-floor"], roomIds: ["other-room"] };
+    expect(LocationFreezeSchema.safeParse(multiple).success).toBe(true);
+    expect(getActiveFreezeConflictsForWR({ ...wr, bl_id: "another-building" }, [multiple])).toHaveLength(1);
+    expect(getActiveFreezeConflictsForWR({ ...wr, bl_id: "third", LevelName: "other-floor" }, [multiple])).toHaveLength(1);
+    expect(getActiveFreezeConflictsForWR({ ...wr, bl_id: "third", LevelName: "third", RoomCode: "other-room" }, [multiple])).toHaveLength(1);
+    expect(getActiveFreezeConflictsForWR({ ...wr, bl_id: "third", LevelName: "third", RoomCode: "third" }, [multiple])).toHaveLength(0);
+    expect(LocationFreezeSchema.safeParse({ ...multiple, buildingId: "third" }).success).toBe(false);
+    const { buildingId: _legacy, ...arrayOnly } = multiple;
+    expect(LocationFreezeSchema.parse(arrayOnly).buildingId).toBe(freeze.buildingId);
+  });
 });

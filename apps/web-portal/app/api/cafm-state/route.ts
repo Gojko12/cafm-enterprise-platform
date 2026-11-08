@@ -73,9 +73,12 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;
   if (state.locationFreezes?.some((item) => item.siteId !== site ||
-    !state.buildings.some((building) => building.bl_id === item.buildingId) ||
-    (item.floorId && !state.floors.some((floor) => floor.bl_id === item.buildingId && floor.LevelName === item.floorId)) ||
-    (item.roomId && !state.rooms.some((room) => room.bl_id === item.buildingId && room.LevelName === item.floorId && room.RoomCode === item.roomId)))) return false;
+    (item.buildingIds ? item.buildingIds.some((id) => !state.buildings.some((building) => building.bl_id === id)) ||
+      (item.floorIds ?? []).some((id) => !state.floors.some((floor) => item.buildingIds!.includes(String(floor.bl_id)) && floor.LevelName === id)) ||
+      (item.roomIds ?? []).some((id) => !state.rooms.some((room) => item.buildingIds!.includes(String(room.bl_id)) && (item.floorIds ?? []).includes(String(room.LevelName)) && room.RoomCode === id)) :
+      !state.buildings.some((building) => building.bl_id === item.buildingId) ||
+      (item.floorId && !state.floors.some((floor) => floor.bl_id === item.buildingId && floor.LevelName === item.floorId)) ||
+      (item.roomId && !state.rooms.some((room) => room.bl_id === item.buildingId && room.LevelName === item.floorId && room.RoomCode === item.roomId))))) return false;
   if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return false;
   return true;
 }
