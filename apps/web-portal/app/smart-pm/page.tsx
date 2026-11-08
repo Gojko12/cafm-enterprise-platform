@@ -235,7 +235,7 @@ export default function SmartPMPage() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className={activeTab === "craftpeople" ? "w-full max-w-none px-4" : "max-w-7xl mx-auto"}>
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-4xl font-bold text-gray-900">SmartPM Engine</h1>

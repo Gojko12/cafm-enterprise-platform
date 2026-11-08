@@ -75,10 +75,11 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     for (let i = 0; i < 12; i++) {
       const trade = CLASSICAL_TRADES[i % CLASSICAL_TRADES.length];
       const shift = DEFAULT_SHIFTS[(["Early", "Standard", "Late", "Night"] as const)[i % 4]];
-      const tomorrow = addDays(calendarDate(new Date()), 1);
+      const today = calendarDate(new Date());
+      const tomorrow = addDays(today, 1);
       craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Gregor", "Tomaž", "Blaž", "Eva", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
         LastName: ["GOJKOŠEK", "Gojkošek", "Gojkošek", "Veselič", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i],
-        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, baseShiftType: shift.shiftType, shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, shiftOverrides: { [tomorrow]: DEFAULT_SHIFTS[(["Standard", "Late", "Night", "Early"] as const)[i % 4]] }, secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
+        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, baseShiftType: shift.shiftType, shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, shiftOverrides: { [tomorrow]: DEFAULT_SHIFTS[(["Late", "Early", "Night", "Early"] as const)[i % 4]], [addDays(today, 3)]: DEFAULT_SHIFTS[i % 2 ? "Early" : "Late"], [addDays(today, 8)]: DEFAULT_SHIFTS[i % 2 ? "Late" : "Early"] }, secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
     }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
@@ -212,6 +213,13 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         assignedEndDateTime: `2026-11-${String(9 + i).padStart(2, "0")}T${i === 0 ? "11:00" : "12:00"}`,
       }));
     });
+    const example = examples.find((wr) => wr.WR_Type === "PM" && wr.Percentage === 50);
+    if (example) {
+      const day = addDays(calendarDate(new Date()), 1);
+      example.CraftpersonAssignments = [{ craftpersonId: siteCraft[0].id, assignedStartDateTime: `${day}T08:00`, assignedEndDateTime: `${day}T11:00` }];
+      example.AssignedCraftpersonIds = [siteCraft[0].id];
+      example.StartDate_DateToPerform = day;
+    }
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };
 }

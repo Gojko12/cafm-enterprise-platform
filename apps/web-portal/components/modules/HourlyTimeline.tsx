@@ -128,20 +128,19 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
               const slot = start + Math.max(0, Math.min(lastHour - firstHour - 1, Math.floor((event.clientX - event.currentTarget.getBoundingClientRect().left) / HOUR_WIDTH))) * 60;
               onMove(wr.WR_ID, person.id, fromWallMinutes(slot), fromWallMinutes(slot + duration), from);
             }}><div className="relative" style={{ width, height: Math.max(56, 32 + entries.length * 28) }}>
-              <div className="absolute inset-0 bg-slate-100/80" title={`${shift.shiftType} ${shift.shiftStart}–${shift.shiftEnd}`} />
-              {segments.map((part, index) => <div key={index} className="pointer-events-none absolute inset-y-0 bg-white" style={{ left: (part.start - start) / 60 * HOUR_WIDTH, width: (part.end - part.start) / 60 * HOUR_WIDTH }} />)}
-              {Array.from({ length: lastHour - firstHour }, (_, index) => <div key={index} className="pointer-events-none absolute inset-y-0 border-l" style={{ left: index * HOUR_WIDTH, width: HOUR_WIDTH }} />)}
-              <span className="pointer-events-none absolute right-1 top-0 text-slate-600">{shift.shiftType} {shift.shiftStart}–{shift.shiftEnd}</span>
+              <div className="absolute inset-0 bg-slate-200/85" title={`${shift.shiftType} ${shift.shiftStart}–${shift.shiftEnd}`} />
+              {segments.map((part, index) => <div key={index} className="pointer-events-none absolute inset-y-0 border-t-2 border-t-emerald-400 bg-white" style={{ left: (part.start - start) / 60 * HOUR_WIDTH, width: (part.end - part.start) / 60 * HOUR_WIDTH }} />)}
+              {Array.from({ length: lastHour - firstHour }, (_, index) => <div key={index} className="pointer-events-none absolute inset-y-0 border-r border-slate-300/70" style={{ left: index * HOUR_WIDTH, width: HOUR_WIDTH }} />)}
               {cap.leave.map((leave) => {
                 const interval = absenceInterval(leave, day);
                 if (!interval) return null;
                 const left = Math.max(start, wallMinutes(interval[0])), right = Math.min(end, wallMinutes(interval[1]));
                 if (right <= left) return null;
                 const color = leave.absenceType === "Vacation" ? "bg-amber-100/90 text-amber-900" : leave.absenceType === "Training" ? "bg-indigo-100/90 text-indigo-900" : leave.absenceType === "SickLeave" ? "bg-rose-100/90 text-rose-900" : "bg-teal-100/90 text-teal-900";
-                return <div key={leave.id} className={`pointer-events-none absolute inset-y-0 overflow-hidden border ${color}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, ...(leave.absenceType === "Vacation" ? { backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 6px, rgba(180, 83, 9, 0.1) 6px, rgba(180, 83, 9, 0.1) 9px)" } : {}) }} title={leave.absenceType}>{leave.absenceType === "Vacation" ? "🏖" : leave.absenceType === "Training" ? "🎓" : leave.absenceType === "SickLeave" ? "🤒" : "●"} {leave.absenceType}</div>;
+                return <div key={leave.id} className={`pointer-events-none absolute inset-y-0 overflow-hidden border ${color}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, ...(leave.absenceType === "Vacation" ? { backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 6px, rgba(180, 83, 9, 0.1) 6px, rgba(180, 83, 9, 0.1) 9px)" } : {}) }} title={leave.absenceType} />;
               })}
               {spotlight?.person === person.id && spotlight.day === day && <div className="pointer-events-none absolute inset-0 bg-amber-200/40" />}
-              <div className="pointer-events-none absolute left-1 top-0">{cap.allocated.toFixed(1)} / {cap.available.toFixed(1)} h <span className="inline-block h-1 w-16 bg-slate-300"><span className={`block h-1 ${cap.allocated > cap.available ? "bg-red-600" : "bg-green-600"}`} style={{ width: `${cap.available ? Math.min(100, 100 * cap.allocated / cap.available) : cap.allocated ? 100 : 0}%` }} /></span></div>
+              <div className="pointer-events-none absolute inset-x-1 top-0 flex items-center justify-between gap-2 overflow-hidden whitespace-nowrap"><span>{cap.allocated.toFixed(1)} / {cap.available.toFixed(1)} h</span><span>{shift.shiftType} {shift.shiftStart}–{shift.shiftEnd}</span><span>{cap.leave.map((leave) => leave.absenceType).join(", ")}</span></div>
               {entries.map(({ wr, interval }, index) => {
                 if (!interval) return null;
                 const left = Math.max(start, wallMinutes(interval.assignedStartDateTime)), right = Math.min(end, wallMinutes(interval.assignedEndDateTime));
