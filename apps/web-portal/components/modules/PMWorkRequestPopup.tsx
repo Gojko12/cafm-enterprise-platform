@@ -10,6 +10,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { useCafmStore } from "@/lib/cafm-store";
 import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
+import { QAChecklistReview } from "@/components/modules/QAChecklistReview";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
@@ -99,7 +100,7 @@ export function PMWorkRequestPopup({
     ))
     .filter((item) => item !== undefined);
   const linkedFastJobs = data.workRequests.filter((item) =>
-    item.WR_Type === "FJ" &&
+    (item.WR_Type === "FJ" || item.WR_Type === "LJ") &&
     item.ParentPM_WR_ID === workRequest.WR_ID &&
     item.SiteId === workRequest.SiteId,
   );
@@ -800,8 +801,8 @@ export function PMWorkRequestPopup({
                   <td className="p-3">{job.JobID ?? job.WR_ID}</td><td className="p-3">{job.DueDate ?? "—"}</td>
                   <td className="p-3">{job.StartDate ?? "—"}</td>
                   <td className="space-x-2 p-3">
-                    <button type="button" onClick={() => onNavigate(job.WR_ID)} className="text-blue-700 underline">Open FJ</button>
-                    {!job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onEscalateToLJ(job)} className="text-orange-700 underline">Escalate to LJ</button>}
+                    <button type="button" onClick={() => onNavigate(job.WR_ID)} className="text-blue-700 underline">Open {job.WR_Type}</button>
+                    {job.WR_Type === "FJ" && !job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onEscalateToLJ(job)} className="text-orange-700 underline">Escalate to LJ</button>}
                     {job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onNavigate(job.EscalatedToLJ_WR_ID!)} className="text-orange-700 underline">Open LJ</button>}
                   </td>
                 </tr>)}
@@ -812,6 +813,7 @@ export function PMWorkRequestPopup({
           </section>}
 
           {activeTab === "AuditLog" && <section className="space-y-4 rounded border bg-white p-4">
+            <QAChecklistReview key={workRequest.WR_ID} wr={workRequest} />
             {(!workRequest.QA_AuditStatus || workRequest.QA_AuditStatus === "None") && <>
             <h3 className="font-semibold">QA inspection controls</h3>
             <p className="text-sm">QA status: <strong>{workRequest.QA_InspectionStatus ?? "Pending"}</strong></p>

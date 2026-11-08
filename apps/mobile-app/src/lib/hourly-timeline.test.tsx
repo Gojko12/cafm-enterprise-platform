@@ -19,6 +19,7 @@ describe("hourly dispatch timeline", () => {
     dates: ["2026-11-09"], people: [person], requests: [wr], absences: [], freezes: [],
     site: "SITE-01", firstHour: 6, lastHour: 20, visible: () => true,
     onMove: vi.fn(), onOpen: vi.fn(), onEdit: vi.fn(), onRemove: vi.fn(),
+    disputeMap: new Map(), disputeMode: "all" as const,
   };
   it("renders the clipped hours and previews a half-hour resize without committing until mouseup", () => {
     const onMove = vi.fn();

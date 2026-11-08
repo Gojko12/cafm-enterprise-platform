@@ -129,6 +129,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
             {field("Created date", workRequest.CreatedDate)}{field("Start date", workRequest.StartDate)}
             {field("Due date", workRequest.DueDate)}{field("Margin date", workRequest.MarginDate)}
             {field("Parent PM WR ID", workRequest.ParentPM_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.ParentPM_WR_ID!)}>{workRequest.ParentPM_WR_ID}</button> : "—")}
+            {workRequest.OriginatingWR_ID && field("Originating QA WR ID", <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingWR_ID!)}>{workRequest.OriginatingWR_ID}</button>)}
           </>)}
           {group("Work Location", <>{field("Room code", workRequest.RoomCode)}{field("Level name", workRequest.LevelName)}{field("bl id", workRequest.bl_id)}{field("Problem location", workRequest.ProblemLocation)}</>)}
           {group("Equipment", <>{field("Equipment code", workRequest.EquipmentCodes.join(", "))}{field("Local equipment code", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.LocalEquipmentCode).filter(Boolean).join(", "))}

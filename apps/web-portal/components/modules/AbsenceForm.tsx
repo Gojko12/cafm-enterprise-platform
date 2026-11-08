@@ -25,7 +25,8 @@ export function AbsenceForm({ people, initial, existing, site, date, onClose, on
     event.preventDefault();
     const hours = full ? 8 : (wallMinutes(`${start}T${endTime}`) - wallMinutes(`${start}T${startTime}`)) / 60;
     const parsed = validateAbsence({ id: existing?.id ?? crypto.randomUUID(), siteId: site, craftpersonId: person, absenceType: type, startDate: start, endDate: end, isFullDay: full, ...(!full ? { startTime, endTime } : {}), unavailableHoursPerDay: hours, status: existing?.status ?? "Approved", notes });
-    if (!parsed.success || !people.some((item) => item.id === person)) { setError(parsed.success ? "Select a craftsperson." : parsed.message); return; }
+    if (parsed.success === false) { setError(parsed.message); return; }
+    if (!people.some((item) => item.id === person)) { setError("Select a craftsperson."); return; }
     onSave(parsed.data);
   }}><h2 className="font-bold">{existing ? "Edit absence" : "Add absence / vacation"}</h2>{error && <p role="alert" className="text-red-700">{error}</p>}
     <label className="block">Craftsperson <select className="block w-full border p-1" value={person} onChange={(e) => setPerson(e.target.value)}><option value="">Select</option>{people.map((item) => <option value={item.id} key={item.id}>{item.Name} {item.LastName} · {item.Trade}</option>)}</select></label>

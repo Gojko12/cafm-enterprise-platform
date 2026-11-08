@@ -12,11 +12,12 @@ export function QAAuditPanel({ wr }: { wr: BaseWorkRequest }) {
   const [correction, setCorrection] = useState(wr.QA_CorrectionComment ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [photos, setPhotos] = useState(wr.QA_AuditPhotos ?? []);
-  useEffect(() => { setIssue(wr.QA_IssueDescription ?? ""); setCorrection(wr.QA_CorrectionComment ?? ""); setPhotos(wr.QA_AuditPhotos ?? []); }, [wr.WR_ID, wr.QA_IssueDescription, wr.QA_CorrectionComment, wr.QA_AuditPhotos]);
+  const [spawn, setSpawn] = useState(false);
+  const [followUpType, setFollowUpType] = useState<"FJ" | "LJ">("FJ");
+  useEffect(() => { setIssue(wr.QA_IssueDescription ?? ""); setCorrection(wr.QA_CorrectionComment ?? ""); }, [wr.WR_ID, wr.QA_IssueDescription, wr.QA_CorrectionComment]);
   const submit = async (verdict: "Pass" | "Fail" | "SubmitCorrection" | "VerifyClose") => {
     setBusy(true); setError("");
-    try { await actions.submitQAVerdict(wr.WR_ID, verdict, { issue, correction, photos }); }
+    try { await actions.submitQAVerdict(wr.WR_ID, verdict, { issue, correction, photos: wr.QA_AuditPhotos, followUpType: verdict === "Fail" && spawn ? followUpType : undefined }); }
     catch (problem) { setError(problem instanceof Error ? problem.message : "Could not save QA verdict."); }
     finally { setBusy(false); }
   };
@@ -27,17 +28,19 @@ export function QAAuditPanel({ wr }: { wr: BaseWorkRequest }) {
     {error && <p role="alert" className="text-red-700">{error}</p>}
     <label className="block">Issue<textarea className="block w-full border p-1" value={issue} onChange={(e) => setIssue(e.target.value)} /></label>
     <label className="block">Correction<textarea className="block w-full border p-1" value={correction} onChange={(e) => setCorrection(e.target.value)} /></label>
-    <div>{photos.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="mr-2 underline">{photo.name}</a>)}</div>
-    {status === "SelectedForAudit" && <label>Attach QA photo (saved with verdict)<input type="file" accept="image/*" onChange={(event) => {
+    <div>{(wr.QA_AuditPhotos ?? []).map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="mr-2 underline">{photo.name}</a>)}</div>
+    {status !== "None" && <label>+ Add QA Photo<input type="file" accept="image/*" disabled={busy} onChange={(event) => {
       const file = event.target.files?.[0];
       if (!file) return;
       if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Choose an image no larger than 2 MB."); return; }
       const reader = new FileReader();
-      reader.onerror = () => setError("Could not read the selected photo.");
-      reader.onload = () => { const url = reader.result; if (typeof url === "string") setPhotos((old) => [...old, { id: crypto.randomUUID(), name: file.name, url, uploadedBy: activePerson, uploadedAt: new Date().toISOString() }]); };
+      setBusy(true); setError("");
+      reader.onerror = () => { setBusy(false); setError("Could not read the selected photo."); };
+      reader.onload = () => { const url = reader.result; if (typeof url !== "string") { setBusy(false); setError("Could not read the selected photo."); return; } void actions.addAuditPhoto(wr.WR_ID, { id: crypto.randomUUID(), name: file.name, url, uploadedBy: activePerson, uploadedAt: new Date().toISOString() }).catch((problem: unknown) => setError(problem instanceof Error ? problem.message : "Could not save QA photo.")).finally(() => setBusy(false)); };
       reader.readAsDataURL(file);
       event.target.value = "";
     }} /></label>}
+    {status === "SelectedForAudit" && <div><label><input type="checkbox" checked={spawn} onChange={(e) => setSpawn(e.target.checked)} /> Spawn Corrective Follow-Up FJ / LJ</label>{spawn && <select aria-label="Corrective follow-up type" value={followUpType} onChange={(e) => setFollowUpType(e.target.value === "LJ" ? "LJ" : "FJ")}><option value="FJ">FJ (&lt; 750 EUR)</option><option value="LJ">LJ (≥ 750 EUR)</option></select>}</div>}
     <div className="flex flex-wrap gap-2">{status === "SelectedForAudit" && <><button disabled={busy} onClick={() => void submit("Pass")}>✓ Pass QA Inspection</button><button disabled={busy} onClick={() => void submit("Fail")}>⚠ Log QA Issue / Fail</button></>}{status === "QA_Failed_ActionRequired" && <button disabled={busy} onClick={() => void submit("SubmitCorrection")}>Submit Correction</button>}{status === "QA_Corrected" && <button disabled={busy} onClick={() => void submit("VerifyClose")}>✓ Verify &amp; Close Audit</button>}</div>
   </section>;
 }

@@ -392,6 +392,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
             {field("Created Date", workRequest.CreatedDate)}{field("Due Date", workRequest.DueDate)}{field("Margin Date", workRequest.MarginDate)}
             {field("Originating FJ WR ID", workRequest.OriginatingFJ_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingFJ_WR_ID!)}>{workRequest.OriginatingFJ_WR_ID}</button> : "—")}
             {field("Parent PM WR ID", workRequest.ParentPM_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.ParentPM_WR_ID!)}>{workRequest.ParentPM_WR_ID}</button> : "—")}
+            {workRequest.OriginatingWR_ID && field("Originating QA WR ID", <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingWR_ID!)}>{workRequest.OriginatingWR_ID}</button>)}
           </>)}
           {group("Work Location & Equipment", <>{field("bl id", workRequest.bl_id)}{field("Level name", workRequest.LevelName)}{field("Room code", workRequest.RoomCode)}{field("Problem location", workRequest.ProblemLocation)}{field("Equipment", workRequest.EquipmentCodes.join(", "))}</>)}
           {group("Assigned Trade & ESA Roles", <>{roles.map((key) => <label key={key} className="text-sm">{ROLE_LABEL[key]} ({key})

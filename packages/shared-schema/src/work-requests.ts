@@ -153,6 +153,7 @@ export const BaseWorkRequestSchema = z.object({
   CostType: CostTypeSchema.optional(),
   ActualCostEur: z.number().nonnegative().optional(),
   ParentPM_WR_ID: z.string().min(1).optional(),
+  OriginatingWR_ID: z.string().min(1).optional(),
   OriginatingFJ_WR_ID: z.string().min(1).optional(),
   EscalatedToLJ_WR_ID: z.string().min(1).optional(),
   ProcessTrack: z.enum(["RFQ", "RFW"]).optional(),

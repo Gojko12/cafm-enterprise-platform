@@ -1,14 +1,16 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
 import { MultiSelectFilter } from "@/components/common/MultiSelectFilter";
 import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
+import { QAChecklistReview } from "@/components/modules/QAChecklistReview";
+import { QAAnalytics } from "@/components/modules/QAAnalytics";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useQAActions } from "@/lib/use-qa-actions";
-import { isQACompleted, qaDate, qaMatches, qaStatus } from "@/lib/qa-audits";
+import { isQACompleted, qaMatches, qaStatus } from "@/lib/qa-audits";
 import { addDays, calendarDate } from "@/lib/dispatch";
 
 export default function TechnicalAuditsPage() {
@@ -28,6 +30,7 @@ export default function TechnicalAuditsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { const focus = new URLSearchParams(window.location.search).get("focusWrId"); if (focus) { setId(focus); setTab("queue"); } }, []);
   const today = calendarDate(new Date());
   const start = period === "week" ? addDays(today, -((new Date(`${today}T12:00:00`).getDay() + 6) % 7)) : period === "month" ? `${today.slice(0, 7)}-01` : period === "custom" ? from : "";
   const end = period === "custom" ? to : period === "all" ? "" : today;
@@ -64,6 +67,6 @@ export default function TechnicalAuditsPage() {
     {tab === "queue" && <div className="flex flex-wrap gap-2"><button disabled={busy} className="rounded bg-blue-700 p-2 text-white" onClick={() => void run(() => actions.autoSelect5PercentQAAudits({ dateFrom: start || undefined, dateTo: end || undefined, wrTypes: types === null ? undefined : types.filter((type): type is "PM" | "FJ" | "LJ" => type === "PM" || type === "FJ" || type === "LJ"), buildingIds: buildings ?? undefined, trades: trades ?? undefined }), "Random selection saved.")}>🎲 Auto-Select 5% Random WRs</button><MultiSelectFilter label="WR Types" value={types} onChange={setTypes} options={["PM", "FJ", "LJ"].map((item) => ({ value: item, label: item }))} /><MultiSelectFilter label="Buildings" value={buildings} onChange={setBuildings} options={data.buildings.map((item) => ({ value: item.bl_id, label: item.bl_id }))} /><MultiSelectFilter label="Trades" value={trades} onChange={setTrades} options={[...new Set(requests.map((wr) => wr.TradeName).filter((value): value is string => !!value))].map((item) => ({ value: item, label: item }))} /></div>}
     {tab === "pool" && <button disabled={busy || !selected.length} onClick={() => void run(() => actions.manualSelectForQAAudit(selected, "ManualInspectorPick").then(() => setSelected([])), "Selected for audit.")}>+ Add selected to QA Audit</button>}
     {tab === "qr" && <label>Equipment code <select value={equipment} onChange={(e) => setEquipment(e.target.value)}><option value="">Select equipment</option>{data.equipment.map((item) => <option key={item.EquipmentCode} value={item.EquipmentCode}>{item.EquipmentCode} · {item.EquipmentName}</option>)}</select></label>}
-    {tab === "report" ? <div className="space-y-2"><h2 className="font-bold">Monthly sampling compliance</h2>{[...new Set(completed.map((wr) => qaDate(wr).slice(0, 7)))].sort().map((month) => <div key={month}>{month}: {(["PM", "FJ", "LJ"] as const).map((type) => { const group = completed.filter((wr) => wr.WR_Type === type && qaDate(wr).startsWith(month)); const q = quota(group); return <span key={type} className={q.selected < q.target ? "text-red-700" : "text-green-700"}> {type} {q.selected}/{q.target} ({group.length} completed) </span>; })}</div>)}<h2 className="font-bold">Open QA issues</h2>{requests.filter((wr) => qaStatus(wr) === "QA_Failed_ActionRequired" && !wr.QA_CorrectionComment).map((wr) => <p key={wr.WR_ID}><button className="underline" onClick={() => { setTab("queue"); setId(wr.WR_ID); }}>{wr.WR_ID} · {wr.QA_IssueDescription}</button></p>)}</div> : <div className="flex gap-2"><div className="min-w-0 flex-1"><OverviewTable preferenceKey="qa-audits" rows={rows} columns={columns} rowKey={(wr) => wr.WR_ID} onRow={(wr) => setId(wr.WR_ID)} /></div>{active && <aside className="w-1/2 space-y-3 overflow-auto rounded border bg-white p-3"><button onClick={() => setId("")}>✕ Close</button><h2 className="font-bold">{active.WR_ID} · {active.Description}</h2><p>Craftspeople: {active.AssignedCraftpersonIds.join(", ")} · Actual: {active.TotalTimeMinutes ?? 0} min · Estimated: {active.ExpectedHours ?? 0} h</p><p>Parts: {(active.SpareParts ?? []).map((part) => `${part.description} (${part.quantity})`).join(", ") || "—"}</p><h3 className="font-bold">Checklist</h3>{(active.ChecklistSteps ?? []).map((step) => <p key={step.StepId}>{step.Title}: {String(active.ChecklistResults?.find((answer) => answer.stepId === step.StepId)?.value ?? "—")}</p>)}{tab === "qr" && qaStatus(active) === "None" && <button disabled={busy} onClick={() => void run(() => actions.manualSelectForQAAudit([active.WR_ID], "QRScanOnSite"), "Selected for QR audit.")}>Inspect This WR (QR Spot-Check)</button>}<QAAuditPanel wr={active} /><h3>History</h3>{[...(active.Activity ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => <p key={item.id}>{item.createdAt} · {item.text}</p>)}</aside>}</div>}
+    {tab === "report" ? <QAAnalytics onResolve={(wrId) => { setTab("queue"); setId(wrId); }} /> : <div className="flex gap-2"><div className="min-w-0 flex-1"><OverviewTable preferenceKey="qa-audits" rows={rows} columns={columns} rowKey={(wr) => wr.WR_ID} onRow={(wr) => setId(wr.WR_ID)} /></div>{active && <aside className="w-1/2 space-y-3 overflow-auto rounded border bg-white p-3"><button onClick={() => setId("")}>✕ Close</button><h2 className="font-bold">{active.WR_ID} · {active.Description}</h2><p>Craftspeople: {active.AssignedCraftpersonIds.join(", ")} · Actual: {active.TotalTimeMinutes ?? 0} min · Estimated: {active.ExpectedHours ?? 0} h</p><p>Parts: {(active.SpareParts ?? []).map((part) => `${part.description} (${part.quantity})`).join(", ") || "—"}</p><QAChecklistReview key={active.WR_ID} wr={active} />{tab === "qr" && qaStatus(active) === "None" && <button disabled={busy} onClick={() => void run(() => actions.manualSelectForQAAudit([active.WR_ID], "QRScanOnSite"), "Selected for QR audit.")}>Inspect This WR (QR Spot-Check)</button>}<QAAuditPanel wr={active} /><h3>History</h3>{[...(active.Activity ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => <p key={item.id}>{item.createdAt} · {item.text}</p>)}</aside>}</div>}
   </main>;
 }

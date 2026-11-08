@@ -151,6 +151,10 @@ export async function POST(request: Request) {
     if (parsed.data.revision !== (current?.revision ?? 0)) {
       return reply(request, { error: "State has changed; reload and resolve the conflict.", revision: current?.revision ?? 0 }, 409);
     }
+    const existing = new Set((current?.state.workRequests ?? []).map((wr) => wr.WR_ID));
+    const otherIds = new Set(Object.entries(database.sites).filter(([id]) => id !== site).flatMap(([, envelope]) => envelope.state.workRequests.map((wr) => wr.WR_ID)));
+    const duplicate = parsed.data.state.workRequests.find((wr) => typeof wr.OriginatingWR_ID === "string" && !existing.has(wr.WR_ID) && otherIds.has(wr.WR_ID));
+    if (duplicate) return reply(request, { error: `Follow-up work request ID ${String(duplicate.WR_ID)} is already in use at another site.` }, 409);
     const next = { revision: (current?.revision ?? 0) + 1, state: parsed.data.state };
     database.sites[site] = next;
     temporary = path.join(directory, `cafm-db-${randomUUID()}.tmp`);

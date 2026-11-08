@@ -724,3 +724,9 @@ Include a toggle in the `Actions` header:
 - The calendar freeze band and location warning surfaces display the selected locations. The state API validates selected locations within the site before accepting updates.
 - The WR pool supports persistent field visibility, order and list-column widths, shared between card and list views. List headers offer ordering, sorting and resize controls.
 - The unified craftsperson shift workspace and its date-specific/overnight scheduling behavior have not been implemented. Existing scheduler and SmartPM workforce views remain in place.
+
+## 34. Technical Audit Follow-up and Reporting
+
+- A failed selected audit can atomically create an FJ or LJ corrective follow-up linked by `OriginatingWR_ID` (and `ParentPM_WR_ID` for a PM). It inherits the parent's site, location, equipment and trade, starts at the configured corrective 50% status, and is recorded in both requests' activity. The job type is an inspector selection, not an automatic cost estimate. QA follow-up numbers use site-partitioned six-digit sequences for the current year, with a cross-site collision check on disk commit.
+- Inspector checklist findings are appended to checklist history and WR activity; QA photos are saved with their own activity entry. Both require the revision-checked disk sync. Photos are stored inline in the state and subject to the state API's size limit.
+- The shared QA dashboard groups completed requests by month or week. Its compliance bars count completed inspections separately from pending selections; its pass-rate breakdown excludes pending selections and treats corrected or verified failures as rework. Older records without a recorded completion date use their last update or creation date, so historical period attribution is approximate. Open-issue age uses the recorded inspection timestamp.

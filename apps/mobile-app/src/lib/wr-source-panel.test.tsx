@@ -7,7 +7,7 @@ import { section20Seed } from "../../../web-portal/lib/section20-seed";
 const seed = section20Seed(["SITE-01"]);
 const pm = { ...seed.workRequests[0], WR_ID: "PM-1", WR_Type: "PM" as const, Percentage: 50, AssignedCraftpersonIds: [], Description: "Pump" };
 const lj = { ...seed.workRequests[1], WR_ID: "LJ-1", WR_Type: "LJ" as const, Percentage: 20, AssignedCraftpersonIds: [], Description: "Repair" };
-const props = { requests: [pm, lj], people: seed.craftspeople, buildings: seed.buildings, freezes: [], now: "", onOpen: vi.fn(), onAssign: vi.fn(), onShow: vi.fn() };
+const props = { requests: [pm, lj], people: seed.craftspeople, buildings: seed.buildings, freezes: [], now: "", onOpen: vi.fn(), onAssign: vi.fn(), onShow: vi.fn(), disputeMap: new Map(), disputeMode: "all" as const, onDisputeMode: vi.fn() };
 beforeEach(() => {
   const values = new Map<string, string>();
   vi.stubGlobal("localStorage", {
@@ -87,10 +87,10 @@ describe("work request source panel", () => {
   it("filters scheduled, unscheduled and mixed requests", () => {
     const scheduled = { ...pm, AssignedCraftpersonIds: [seed.craftspeople[0].id], CraftpersonAssignments: [{ craftpersonId: seed.craftspeople[0].id, assignedStartDateTime: "2026-11-09T08:00", assignedEndDateTime: "2026-11-09T11:00" }] };
     render(<WRSourcePanel {...props} requests={[scheduled, lj]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Scheduled", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Scheduled$/ }));
     expect(screen.getByText("Pump")).toBeTruthy();
     expect(screen.queryByText("Repair")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Unscheduled", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Unscheduled$/ }));
     expect(screen.queryByText("Pump")).toBeNull();
     expect(screen.getByText("Repair")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Scheduled & Unscheduled" }));

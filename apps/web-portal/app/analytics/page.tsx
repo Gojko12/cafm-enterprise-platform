@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { TrendingUp, Download, BarChart3 } from "lucide-react";
+import { QAAnalytics } from "@/components/modules/QAAnalytics";
 
 interface KPICard {
   label: string;
@@ -181,6 +182,7 @@ export default function AnalyticsPage() {
             { id: "workload", label: "Backlog & Workload" },
             { id: "reliability", label: "Asset Reliability" },
             { id: "productivity", label: "Technician Productivity" },
+            { id: "qa", label: "QA & Technical Audits (5% Quota)" },
           ].map((metric) => (
             <button
               key={metric.id}
@@ -196,6 +198,7 @@ export default function AnalyticsPage() {
           ))}
         </div>
 
+        {selectedMetric === "qa" ? <QAAnalytics /> : <>
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {kpis[selectedMetric].map((kpi, i) => (
@@ -343,6 +346,7 @@ export default function AnalyticsPage() {
             ))}
           </div>
         </div>
+        </>}
       </div>
     </div>
   );
