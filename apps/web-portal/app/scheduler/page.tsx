@@ -3,11 +3,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
-import type { BaseWorkRequest, CraftpersonAbsence } from "@cafm/shared-schema";
+import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
-import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, resolveLeaveConflicts, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
+import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
 import { HourlyTimeline } from "@/components/modules/HourlyTimeline";
 import type { TimelineSpotlight } from "@/components/modules/HourlyTimeline";
 import { MultiSelectFilter } from "@/components/common/MultiSelectFilter";
@@ -15,14 +15,14 @@ import { tradeColor } from "@/lib/trade-colors";
 import { revealAssignment } from "@/lib/calendar-locator";
 import { LocationFreezes } from "@/components/modules/LocationFreezes";
 import { WRSourcePanel } from "@/components/modules/WRSourcePanel";
-import { AbsenceForm } from "@/components/modules/AbsenceForm";
 import { AssignmentLocatorDialog } from "@/components/modules/AssignmentLocatorDialog";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
 import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
+import { isOutsideShift } from "@/lib/craftperson-shifts";
+import { CraftpersonShiftWorkspace } from "@/components/modules/CraftpersonShiftWorkspace";
 
-type Person = ReturnType<typeof useCafmStore>["data"]["craftspeople"][number];
 type Move = { id: string; from?: string; person: string; date: string; start?: string; end?: string };
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
 
@@ -54,10 +54,7 @@ function SchedulerContent() {
   const focusHandled = useRef("");
   const [open, setOpen] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [leaveFor, setLeaveFor] = useState<string | null>(null);
-  const [editLeave, setEditLeave] = useState<CraftpersonAbsence | null>(null);
   const [editTime, setEditTime] = useState<{ id: string; person: string; start: string; end: string } | null>(null);
-  const [conflict, setConflict] = useState<CraftpersonAbsence | null>(null);
   const [error, setError] = useState("");
   const [spotlight, setSpotlight] = useState<TimelineSpotlight | null>(null);
   const [showChoices, setShowChoices] = useState<string | null>(null);
@@ -114,12 +111,7 @@ function SchedulerContent() {
     const assignment = { craftpersonId: person.id, assignedStartDateTime: startTime, assignedEndDateTime: endTime };
     const leave = assignmentAbsences(data.craftpersonAbsences, activeSiteId, assignment);
     if (leave.length && !window.confirm(`${leave.map((item) => `${people.find((p) => p.id === item.craftpersonId)?.Name ?? item.craftpersonId}: ${item.absenceType} (${item.startDate} to ${item.endDate})`).join("; ")}. Force assignment?`)) return;
-    let offShift = false;
-    for (let day = startTime.slice(0, 10); day <= endTime.slice(0, 10); day = addDays(day, 1)) {
-      const start = Math.max(wallMinutes(startTime), wallMinutes(`${day}T00:00`));
-      const end = Math.min(wallMinutes(endTime), wallMinutes(`${addDays(day, 1)}T00:00`));
-      if (end > start && (start < wallMinutes(`${day}T${person.shiftStart ?? "07:00"}`) || end > wallMinutes(`${day}T${person.shiftEnd ?? "15:30"}`))) offShift = true;
-    }
+    const offShift = isOutsideShift(person, startTime, endTime);
     if (offShift && !window.confirm("This assignment includes off-shift hours. Schedule anyway?")) return;
     const mismatch = !!wr.TradeName && person.Trade !== wr.TradeName && !(person.secondaryTradeIds ?? []).includes(wr.TradeName);
     if (mismatch && !window.confirm(`${person.Name} works in ${person.Trade}, not ${wr.TradeName}. Assign anyway?`)) return;
@@ -152,18 +144,6 @@ function SchedulerContent() {
       const [year, month] = date.split("-").map(Number);
       setDate(calendarDate(new Date(year, month - 1 + direction, 1, 12)));
     } else setDate(addDays(date, direction * days));
-  };
-  const resolveLeave = (mode: "unassign" | "reassign", selected = conflict) => {
-    if (!selected) return;
-    setData((state) => {
-      if (!state.craftpersonAbsences.some((entry) => entry.id === selected.id && JSON.stringify(entry) === JSON.stringify(selected))) {
-        queueMicrotask(() => setError("Leave record changed; retry.")); return state;
-      }
-      const { requests, unresolved } = resolveLeaveConflicts(state.workRequests, state.craftpersonAbsences, state.craftspeople, selected, mode,
-        (wr, text) => audit(wr, `${text} by ${activePerson}`));
-      queueMicrotask(() => { setConflict(null); setError(unresolved ? `${unresolved} request(s) could not be reassigned; leave conflicts remain.` : ""); setNotice(unresolved ? "" : "Affected assignments updated."); });
-      return { ...state, workRequests: requests };
-    });
   };
   const locate = (wr: BaseWorkRequest, personId: string) => {
     const person = people.find((item) => item.id === personId);
@@ -247,55 +227,12 @@ function SchedulerContent() {
       <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
-    {tab === "availability" && <div className="space-y-4 rounded border bg-white p-3">
-      <h2 className="text-base font-bold">Craftsperson Working Shifts</h2>
-      <div className="overflow-auto"><table className="w-full text-left"><thead><tr><th>Craftsperson</th><th>Shift start</th><th>Shift end</th><th>Daily capacity</th><th>Primary trade</th><th>Secondary trades</th><th /></tr></thead><tbody>
-        {people.map((person) => <ShiftRow key={`${activeSiteId}-${person.id}-${JSON.stringify(person)}`} person={person} onSave={(updated) => setData((state) => {
-          const current = state.craftspeople.find((item) => item.id === person.id && item.SiteId === activeSiteId);
-          if (!current || JSON.stringify(current) !== JSON.stringify(person)) { queueMicrotask(() => setError("Craftsperson changed; refresh the shift editor and retry.")); return state; }
-          return { ...state, craftspeople: state.craftspeople.map((item) => item === current ? updated : item) };
-        })} />)}
-      </tbody></table></div>
-      <div className="flex items-center justify-between"><h2 className="text-base font-bold">Vacations, Trainings &amp; Absences</h2><button className={button} onClick={() => { setEditLeave(null); setLeaveFor(people[0]?.id ?? ""); }}>+ Add Vacation / Training / Sick Leave</button></div>
-      <div className="overflow-auto"><table className="w-full text-left"><thead><tr><th>Craftsperson</th><th>Type</th><th>Dates</th><th>Hours</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        {data.craftpersonAbsences.filter((entry) => entry.siteId === activeSiteId).map((entry) => <tr key={entry.id} className="border-t"><td>{people.find((person) => person.id === entry.craftpersonId)?.Name ?? entry.craftpersonId}</td><td>{entry.absenceType}</td><td>{entry.startDate} – {entry.endDate}</td><td>{entry.isFullDay ? "Full day" : entry.startTime && entry.endTime ? `${entry.startTime} – ${entry.endTime}` : `${entry.unavailableHoursPerDay}h`}</td><td>{entry.status}</td><td className="space-x-1"><button className={button} onClick={() => { setEditLeave(entry); setLeaveFor(entry.craftpersonId); }}>Edit</button><button className={button} onClick={() => { if (window.confirm("Delete this absence?")) setData((state) => {
-          const current = state.craftpersonAbsences.find((item) => item.id === entry.id && item.siteId === activeSiteId);
-          if (JSON.stringify(current) !== JSON.stringify(entry)) { queueMicrotask(() => setError("Absence changed; retry with the latest data.")); return state; }
-          return { ...state, craftpersonAbsences: state.craftpersonAbsences.filter((item) => item !== current) };
-        }); }}>Delete</button><button className={button} onClick={() => resolveLeave("reassign", entry)}>Auto-Reassign Affected WRs</button><button className={button} onClick={() => resolveLeave("unassign", entry)}>Return to Unassigned Pool</button></td></tr>)}
-      </tbody></table></div>
-    </div>}
+    {tab === "availability" && <CraftpersonShiftWorkspace key={activeSiteId} />}
     {showChoices && (() => { const wr = siteRequests.find((item) => item.WR_ID === showChoices); return wr ? <AssignmentLocatorDialog request={wr} people={people} onSelect={(id) => locate(wr, id)} onClose={() => setShowChoices(null)} /> : null; })()}
     {quickAssign && <div role="dialog" aria-modal="true" aria-label="Assign work request" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: quickAssign, person: quickPerson, date: quickDate }); }}><h2 className="font-bold">Assign {quickAssign}</h2><select required className="block border p-1" value={quickPerson} onChange={(event) => setQuickPerson(event.target.value)}><option value="">Select craftsperson</option>{people.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}</select><input required type="date" className="block border p-1" value={quickDate} onChange={(event) => setQuickDate(event.target.value)} /><button className={button}>Assign</button> <button type="button" className={button} onClick={() => setQuickAssign(null)}>Cancel</button></form></div>}
     {editTime && <div role="dialog" aria-modal="true" aria-label="Edit assignment time" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: editTime.id, person: editTime.person, from: editTime.person, date: editTime.start.slice(0, 10), start: editTime.start, end: editTime.end }); }}><h2 className="font-bold">Edit {editTime.id}</h2><label className="block">Start <input required type="datetime-local" value={editTime.start} onChange={(event) => setEditTime({ ...editTime, start: event.target.value })} /></label><label className="block">End <input required type="datetime-local" value={editTime.end} onChange={(event) => setEditTime({ ...editTime, end: event.target.value })} /></label><button className={button}>Save</button> <button type="button" className={button} title="Remove from calendar (Unschedule)" onClick={() => removeAssignment(editTime.id, editTime.person)}>✕ Unschedule</button> <button type="button" className={button} onClick={() => setEditTime(null)}>Cancel</button></form></div>}
-    {leaveFor !== null && <AbsenceForm people={people} initial={leaveFor} existing={editLeave} onClose={() => setLeaveFor(null)} onSave={(entry) => {
-      setData((state) => {
-        const current = state.craftpersonAbsences.find((item) => item.id === entry.id && item.siteId === activeSiteId);
-        if ((editLeave && JSON.stringify(current) !== JSON.stringify(editLeave)) || (!editLeave && current)) { queueMicrotask(() => setError("Absence changed; retry with the latest data.")); return state; }
-        queueMicrotask(() => setConflict(entry));
-        return { ...state, craftpersonAbsences: [...state.craftpersonAbsences.filter((item) => item.id !== entry.id || item.siteId !== activeSiteId), entry] };
-      });
-      setLeaveFor(null);
-    }} site={activeSiteId} date={date} />}
-    {conflict && <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><div className="rounded bg-white p-5"><h2 className="font-bold">Leave conflict resolution</h2>{siteRequests.filter((wr) => { const interval = intervalFor(wr, conflict.craftpersonId); return interval && assignmentAbsences([conflict], activeSiteId, interval).length; }).map((wr) => <p key={wr.WR_ID}>{wr.WR_ID} · {wr.Description}</p>)}<div className="mt-3 flex gap-2"><button className={button} onClick={() => resolveLeave("reassign")}>Auto-Reassign to Available Trade Peer</button><button className={button} onClick={() => resolveLeave("unassign")}>Unassign &amp; Return to Trade Pool</button><button className={button} onClick={() => setConflict(null)}>Close</button></div></div></div>}
     {request?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={request} onClose={() => setOpen(null)} onNavigate={setOpen} onEscalateToLJ={() => { setOpen(null); setError("Create Long Jobs from the work request overview."); }} />}
     {request?.WR_Type === "FJ" && <FJWorkRequestPopup workRequest={request} onClose={() => setOpen(null)} onNavigate={setOpen} onEscalateToLJ={() => { setOpen(null); setError("Create Long Jobs from the work request overview."); }} />}
     {request?.WR_Type === "LJ" && <LJWorkRequestPopup workRequest={request} onClose={() => setOpen(null)} onNavigate={setOpen} />}
   </div>;
-}
-
-function ShiftRow({ person, onSave }: { person: Person; onSave: (person: Person) => void }) {
-  const [start, setStart] = useState(person.shiftStart ?? "07:00");
-  const [end, setEnd] = useState(person.shiftEnd ?? "15:30");
-  const [hours, setHours] = useState(person.ShiftHours);
-  const [trade, setTrade] = useState(person.Trade);
-  const [secondary, setSecondary] = useState(person.secondaryTradeIds ?? []);
-  const [error, setError] = useState("");
-  return <tr className="border-t"><td>{person.Name} {person.LastName}</td>
-    <td><input aria-label="Shift start" type="time" value={start} onChange={(event) => setStart(event.target.value)} /></td>
-    <td><input aria-label="Shift end" type="time" value={end} onChange={(event) => setEnd(event.target.value)} /></td>
-    <td><input aria-label="Daily capacity" className="w-16 border" type="number" min="0" max="24" step="0.5" value={hours} onChange={(event) => setHours(Number(event.target.value))} /></td>
-    <td><select aria-label="Primary trade" value={trade} onChange={(event) => setTrade(event.target.value)}>{CLASSICAL_TRADES.map((item) => <option key={item}>{item}</option>)}</select></td>
-    <td><select aria-label="Secondary trades" multiple value={secondary} onChange={(event) => setSecondary(Array.from(event.target.selectedOptions, (option) => option.value))}>{CLASSICAL_TRADES.filter((item) => item !== trade).map((item) => <option key={item}>{item}</option>)}</select></td>
-    <td><button className={button} onClick={() => { if (!start || !end || start >= end || !Number.isFinite(hours) || hours < 0 || hours > 24) { setError("Enter a valid same-day shift and capacity."); return; } onSave({ ...person, shiftStart: start, shiftEnd: end, ShiftHours: hours, Trade: trade, secondaryTradeIds: secondary.filter((item) => item !== trade) }); setError(""); }}>Save</button>{error && <span role="alert" className="text-red-700">{error}</span>}</td></tr>;
 }

@@ -8,6 +8,7 @@ import { absenceInterval, dailyCapacity, fromWallMinutes, intervalFor, wallMinut
 import { describeLocationFreeze, freezeLocationLabel, getActiveFreezeConflictsForWR } from "../../lib/location-freezes";
 import { tradeColor } from "../../lib/trade-colors";
 import { startRequestDrag } from "../../lib/drag-preview";
+import { getEffectiveCraftpersonShift, shiftSegments } from "../../lib/craftperson-shifts";
 
 type Person = DemoData["craftspeople"][number];
 type Preview = { wr: BaseWorkRequest; person: string; start: string; end: string };
@@ -105,12 +106,13 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
       <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => <React.Fragment key={trade}>
         <tr className="bg-slate-100"><th className="sticky left-0 z-20 border-r bg-slate-100 p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th>{dates.length > 0 && <td colSpan={dates.length} />}</tr>
         {!collapsed.includes(trade) && people.filter((person) => person.Trade === trade).map((person) => <tr key={person.id}>
-          <th className={`sticky left-0 z-20 border-r border-t p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] ${spotlight?.person === person.id ? "bg-amber-100" : "bg-white dark:bg-slate-900"}`}>{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
+          <th className={`sticky left-0 z-20 border-r border-t p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] ${spotlight?.person === person.id ? "bg-amber-100" : "bg-white dark:bg-slate-900"}`}>{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · Base {person.baseShiftType ?? "Standard"} {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
           {dates.map((day) => {
             const start = wallMinutes(`${day}T00:00`) + firstHour * 60, end = start + (lastHour - firstHour) * 60;
-            const cap = dailyCapacity(displayed, absences, site, person.id, day, person.ShiftHours, person.shiftStart, person.shiftEnd);
+            const shift = getEffectiveCraftpersonShift(person, day);
+            const cap = dailyCapacity(displayed, absences, site, person.id, day, person.ShiftHours, shift.shiftStart, shift.shiftEnd, person);
             const entries = cap.assigned.filter(visible).map((wr) => ({ wr, interval: intervalFor(wr, person.id) })).filter((item) => item.interval && wallMinutes(item.interval.assignedEndDateTime) > start && wallMinutes(item.interval.assignedStartDateTime) < end);
-            const shiftStart = wallMinutes(`${day}T${person.shiftStart ?? "07:00"}`), shiftEnd = wallMinutes(`${day}T${person.shiftEnd ?? "15:30"}`);
+            const segments = shiftSegments(person, day).map((part) => ({ start: Math.max(start, part.start), end: Math.min(end, part.end) })).filter((part) => part.end > part.start);
             return <td key={day} className="border align-top" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
               event.preventDefault();
               let payload: unknown;
@@ -126,10 +128,10 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
               const slot = start + Math.max(0, Math.min(lastHour - firstHour - 1, Math.floor((event.clientX - event.currentTarget.getBoundingClientRect().left) / HOUR_WIDTH))) * 60;
               onMove(wr.WR_ID, person.id, fromWallMinutes(slot), fromWallMinutes(slot + duration), from);
             }}><div className="relative" style={{ width, height: Math.max(56, 32 + entries.length * 28) }}>
-              {Array.from({ length: lastHour - firstHour }, (_, index) => {
-                return <div key={index} className="absolute inset-y-0 border-l bg-white" style={{ left: index * HOUR_WIDTH, width: HOUR_WIDTH }} />;
-              })}
-              {[[start, Math.min(end, shiftStart)], [Math.max(start, shiftEnd), end]].map(([left, right], index) => right > left ? <div key={index} className="pointer-events-none absolute inset-y-0 bg-slate-100/80" style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH }} /> : null)}
+              <div className="absolute inset-0 bg-slate-100/80" title={`${shift.shiftType} ${shift.shiftStart}–${shift.shiftEnd}`} />
+              {segments.map((part, index) => <div key={index} className="pointer-events-none absolute inset-y-0 bg-white" style={{ left: (part.start - start) / 60 * HOUR_WIDTH, width: (part.end - part.start) / 60 * HOUR_WIDTH }} />)}
+              {Array.from({ length: lastHour - firstHour }, (_, index) => <div key={index} className="pointer-events-none absolute inset-y-0 border-l" style={{ left: index * HOUR_WIDTH, width: HOUR_WIDTH }} />)}
+              <span className="pointer-events-none absolute right-1 top-0 text-slate-600">{shift.shiftType} {shift.shiftStart}–{shift.shiftEnd}</span>
               {cap.leave.map((leave) => {
                 const interval = absenceInterval(leave, day);
                 if (!interval) return null;

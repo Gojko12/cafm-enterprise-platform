@@ -1,6 +1,8 @@
 import { CLASSICAL_TRADES, EQUIPMENT_STATUSES } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
+import { DEFAULT_SHIFTS } from "./craftperson-shifts";
+import { addDays, calendarDate } from "./dispatch";
 
 const systems = [
   ["Chiller", "Mechanical", "bar", 3, 8], ["Diesel Generator", "Electrical", "V", 380, 420],
@@ -72,9 +74,11 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     const siteRooms = rooms.filter((item) => item.SiteId === site);
     for (let i = 0; i < 12; i++) {
       const trade = CLASSICAL_TRADES[i % CLASSICAL_TRADES.length];
+      const shift = DEFAULT_SHIFTS[(["Early", "Standard", "Late", "Night"] as const)[i % 4]];
+      const tomorrow = addDays(calendarDate(new Date()), 1);
       craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Gregor", "Tomaž", "Blaž", "Eva", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
         LastName: ["GOJKOŠEK", "Gojkošek", "Gojkošek", "Veselič", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i],
-        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, shiftStart: "07:00", shiftEnd: "15:30", secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
+        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, baseShiftType: shift.shiftType, shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, shiftOverrides: { [tomorrow]: DEFAULT_SHIFTS[(["Standard", "Late", "Night", "Early"] as const)[i % 4]] }, secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
     }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];

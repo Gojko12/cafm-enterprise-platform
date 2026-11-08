@@ -1,4 +1,7 @@
 import type { BaseWorkRequest, CraftpersonAbsence } from "@cafm/shared-schema";
+import type { DemoData } from "./cafm-data";
+import { dailyShiftCapacitySegments, isOutsideShift } from "./craftperson-shifts";
+import type { ShiftPerson } from "./craftperson-shifts";
 
 export type TimedAssignment = NonNullable<BaseWorkRequest["CraftpersonAssignments"]>[number];
 
@@ -82,7 +85,7 @@ export function frozenOn(wr: BaseWorkRequest, date: string) {
   return wr.IsFrozen && (!wr.FreezeStartDate || wr.FreezeStartDate <= date) && (!wr.FreezeEndDate || date <= wr.FreezeEndDate);
 }
 
-export function dailyCapacity(wrs: BaseWorkRequest[], absences: CraftpersonAbsence[], site: string, person: string, date: string, shiftHours: number, shiftStart = "07:00", shiftEnd = "15:30") {
+export function dailyCapacity(wrs: BaseWorkRequest[], absences: CraftpersonAbsence[], site: string, person: string, date: string, shiftHours: number, shiftStart = "07:00", shiftEnd = "15:30", shiftPerson?: ShiftPerson) {
   const leave = activeAbsences(absences, site, person, date);
   const shiftBegin = wallMinutes(`${date}T${shiftStart}`), shiftFinish = wallMinutes(`${date}T${shiftEnd}`);
   const intervals = leave.filter((item) => !item.isFullDay && item.startTime && item.endTime).map((item) => ({
@@ -92,7 +95,24 @@ export function dailyCapacity(wrs: BaseWorkRequest[], absences: CraftpersonAbsen
   let covered = 0, last = shiftBegin;
   for (const interval of intervals) { covered += Math.max(0, interval.end - Math.max(last, interval.start)); last = Math.max(last, interval.end); }
   const legacyHours = leave.filter((item) => !item.isFullDay && (!item.startTime || !item.endTime)).reduce((total, item) => total + item.unavailableHoursPerDay, 0);
-  const available = leave.some((item) => item.isFullDay) ? 0 : Math.max(0, shiftHours - covered / 60 - legacyHours);
+  let available = leave.some((item) => item.isFullDay) ? 0 : Math.max(0, shiftHours - covered / 60 - legacyHours);
+  if (shiftPerson) {
+    const segments = dailyShiftCapacitySegments(shiftPerson, date, shiftHours);
+    const blocked = leave.filter((item) => item.isFullDay || (item.startTime && item.endTime)).flatMap((item) => {
+      const interval = absenceInterval(item, date);
+      if (!interval) return [];
+      return [{ start: wallMinutes(interval[0]), end: wallMinutes(interval[1]) }];
+    });
+    const boundaries = [...new Set([...segments.flatMap((part) => [part.start, part.end]), ...blocked.flatMap((part) => [part.start, part.end])])].sort((a, b) => a - b);
+    let remaining = 0;
+    for (let index = 1; index < boundaries.length; index++) {
+      const start = boundaries[index - 1], end = boundaries[index];
+      if (blocked.some((part) => part.start < end && part.end > start)) continue;
+      const rate = Math.max(0, ...segments.filter((part) => part.start < end && part.end > start).map((part) => part.rate));
+      remaining += (end - start) * rate / 60;
+    }
+    available = Math.max(0, remaining - legacyHours);
+  }
   const start = `${date}T00:00`, end = `${addDays(date, 1)}T00:00`;
   const assigned = wrs.filter((wr) => {
     if (wr.SiteId !== site) return false;
@@ -111,7 +131,7 @@ export function dailyCapacity(wrs: BaseWorkRequest[], absences: CraftpersonAbsen
 export function resolveLeaveConflicts(
   requests: BaseWorkRequest[],
   absences: CraftpersonAbsence[],
-  people: Array<{ id: string; SiteId: string; Trade: string; ShiftHours: number; Name?: string; LastName?: string; HourlyRate?: number; shiftStart?: string; shiftEnd?: string; secondaryTradeIds?: string[] }>,
+  people: Array<{ id: string; SiteId: string; Trade: string; ShiftHours: number; Name?: string; LastName?: string; HourlyRate?: number; shiftStart?: string; shiftEnd?: string; baseShiftType?: DemoData["craftspeople"][number]["baseShiftType"]; shiftOverrides?: DemoData["craftspeople"][number]["shiftOverrides"]; secondaryTradeIds?: string[] }>,
   absence: CraftpersonAbsence,
   mode: "unassign" | "reassign",
   audit: (wr: BaseWorkRequest, text: string) => BaseWorkRequest,
@@ -126,12 +146,12 @@ export function resolveLeaveConflicts(
     const peer = mode === "reassign" ? people.find((person) => person.SiteId === absence.siteId && person.id !== absence.craftpersonId && (person.Trade === wr.TradeName || (wr.TradeName && person.secondaryTradeIds?.includes(wr.TradeName))) && !wr.AssignedCraftpersonIds.includes(person.id) &&
       (() => {
         if (assignmentAbsences(absences, absence.siteId, { ...interval, craftpersonId: person.id }).length) return false;
+        if (isOutsideShift(person, interval.assignedStartDateTime, interval.assignedEndDateTime)) return false;
         for (let day = interval.assignedStartDateTime.slice(0, 10); day <= interval.assignedEndDateTime.slice(0, 10); day = addDays(day, 1)) {
           const begin = Math.max(wallMinutes(interval.assignedStartDateTime), wallMinutes(`${day}T00:00`));
           const end = Math.min(wallMinutes(interval.assignedEndDateTime), wallMinutes(`${addDays(day, 1)}T00:00`));
           if (end <= begin) continue;
-          if (begin < wallMinutes(`${day}T${person.shiftStart ?? "07:00"}`) || end > wallMinutes(`${day}T${person.shiftEnd ?? "15:30"}`)) return false;
-          const cap = dailyCapacity(updated, absences, absence.siteId, person.id, day, person.ShiftHours, person.shiftStart, person.shiftEnd);
+          const cap = dailyCapacity(updated, absences, absence.siteId, person.id, day, person.ShiftHours, person.shiftStart, person.shiftEnd, person);
           if (cap.allocated + (end - begin) / 60 > cap.available || cap.assigned.some((other) => { const scheduled = intervalFor(other, person.id); return scheduled && overlaps(interval.assignedStartDateTime, interval.assignedEndDateTime, scheduled.assignedStartDateTime, scheduled.assignedEndDateTime); })) return false;
         }
         return true;

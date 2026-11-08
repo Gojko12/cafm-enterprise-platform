@@ -3,6 +3,14 @@ import { SiteIdSchema } from "./locations.js";
 
 export const CalendarDateSchema = z.iso.date();
 export const LocalTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+export const ShiftTypeSchema = z.enum(["Early", "Standard", "Late", "Night", "Custom"]);
+export const CraftpersonShiftSchema = z.object({
+  shiftType: ShiftTypeSchema,
+  shiftStart: LocalTimeSchema,
+  shiftEnd: LocalTimeSchema,
+}).refine((value) => value.shiftStart !== value.shiftEnd, "Shift start and end must differ.");
+export type CraftpersonShift = z.infer<typeof CraftpersonShiftSchema>;
+export type ShiftType = z.infer<typeof ShiftTypeSchema>;
 export const LocalDateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/)
   .refine((value) => CalendarDateSchema.safeParse(value.slice(0, 10)).success, "Invalid local date and time");
 export const LocationFreezeSchema = z.preprocess((value) => {

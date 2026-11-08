@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SiteIdSchema } from "./locations.js";
+import { CalendarDateSchema, CraftpersonShiftSchema, LocalTimeSchema, ShiftTypeSchema } from "./dispatch.js";
 
 export const WorkSessionSchema = z
   .object({
@@ -72,6 +73,10 @@ export const CraftpersonSchema = z.object({
     }),
   ).default([]),
   HourlyRate: z.number().nonnegative().optional(),
+  baseShiftType: ShiftTypeSchema.optional(),
+  shiftStart: LocalTimeSchema.optional(),
+  shiftEnd: LocalTimeSchema.optional(),
+  shiftOverrides: z.record(CalendarDateSchema, CraftpersonShiftSchema).optional(),
   IsActive: z.boolean().default(true),
 });
 
