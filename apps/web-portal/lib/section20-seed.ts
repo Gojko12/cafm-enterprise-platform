@@ -245,6 +245,26 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       if (index === 2) { wr.QA_InspectionStatus = "ToBeCorrected"; wr.AuditInspectionStatus = "PM WRs to be corrected"; }
       if (index === 1 || index === 4) { wr.QA_InspectionStatus = "Passed"; wr.AuditInspectionStatus = "Passed Inspected"; }
     });
+    workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type !== "PM").forEach((wr) => {
+      wr.roughScopeNotes = `Inspect and repair ${wr.Description}; test operation and document the completed work.`;
+      wr.todoSteps = [
+        "Review hazards, permits and required isolation before starting.",
+        `Inspect ${wr.Description} and identify the repair scope.`,
+        "Carry out the approved repair or installation.",
+        "Restore service and perform a functional test.",
+        "Record findings and photos; clean and secure the work area.",
+      ].map((title, index) => ({ id: `${wr.WR_ID}-todo-${index + 1}`, order: index + 1, title, completed: false }));
+      if (wr.Percentage < 50 || [55, 27, 29].includes(wr.Percentage)) return;
+      const person = siteCraft.find((item) => item.id === wr.AssignedCraftpersonIds[0]);
+      if (!person) return;
+      const name = `${person.Name} ${person.LastName}`;
+      wr.timeSessions = [
+        { id: `${wr.WR_ID}-session-1`, craftpersonId: person.id, craftpersonName: name, startedAt: "2026-10-12T08:00:00.000Z", endedAt: "2026-10-12T08:45:00.000Z", durationMinutes: 45 },
+        { id: `${wr.WR_ID}-session-2`, craftpersonId: person.id, craftpersonName: name, startedAt: "2026-10-12T09:00:00.000Z", endedAt: "2026-10-12T09:45:00.000Z", durationMinutes: 45 },
+      ];
+      wr.laborEntries = [{ craftpersonId: person.id, name: person.Name, lastName: person.LastName, trade: person.Trade, hourlyRate: person.HourlyRate, recordedTimerMinutes: 90, effectiveMinutes: 90 }];
+      wr.TotalTimeMinutes = 90;
+    });
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };
 }

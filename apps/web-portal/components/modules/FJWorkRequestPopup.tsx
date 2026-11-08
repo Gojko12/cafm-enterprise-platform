@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
+import { TechnicianTodoList } from "@/components/modules/TechnicianTodoList";
 import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
@@ -14,7 +15,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 
-type Tab = "Work request details" | "Labor, parts & Completion" | "Attached Documents" | "AuditLog & QA";
+type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA";
 
 export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalateToLJ }: {
   workRequest: BaseWorkRequest;
@@ -23,7 +24,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
   onEscalateToLJ: (wr: BaseWorkRequest) => void;
 }) {
   const { data, setData } = useCafmStore();
-  const { currentUser } = useSiteContext();
+  const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const [tab, setTab] = useState<Tab>("Work request details");
   const [historyOpen, setHistoryOpen] = useState(true);
@@ -95,7 +96,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
     };
     reader.readAsDataURL(file);
   };
-  const tabs: Tab[] = ["Work request details", "Labor, parts & Completion", "Attached Documents", "AuditLog & QA"];
+  const tabs: Tab[] = ["Work request details", "Labor, parts & Completion", "Technician To-Do & AI Task List", "Attached Documents", "AuditLog & QA"];
   const group = (title: string, children: React.ReactNode) => <details open className="rounded border bg-white">
     <summary className="cursor-pointer bg-slate-50 px-4 py-3 font-semibold">{title}</summary>
     <div className="grid gap-3 p-4 sm:grid-cols-2">{children}</div>
@@ -146,11 +147,11 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
                 update((wr) => assignPerson(wr, {
                   craftpersonId: person.id, hourlyRate: person.HourlyRate, workingTimeMinutes: 0,
                   name: person.Name, lastName: person.LastName,
-                }), `${person.Name} ${person.LastName} assigned by ${actorName}`);
+                }), `${currentRole} ${activePerson} assigned craftperson ${person.Name} ${person.LastName} (${person.Trade}).`);
               }}><option value="">Select…</option>{craftpeople.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} ({person.Trade})</option>)}</select>
             </label>
           </div>
-          <WorkRequestLabor wr={workRequest} people={craftpeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} />
+          <WorkRequestLabor wr={workRequest} people={craftpeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={currentRole === "TeamLeader" || currentRole === "SiteAdministrator"} />
           <section className="rounded border bg-white p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">Spare parts / materials</h3><button type="button" onClick={() => update((wr) => ({ ...wr, SpareParts: [...(wr.SpareParts ?? []), { id: crypto.randomUUID(), description: "", quantity: 1, unitCostEur: 0 }] }), `Spare part row added by ${actorName}`)} className="rounded border px-3 py-1 text-sm">+ Add Part</button></div>
             <div className="mt-3 space-y-2">{(workRequest.SpareParts ?? []).map((part) => <div key={part.id} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
               <input aria-label="Spare part description" value={part.description} onChange={(e) => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).map((item) => item.id === part.id ? { ...item, description: e.target.value } : item) }))} placeholder="Description" className="rounded border px-2 py-1" />
@@ -181,6 +182,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           <h3 className="font-semibold">Attached Documents</h3><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New WR Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
           {(workRequest.Attachments ?? []).map((doc) => <div key={doc.id} className="flex items-center justify-between border-b py-3"><span>{doc.name}</span><div className="flex gap-3"><a href={doc.dataUrl} target="_blank" rel="noreferrer" onClick={() => update((wr) => wr, `Document '${doc.name}' opened by ${actorName}`)} className="text-blue-700 underline">Open</a><button onClick={() => update((wr) => ({ ...wr, Attachments: (wr.Attachments ?? []).filter((item) => item.id !== doc.id) }), `Document '${doc.name}' deleted by ${actorName}`)} className="text-red-700">Delete</button></div></div>)}
         </section>}
+        {tab === "Technician To-Do & AI Task List" && <TechnicianTodoList wr={workRequest} update={update} />}
         {tab === "AuditLog & QA" && <QAAuditPanel wr={workRequest} />}
       </main>
       <ResizableHistory>

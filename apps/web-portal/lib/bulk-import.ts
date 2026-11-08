@@ -25,7 +25,7 @@ export interface Preview { errors: ImportError[]; diffs: ImportDiff[]; next: Dem
 const numeric = new Set(["FloorNumber", "GrossAreaM2", "NetAreaM2", "ExpectedHours", "Version", "FrequencyInterval", "MeterInterval", "LeadTimeDays", "MarginWindowDays", "TicketSequence", "TotalTimeMinutes", "Percentage", "EstimatedCostEur", "ActualCostEur", "DowntimeMinutes"]);
 const boolean = new Set(["IsActive", "IsDeskReservable", "IsInstallation", "ReceiveNotifications", "StartDateTBD", "IsFrozen", "ChecklistCompleted", "PreSATApproved", "RequiresSAT", "RequiresDrawingUpdate", "RequiresInventoryUpdate"]);
 const dateOnly = new Set(["CreatedDate", "StartDate", "DueDate", "MarginDate", "NextDueDate", "InstallationDate", "WarrantyExpiryDate"]);
-const json = new Set(["GPSCoordinates", "Polygon", "TechnicalSpecifications", "Steps", "EquipmentCodes", "AssignedCraftpersonIds", "AssignedUserIds", "AssignedRoles", "ChecklistSteps", "ChecklistInstances", "StepAuditLogs", "ChecklistHistory", "MobileWorkSessions", "CraftpersonLabor", "SpareParts", "QuotationLines", "Activity", "Attachments", "ChecklistResults", "AcceptanceGates"]);
+const json = new Set(["GPSCoordinates", "Polygon", "TechnicalSpecifications", "Steps", "EquipmentCodes", "AssignedCraftpersonIds", "AssignedUserIds", "AssignedRoles", "ChecklistSteps", "ChecklistInstances", "StepAuditLogs", "ChecklistHistory", "MobileWorkSessions", "CraftpersonLabor", "timeSessions", "laborEntries", "todoSteps", "CraftpersonAssignments", "SpareParts", "QuotationLines", "Activity", "Attachments", "ChecklistResults", "AcceptanceGates"]);
 const columns = (entity: Entity) => Object.keys(entities[entity].schema.shape);
 
 function keyOf(record: object, entity: Entity): string {

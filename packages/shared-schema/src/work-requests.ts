@@ -42,12 +42,59 @@ export const ChecklistHistoryEntrySchema = z.object({
   details: z.string().min(1),
 });
 
+const LaborTimeFields = {
+  trade: z.string().optional(),
+  recordedTimerMinutes: z.number().nonnegative().optional(),
+  technicianOpinionMinutes: z.number().nonnegative().optional(),
+  teamLeaderOverrideMinutes: z.number().nonnegative().optional(),
+  effectiveMinutes: z.number().nonnegative().optional(),
+  addedByCoWorker: z.string().optional(),
+  lastModifiedBy: z.string().optional(),
+  lastModifiedAt: z.string().optional(),
+};
+
 export const CraftpersonLaborSchema = z.object({
   craftpersonId: z.string().min(1),
   hourlyRate: z.number().nonnegative(),
   workingTimeMinutes: z.number().nonnegative(),
   name: z.string().min(1),
   lastName: z.string().min(1),
+  ...LaborTimeFields,
+});
+
+export const WRLaborEntrySchema = z.object({
+  craftpersonId: z.string().min(1).optional(),
+  name: z.string().min(1),
+  lastName: z.string(),
+  hourlyRate: z.number().nonnegative(),
+  ...LaborTimeFields,
+  recordedTimerMinutes: z.number().nonnegative(),
+  effectiveMinutes: z.number().nonnegative(),
+}).refine((entry) => entry.effectiveMinutes === (entry.teamLeaderOverrideMinutes ?? entry.technicianOpinionMinutes ?? entry.recordedTimerMinutes), {
+  path: ["effectiveMinutes"],
+  message: "Effective minutes must follow override, opinion, then recorded time.",
+});
+
+export const WRTimeSessionSchema = z.object({
+  id: z.string().min(1),
+  craftpersonId: z.string().min(1),
+  craftpersonName: z.string().min(1),
+  startedAt: z.string().min(1),
+  endedAt: z.string().min(1).optional(),
+  durationMinutes: z.number().nonnegative(),
+});
+
+export const WRTodoStepSchema = z.object({
+  id: z.string().min(1),
+  order: z.number().int().positive(),
+  title: z.string().min(1),
+  instruction: z.string().optional(),
+  completed: z.boolean(),
+  completedBy: z.string().optional(),
+  completedAt: z.string().optional(),
+  technicianComment: z.string().optional(),
+  photoUrls: z.array(z.string()).optional(),
+  isFavourable: z.boolean().optional(),
 });
 
 export const WR_Statuses: readonly WRStatusDefinition[] = Object.freeze([
@@ -139,6 +186,10 @@ export const BaseWorkRequestSchema = z.object({
     craftpersonId: z.string().min(1),
     assignedStartDateTime: LocalDateTimeSchema,
     assignedEndDateTime: LocalDateTimeSchema,
+    name: z.string().optional(),
+    lastName: z.string().optional(),
+    hourlyRate: z.number().nonnegative().optional(),
+    ...LaborTimeFields,
   }).refine((entry) => entry.assignedStartDateTime < entry.assignedEndDateTime, { path: ["assignedEndDateTime"], message: "End must be after start." })).optional(),
   AssignedUserIds: z.array(z.string().min(1)).default([]),
   CreatedBy: z.string().min(1),
@@ -190,6 +241,10 @@ export const BaseWorkRequestSchema = z.object({
     Status: z.literal("STOPPED"),
   })).optional(),
   CraftpersonLabor: z.array(CraftpersonLaborSchema).optional(),
+  timeSessions: z.array(WRTimeSessionSchema).optional(),
+  laborEntries: z.array(WRLaborEntrySchema).optional(),
+  todoSteps: z.array(WRTodoStepSchema).optional(),
+  roughScopeNotes: z.string().optional(),
   SpareParts: z.array(z.object({
     id: z.string().min(1),
     description: z.string(),

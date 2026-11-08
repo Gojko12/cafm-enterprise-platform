@@ -14,7 +14,7 @@ import { QAChecklistReview } from "@/components/modules/QAChecklistReview";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
-import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
+import { WorkRequestLabor, laborRows } from "@/components/modules/WorkRequestLabor";
 import { assignPerson } from "@/lib/dispatch";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
@@ -58,7 +58,7 @@ export function PMWorkRequestPopup({
   onEscalateToLJ,
 }: PMWorkRequestPopupProps) {
   const { data, setData } = useCafmStore();
-  const { activeSiteId, currentUser } = useSiteContext();
+  const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const { currentRole } = useApp();
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(TABS[0]);
   const [checklistHistoryOpen, setChecklistHistoryOpen] = useState(true);
@@ -407,7 +407,7 @@ export function PMWorkRequestPopup({
       if ((workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
       const labor = { craftpersonId: userId, hourlyRate: craftperson.HourlyRate, workingTimeMinutes: 0,
         name: craftperson.Name, lastName: craftperson.LastName };
-      updateWorkRequest((current) => assignPerson(current, labor), `Craftperson ${craftperson.Name} ${craftperson.LastName} assigned to ${workRequest.WR_ID} by ${actorName}`);
+      updateWorkRequest((current) => assignPerson(current, labor), `${currentRole} ${activePerson} assigned craftperson ${craftperson.Name} ${craftperson.LastName} (${craftperson.Trade}).`);
       setAssignModalOpen(false);
       setCraftFilter("");
       return;
@@ -423,7 +423,7 @@ export function PMWorkRequestPopup({
       name: names.join(" ") || lastName,
       lastName,
     };
-    updateWorkRequest((current) => assignPerson(current, labor), `Craftperson ${user.DisplayName} assigned to ${workRequest.WR_ID} by ${actorName}`);
+    updateWorkRequest((current) => assignPerson(current, labor), `${currentRole} ${activePerson} assigned craftperson ${user.DisplayName}.`);
     setAssignModalOpen(false);
     setCraftFilter("");
   };
@@ -657,7 +657,7 @@ export function PMWorkRequestPopup({
                 Assign Craftperson
               </button>
             </div>
-            <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} />
+            <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={currentRole === "TeamLeader" || currentRole === "SiteAdministrator"} />
             <div className="grid gap-3 rounded border bg-white p-4 md:grid-cols-[1fr_2fr]">
               <label className="text-sm font-medium">WR Statuses
                 <select aria-label="WR Statuses" value={currentStatusChoice?.key ?? ""}
@@ -714,7 +714,7 @@ export function PMWorkRequestPopup({
             <section className="rounded border bg-white p-4">
               <h3 className="mb-3 font-semibold">Work Request Metrics</h3>
               {renderField("Expected hours", workRequest.ExpectedHours)}
-              {renderField("Logged working time (hours)", ((workRequest.CraftpersonLabor ?? []).reduce((sum, item) => sum + item.workingTimeMinutes, 0) / 60).toFixed(2))}
+              {renderField("Effective working time (hours)", (laborRows(workRequest, data.craftspeople).reduce((sum, item) => sum + item.effective, 0) / 60).toFixed(2))}
               {renderField("Total work session time (minutes)", workRequest.TotalTimeMinutes)}
               {renderField("Estimated cost (EUR)", workRequest.EstimatedCostEur)}
               {renderField("Actual cost (EUR)", workRequest.ActualCostEur)}

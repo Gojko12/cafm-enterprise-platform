@@ -26,6 +26,7 @@ export function intervalFor(wr: BaseWorkRequest, person: string): TimedAssignmen
 }
 
 export function schedulePerson(wr: BaseWorkRequest, assignment: TimedAssignment): BaseWorkRequest {
+  assignment = { ...wr.CraftpersonAssignments?.find((item) => item.craftpersonId === assignment.craftpersonId), ...assignment };
   const ids = [...new Set([...wr.AssignedCraftpersonIds, assignment.craftpersonId])];
   const otherIds = wr.AssignedCraftpersonIds.filter((id) => id !== assignment.craftpersonId);
   const previous = otherIds.map((id) => intervalFor(wr, id)).filter((item): item is TimedAssignment => item !== null);

@@ -22,6 +22,7 @@ import {
 } from "@cafm/shared-schema";
 import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
+import { MobileExecutionTools } from "./components/MobileExecutionTools";
 
 type AppView = "home" | "checklist" | "scanner" | "inspection" | "qa-spot-check";
 
@@ -115,35 +116,14 @@ export default function App() {
     const wr = [...myWRs, ...unassignedWRs].find((w) => w.WR_ID === wrId);
     if (wr) {
       setSelectedWR(wr);
-      // Generate sample checklist steps
-      setChecklistSteps([
-        {
-          StepId: "step-1",
-          StepNumber: 1,
-          StepTitle: "Visual Inspection",
-          InputType: "Boolean",
-        },
-        {
-          StepId: "step-2",
-          StepNumber: 2,
-          StepTitle: "Measure Voltage",
-          InputType: "Numeric",
-          MinThreshold: 200,
-          MaxThreshold: 250,
-          Unit: "V",
-        },
-        {
-          StepId: "step-3",
-          StepNumber: 3,
-          StepTitle: "Test Function",
-          InputType: "SingleSelect",
-          Options: [
-            { OptionId: "opt-1", OptionValue: "Working correctly" },
-            { OptionId: "opt-2", OptionValue: "Needs adjustment" },
-            { OptionId: "opt-3", OptionValue: "Requires replacement" },
-          ],
-        },
-      ]);
+      const sourceSteps = wr.ChecklistSteps?.length ? wr.ChecklistSteps : wr.ChecklistInstances ?? [];
+      setChecklistSteps([...sourceSteps].sort((a, b) => a.SortOrder - b.SortOrder).map((step) => ({
+        StepId: step.StepId, StepNumber: step.SortOrder, StepTitle: step.Title, InputType: step.InputType,
+        favourableBoolean: step.favourableBoolean, MinThreshold: step.MinThreshold, MaxThreshold: step.MaxThreshold, Unit: step.Unit,
+        RequiresPhotoOnFailure: step.RequiresPhotoOnFailure, RequiresCommentOnFailure: step.RequiresCommentOnFailure,
+        IsRequired: "IsRequired" in step ? step.IsRequired : true,
+        Options: step.Options.map((option) => ({ OptionId: option.OptionId, OptionValue: option.Value, TriggersFailure: option.TriggersFailure })),
+      })));
       setCurrentView("checklist");
     }
   };
@@ -261,6 +241,23 @@ export default function App() {
     switch (currentView) {
       case "checklist":
         return selectedWR ? (
+          <>
+          <div className="px-4 pt-40"><button className="mb-2 text-blue-700" onClick={() => { setCurrentView("home"); setSelectedWR(null); }}>← Back to work requests</button>
+            <h1 className="mb-2 font-bold">{selectedWR.WR_ID} · {selectedWR.Description}</h1>
+            <MobileExecutionTools key={`${selectedWR.WR_ID}-${currentTechnicianId}`} wr={selectedWR} technician={currentTechnicianId} save={async (change, message) => {
+              if (!engine) throw new Error("Offline storage is not ready.");
+              const current = await engine.getWorkRequest(selectedWR.WR_ID);
+              if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
+              const changed = change(current), now = new Date().toISOString();
+              const updated: BaseWorkRequest = { ...changed, UpdatedAt: now, Activity: [...(changed.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: currentTechnicianId, actorRole: "MobileTechnician", createdAt: now, text: message }] };
+              await engine.saveWorkRequest(updated, current);
+              setSelectedWR(updated);
+              setSiteWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+              setMyWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+              setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+            }} />
+          </div>
+          {selectedWR.WR_Type === "PM" && (checklistSteps.length ? (
           <ChecklistExecutor
             wr={selectedWR}
             steps={checklistSteps}
@@ -349,7 +346,8 @@ export default function App() {
               setCurrentView("home");
               setSelectedWR(null);
             }}
-          />
+          />) : <p className="p-4 text-amber-700">No PM checklist is available on this work request.</p>)}
+          </>
         ) : null;
 
       case "scanner":
