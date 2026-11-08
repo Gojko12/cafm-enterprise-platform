@@ -27,7 +27,7 @@ import { MobileChecklist } from "./components/MobileChecklist";
 import { ExecutionHub } from "./components/ExecutionHub";
 import { stable } from "./lib/portal-sync";
 
-type AppView = "home" | "hub" | "checklist" | "followup" | "scanner" | "inspection" | "qa-spot-check";
+type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check";
 const siteContextSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
   locationFreezes: z.array(LocationFreezeSchema),
@@ -41,6 +41,9 @@ export default function App() {
   const [freezes, setFreezes] = useState<LocationFreeze[]>([]);
   const [followUpDescription, setFollowUpDescription] = useState("");
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpError, setFollowUpError] = useState("");
+  const [openCompletion, setOpenCompletion] = useState(false);
   const activeSelection = useRef({ activeSiteId, currentTechnicianId });
   activeSelection.current = { activeSiteId, currentTechnicianId };
 
@@ -109,7 +112,7 @@ export default function App() {
 
   const handleSyncNow = async () => {
     if (!engine) throw new Error("The offline engine is not ready.");
-    const result = await engine.syncNow();
+    const result = await engine.syncAfterChanges();
     await refreshData();
     return result;
   };
@@ -275,18 +278,26 @@ export default function App() {
     const now = new Date().toISOString();
     const request: BaseWorkRequest = { WR_ID: `FJ-${crypto.randomUUID()}`, WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}.` }] };
     await persistCreatedRequest(request);
-    setCurrentView("hub");
-    alert(`Follow-up ${request.WR_ID} saved offline.`);
+    setFollowUpOpen(false);
+    try { await handleSyncNow(); alert(`Follow-up ${request.WR_ID} saved and synchronized.`); }
+    catch (error) { alert(`Follow-up ${request.WR_ID} saved offline. Synchronization failed: ${error instanceof Error ? error.message : "Retry Sync Now."}`); }
   };
+  const openFollowUp = () => {
+    if (!selectedWR) return;
+    setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `);
+    setFollowUpError("");
+    setFollowUpOpen(true);
+  };
+  const finishChecklist = () => { setOpenCompletion(true); setCurrentView("hub"); };
 
   // Render based on current view
   const renderContent = () => {
     switch (currentView) {
       case "hub":
-        return selectedWR ? <ExecutionHub wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} equipment={equipment} freezes={freezes} save={saveSelected} back={() => { setCurrentView("home"); setSelectedWR(null); }} checklist={() => setCurrentView("checklist")} followUp={() => { setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `); setCurrentView("followup"); }} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={openFollowUp} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
-        if (selectedWR.WR_Type === "PM") return <MobileChecklist key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} followUp={() => { setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `); setCurrentView("followup"); }} save={async (results, baseline) => saveSelected((current) => {
+        if (selectedWR.WR_Type === "PM") return <MobileChecklist key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={finishChecklist} followUp={openFollowUp} save={async (results, baseline) => saveSelected((current) => {
           const now = new Date().toISOString();
           const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
           for (const result of changed) {
@@ -297,8 +308,12 @@ export default function App() {
         {
           const todo = selectedWR.todoSteps ?? [];
           const todoSteps: PM_StepDefinition[] = [...todo].sort((a, b) => a.order - b.order).map((step) => ({ StepId: step.id, StepNumber: step.order, StepTitle: step.title, Instruction: step.instruction, InputType: "Boolean", favourableBoolean: true, RequiresPhotoOnFailure: false, RequiresCommentOnFailure: false }));
-          const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? String(step.isFavourable ?? true) : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
-          return <MobileChecklist key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} followUp={() => { setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `); setCurrentView("followup"); }} save={async (results, baseline) => saveSelected((current) => {
+          const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? "true" : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
+          return <MobileChecklist key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={finishChecklist} followUp={openFollowUp} addSteps={async (titles, scope) => saveSelected((current) => {
+            const existing = current.todoSteps ?? [];
+            const start = Math.max(0, ...existing.map((step) => step.order));
+            return { ...current, ...(scope !== undefined ? { roughScopeNotes: scope } : {}), todoSteps: [...existing, ...titles.map((title, index) => ({ id: crypto.randomUUID(), order: start + index + 1, title, completed: false }))] };
+          }, `Added ${titles.length} technician to-do step(s).`)} save={async (results, baseline) => saveSelected((current) => {
             const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
             if (changed.some((result) => !(current.todoSteps ?? []).some((step) => step.id === result.stepId))) throw new Error("A technician step was removed elsewhere. Your edits have not been saved.");
             return { ...current, todoSteps: (current.todoSteps ?? []).map((step) => {
@@ -306,13 +321,10 @@ export default function App() {
               if (!result) return step;
               const before = baseline.find((item) => item.stepId === step.id);
               if (step.completed !== (!!before && before.value !== "") || (before && ((step.isFavourable ?? true) !== before.passed || step.technicianComment !== before.comment || stable(step.photoUrls) !== stable(before.photoPaths)))) throw new Error(`Step ${step.id} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
-              return { ...step, completed: result.value !== "", completedBy: technicianName, completedAt: result.completedAt, technicianComment: result.comment, photoUrls: result.photoPaths, isFavourable: result.passed };
+              return { ...step, completed: result.value !== "", completedBy: result.value !== "" ? (step.completed ? step.completedBy : technicianName) : undefined, completedAt: result.value !== "" ? (step.completed ? step.completedAt : result.completedAt) : undefined, technicianComment: result.comment, photoUrls: result.photoPaths, isFavourable: result.passed };
             }) };
           }, "Technician task progress saved.")} />;
         }
-      case "followup":
-        return selectedWR ? <div className="space-y-3 p-4 pt-48"><button disabled={creatingFollowUp} onClick={() => setCurrentView("hub")}>← Back to WR Overview</button><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} /><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); void createFollowUp().catch((error: unknown) => alert(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button></div> : null;
-
       case "scanner":
         return (
           <QRScanner
@@ -400,6 +412,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className="h-screen overflow-y-auto flex flex-col">{renderContent()}</main>
+      {followUpOpen && selectedWR && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" aria-label="Create Follow-Up FJ" className="w-full max-w-lg space-y-3 rounded bg-white p-4"><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea aria-label="Follow-up description" className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} />{followUpError && <p role="alert" className="text-rose-700">{followUpError}</p>}<div className="flex gap-2"><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); setFollowUpError(""); void createFollowUp().catch((error: unknown) => setFollowUpError(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button><button disabled={creatingFollowUp} className="rounded border p-2" onClick={() => setFollowUpOpen(false)}>Cancel</button></div></div></div>}
 
       {/* Bottom Navigation Tabs */}
       {currentView === "home" && (

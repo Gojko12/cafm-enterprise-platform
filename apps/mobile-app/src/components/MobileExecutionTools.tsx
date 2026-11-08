@@ -4,7 +4,7 @@ import type { BaseWorkRequest } from "@cafm/shared-schema";
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 type Session = NonNullable<BaseWorkRequest["timeSessions"]>[number];
 
-function laborFor(current: BaseWorkRequest, sessions: Session[], technician: string, modifiedAt: string, person?: { Name: string; LastName: string; Trade: string; HourlyRate: number }) {
+export function laborFor(current: BaseWorkRequest, sessions: Session[], technician: string, modifiedAt: string, person?: { Name: string; LastName: string; Trade: string; HourlyRate: number }) {
   const existing = current.laborEntries?.find((entry) => entry.craftpersonId === technician);
   const legacy = current.CraftpersonLabor?.find((entry) => entry.craftpersonId === technician);
   const assignment = current.CraftpersonAssignments?.find((entry) => entry.craftpersonId === technician);
@@ -14,6 +14,17 @@ function laborFor(current: BaseWorkRequest, sessions: Session[], technician: str
   const opinion = existing?.technicianOpinionMinutes ?? legacy?.technicianOpinionMinutes ?? assignment?.technicianOpinionMinutes;
   const override = existing?.teamLeaderOverrideMinutes ?? legacy?.teamLeaderOverrideMinutes ?? assignment?.teamLeaderOverrideMinutes;
   return { ...existing, craftpersonId: technician, name: existing?.name ?? legacy?.name ?? assignment?.name ?? person?.Name ?? technician, lastName: existing?.lastName ?? legacy?.lastName ?? assignment?.lastName ?? person?.LastName ?? "", trade: existing?.trade ?? legacy?.trade ?? assignment?.trade ?? person?.Trade, hourlyRate: existing?.hourlyRate ?? legacy?.hourlyRate ?? assignment?.hourlyRate ?? person?.HourlyRate ?? 0, recordedTimerMinutes: recorded, technicianOpinionMinutes: opinion, teamLeaderOverrideMinutes: override, effectiveMinutes: override ?? opinion ?? recorded, lastModifiedBy: technician, lastModifiedAt: modifiedAt };
+}
+
+export function stopTechnicianTimer(current: BaseWorkRequest, technician: string, person?: { Name: string; LastName: string; Trade: string; HourlyRate: number }): BaseWorkRequest {
+  const running = (current.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
+  if (!running) return current;
+  const end = Date.now(), startTime = Date.parse(running.startedAt);
+  if (!Number.isFinite(startTime) || end < startTime) throw new Error("The timer timestamps are invalid; the session was not stopped.");
+  const minutes = Math.round((end - startTime) / 60000);
+  const sessions = (current.timeSessions ?? []).map((session) => session.id === running.id ? { ...session, endedAt: new Date(end).toISOString(), durationMinutes: minutes } : session);
+  const entry = laborFor(current, sessions, technician, new Date(end).toISOString(), person);
+  return { ...current, timeSessions: sessions, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), entry], TotalTimeMinutes: current.TotalTimeMinutes + minutes };
 }
 
 export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save }: {
@@ -51,12 +62,7 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
   const stop = () => void execute((current) => {
     const running = (current.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
     if (!running) throw new Error("The running session is no longer available.");
-    const end = Date.now(), startTime = Date.parse(running.startedAt);
-    if (!Number.isFinite(startTime) || end < startTime) throw new Error("The timer timestamps are invalid; the session was not stopped.");
-    const minutes = Math.round((end - startTime) / 60000);
-    const sessions = (current.timeSessions ?? []).map((session) => session.id === running.id ? { ...session, endedAt: new Date(end).toISOString(), durationMinutes: minutes } : session);
-    const entry = laborFor(current, sessions, technician, new Date(end).toISOString(), person);
-    return { ...current, timeSessions: sessions, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), entry], TotalTimeMinutes: current.TotalTimeMinutes + minutes };
+    return stopTechnicianTimer(current, technician, person);
   }, "Stopped work timer.");
   const elapsed = active ? Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000)) : 0;
   const completedSessions = (wr.timeSessions ?? []).filter((item) => item.craftpersonId === technician && item.endedAt);

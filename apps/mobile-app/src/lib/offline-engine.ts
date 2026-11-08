@@ -64,6 +64,7 @@ export async function compressPhoto(
 export class OfflineEngine {
   private isOnline: boolean = navigator.onLine;
   private syncInProgress: boolean = false;
+  private syncFinished: Promise<void> | null = null;
   private site: SiteId = "SITE-01";
   private person = "TECH-001";
   private simulatedOffline = false;
@@ -327,6 +328,8 @@ export class OfflineEngine {
     }
 
     this.syncInProgress = true;
+    let finishSync!: () => void;
+    this.syncFinished = new Promise<void>((resolve) => { finishSync = resolve; });
     const status: SyncStatus = { synced: 0, failed: 0, pending: 0, lastSyncTime: null };
 
     try {
@@ -348,7 +351,14 @@ export class OfflineEngine {
       return status;
     } finally {
       this.syncInProgress = false;
+      this.syncFinished = null;
+      finishSync();
     }
+  }
+
+  async syncAfterChanges(): Promise<SyncStatus> {
+    while (this.syncFinished) await this.syncFinished;
+    return this.syncNow();
   }
 
   isOnlineNow(): boolean {
