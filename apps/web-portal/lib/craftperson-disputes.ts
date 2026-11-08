@@ -6,7 +6,7 @@ import { absenceInterval, addDays, dailyCapacity, fromWallMinutes, intervalFor, 
 type Person = DemoData["craftspeople"][number];
 export type CraftpersonDispute = {
   date: string;
-  type: "Leave" | "Shift Hours" | "Capacity" | "Overlap";
+  type: "Leave" | "Shift Hours" | "Capacity" | "Overlap" | "Freeze";
   wr: BaseWorkRequest;
   message: string;
 };

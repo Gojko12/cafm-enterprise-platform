@@ -9,6 +9,7 @@ import { describeLocationFreeze, freezeLocationLabel, getActiveFreezeConflictsFo
 import { tradeColor } from "../../lib/trade-colors";
 import { startRequestDrag } from "../../lib/drag-preview";
 import { getEffectiveCraftpersonShift, shiftSegments } from "../../lib/craftperson-shifts";
+import type { DisputeViewMode, WRDispute } from "../../lib/disputes";
 
 type Person = DemoData["craftspeople"][number];
 type Preview = { wr: BaseWorkRequest; person: string; start: string; end: string };
@@ -25,7 +26,7 @@ function weekLabel(day: string) {
 
 export type TimelineSpotlight = { id: string; person: string; day: string; trade: string; token: number };
 
-export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit, onRemove, spotlight }: {
+export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit, onRemove, spotlight, disputeMap, disputeMode }: {
   dates: string[]; people: Person[]; requests: BaseWorkRequest[]; absences: CraftpersonAbsence[]; freezes: LocationFreeze[];
   site: string; firstHour: number; lastHour: number;
   visible: (wr: BaseWorkRequest) => boolean;
@@ -34,6 +35,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
   onEdit: (wr: BaseWorkRequest, person: string) => void;
   onRemove: (id: string, person: string) => void;
   spotlight?: TimelineSpotlight | null;
+  disputeMap: Map<string, WRDispute[]>; disputeMode: DisputeViewMode;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -145,13 +147,13 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 if (!interval) return null;
                 const left = Math.max(start, wallMinutes(interval.assignedStartDateTime)), right = Math.min(end, wallMinutes(interval.assignedEndDateTime));
                 const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
-                const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}`;
+                const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
                 const editable = ![27, 78, 100].includes(wr.Percentage);
                 const highlighted = spotlight?.id === wr.WR_ID && spotlight.person === person.id && spotlight.day === day;
                 const affected = !!focusFreeze && getActiveFreezeConflictsForWR({ ...wr, AssignedCraftpersonIds: [person.id], CraftpersonAssignments: [interval], StartDate_DateToPerform: undefined }, [focusFreeze]).length > 0;
-                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={title} draggable={editable} onDragStart={(event) => startRequestDrag(event, wr, person.id)} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${highlighted ? "z-10 animate-pulse bg-amber-200 shadow-lg ring-4 ring-amber-400" : affected ? "z-10 ring-2 ring-cyan-500" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
+                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={title} draggable={editable} onDragStart={(event) => startRequestDrag(event, wr, person.id)} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${disputeMode === "highlight" ? disputeMap.get(wr.WR_ID)?.length ? "z-10 animate-pulse bg-rose-100 font-bold text-rose-950 shadow-lg ring-4 ring-rose-500" : "opacity-40" : highlighted ? "z-10 animate-pulse bg-amber-200 shadow-lg ring-4 ring-amber-400" : affected ? "z-10 ring-2 ring-cyan-500" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
                   {editable && left === wallMinutes(interval.assignedStartDateTime) && <span role="separator" aria-label="Resize start" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "start")} />}
-                  <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_ID}{conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
+                  <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_ID}{disputeMap.get(wr.WR_ID)?.length ? " ⚠ Dispute" : conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
                   {editable && <button aria-label={`Edit time for ${wr.WR_ID}`} onClick={() => onEdit(wr, person.id)}>✎</button>}
                   <button title="Remove from calendar (Unschedule)" aria-label={`Unschedule ${wr.WR_ID} for ${person.Name} ${person.LastName}`} onClick={() => onRemove(wr.WR_ID, person.id)}>✕</button>
                   {editable && right === wallMinutes(interval.assignedEndDateTime) && <span role="separator" aria-label="Resize end" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "end")} />}

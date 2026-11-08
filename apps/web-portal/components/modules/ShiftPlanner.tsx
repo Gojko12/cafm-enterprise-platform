@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import type { CraftpersonAbsence } from "@cafm/shared-schema";
 import type { DemoData } from "@/lib/cafm-data";
 import type { CraftpersonDispute } from "@/lib/craftperson-disputes";
+import type { DisputeViewMode } from "@/lib/disputes";
 import { getEffectiveCraftpersonShift, shiftSegments } from "@/lib/craftperson-shifts";
 import { activeAbsences, addDays, wallMinutes } from "@/lib/dispatch";
 
@@ -20,19 +21,20 @@ export function MultiFilter({ label, options, selected, onChange }: { label: str
   </div></details>;
 }
 
-export function ShiftPlanner({ people, absences, today, selected, setSelected, brush, setBrush, customStart, customEnd, setCustomStart, setCustomEnd, paint, editDay, disputes, period, setPeriod, anchor, setAnchor }: {
+export function ShiftPlanner({ people, absences, today, selected, setSelected, brush, setBrush, customStart, customEnd, setCustomStart, setCustomEnd, paint, paintCustom, editDay, disputes, disputeMode, period, setPeriod, anchor, setAnchor }: {
   people: Person[]; absences: CraftpersonAbsence[]; today: string; selected: string[]; setSelected: React.Dispatch<React.SetStateAction<string[]>>;
   brush: Brush; setBrush: (value: Brush) => void; customStart: string; customEnd: string; setCustomStart: (value: string) => void; setCustomEnd: (value: string) => void;
-  paint: (ids: string[], dates: string[], brush: Brush) => void; editDay: (person: Person, day: string) => void;
-  disputes: Record<string, CraftpersonDispute[]>; period: "week" | "two" | "month"; setPeriod: (value: "week" | "two" | "month") => void; anchor: string; setAnchor: (value: string) => void;
+  paint: (ids: string[], dates: string[], brush: Brush) => void; paintCustom: (id: string, day: string, start: string, end: string) => void; editDay: (person: Person, day: string) => void;
+  disputes: Record<string, CraftpersonDispute[]>; disputeMode: DisputeViewMode; period: "week" | "two" | "month"; setPeriod: (value: "week" | "two" | "month") => void; anchor: string; setAnchor: (value: string) => void;
 }) {
   const [filter, setFilter] = useState<string[]>([]);
+  const [editing, setEditing] = useState<{ id: string; day: string; start: string; end: string } | null>(null);
   const date = new Date(`${anchor}T12:00:00`);
   const first = period === "month" ? `${anchor.slice(0, 7)}-01` : addDays(anchor, -((date.getDay() + 6) % 7));
   const count = period === "month" ? new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate() : period === "week" ? 7 : 14;
   const days = Array.from({ length: count }, (_, i) => addDays(first, i));
   const dayValues = (p: Person, day: string) => { const leaves = activeAbsences(absences, p.SiteId, p.id, day); return [getEffectiveCraftpersonShift(p, day).shiftType, ...(leaves.length ? leaves.map((a) => a.absenceType) : ["Available"])]; };
-  const visible = people.filter((p) => !filter.length || days.some((day) => dayValues(p, day).some((value) => filter.includes(value))));
+  const visible = people.filter((p) => (disputeMode !== "only" || (disputes[p.id] ?? []).some((issue) => issue.type !== "Overlap" && days.includes(issue.date))) && (!filter.length || days.some((day) => dayValues(p, day).some((value) => filter.includes(value)))));
   const move = (offset: number) => {
     if (period !== "month") setAnchor(addDays(anchor, offset * count));
     else { const moved = new Date(date.getFullYear(), date.getMonth() + offset, 1, 12); setAnchor(`${moved.getFullYear()}-${String(moved.getMonth() + 1).padStart(2, "0")}-01`); }
@@ -50,8 +52,10 @@ export function ShiftPlanner({ people, absences, today, selected, setSelected, b
     <div className="overflow-auto"><table className="border-collapse"><thead><tr><th>Craftsperson</th>{days.map((day) => <th key={day} className="min-w-36 border p-1">{day === today ? "Today" : day === addDays(today, 1) ? "Tomorrow" : new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" })}</th>)}</tr></thead><tbody>
       {visible.map((p) => <tr key={p.id}><th className="sticky left-0 z-10 bg-white p-1 text-left"><input type="checkbox" checked={selected.includes(p.id)} onChange={(e) => setSelected((old) => e.target.checked ? [...old, p.id] : old.filter((id) => id !== p.id))} /> <button title="Apply brush to whole visible period" onClick={() => { if (window.confirm(`Apply ${labels[brush]} to ${p.Name} for all ${days.length} days?`)) paint([p.id], days, brush); }}>{p.Name} {p.LastName}</button></th>
         {days.map((day) => { const shift = getEffectiveCraftpersonShift(p, day); const leaves = activeAbsences(absences, p.SiteId, p.id, day); const key = (leaves[0]?.absenceType && brushes.includes(leaves[0].absenceType as Brush) ? leaves[0].absenceType : shift.shiftType) as Brush; const issues = (disputes[p.id] ?? []).filter((item) => item.date === day); const midnight = wallMinutes(`${day}T00:00`); const matches = filter.length && dayValues(p, day).some((value) => filter.includes(value));
-          return <td key={day} className={`border p-1 align-top ${matches ? "ring-2 ring-inset ring-amber-400" : ""}`}><button className="w-full text-left" onClick={() => paint([p.id], [day], brush)}><span className={`block rounded px-1 ${colors[key]}`}>{leaves.length ? leaves.map((leave) => leave.absenceType).join(", ") : `${labels[shift.shiftType]} ${shift.shiftStart}–${shift.shiftEnd}`}</span><span className="relative mt-1 block h-2.5 w-full overflow-hidden rounded bg-slate-200" aria-label={`Working time ${shift.shiftStart} to ${shift.shiftEnd}`}>{shiftSegments(p, day).map((part, index) => <span key={index} className="absolute inset-y-0 border border-emerald-500 bg-white" style={{ left: `${(part.start - midnight) / 1440 * 100}%`, width: `${(part.end - part.start) / 1440 * 100}%` }} />)}</span></button>
-            <button className="text-blue-700" aria-label={`Custom hours for ${p.Name} ${day}`} onClick={() => editDay(p, day)}>⚙</button>{issues.map((issue, index) => <p key={`${issue.type}-${issue.wr.WR_ID}-${index}`} className="whitespace-normal text-red-700">⚠ {issue.message}</p>)}</td>;
+          return <td key={day} className={`border p-1 align-top ${disputeMode === "highlight" ? issues.some((issue) => issue.type !== "Overlap") ? "relative z-10 bg-rose-100 font-bold text-rose-950 shadow-lg ring-4 ring-rose-500" : "opacity-40" : matches ? "ring-2 ring-inset ring-amber-400" : ""}`}><button className="w-full text-left" onClick={() => paint([p.id], [day], brush)}><span className={`block rounded px-1 ${colors[key]}`}>{leaves.length ? leaves.map((leave) => leave.absenceType).join(", ") : `${labels[shift.shiftType]} ${shift.shiftStart}–${shift.shiftEnd}`}</span><span className="relative mt-1 block h-2.5 w-full overflow-hidden rounded bg-slate-200" aria-label={`Working time ${shift.shiftStart} to ${shift.shiftEnd}`}>{shiftSegments(p, day).map((part, index) => <span key={index} className="absolute inset-y-0 border border-emerald-500 bg-white" style={{ left: `${(part.start - midnight) / 1440 * 100}%`, width: `${(part.end - part.start) / 1440 * 100}%` }} />)}</span></button>
+            <button className="text-blue-700" aria-label={`Edit inline custom hours for ${p.Name} ${day}`} onClick={() => setEditing({ id: p.id, day, start: shift.shiftStart, end: shift.shiftEnd })}>⏱</button> <button className="text-blue-700" aria-label={`Open schedule for ${p.Name} ${day}`} onClick={() => editDay(p, day)}>⚙</button>
+            {editing?.id === p.id && editing.day === day && <div className="space-y-1"><input aria-label="Cell start time" type="time" value={editing.start} onChange={(e) => setEditing({ ...editing, start: e.target.value })} /><input aria-label="Cell end time" type="time" value={editing.end} onChange={(e) => setEditing({ ...editing, end: e.target.value })} /><button disabled={!editing.start || !editing.end || editing.start === editing.end} onClick={() => { paintCustom(p.id, day, editing.start, editing.end); setEditing(null); }}>Save</button> <button onClick={() => setEditing(null)}>Cancel</button></div>}
+            {issues.map((issue, index) => <p key={`${issue.type}-${issue.wr.WR_ID}-${index}`} className="whitespace-normal text-red-700">⚠ {issue.message}</p>)}</td>;
         })}
       </tr>)}
     </tbody></table></div>

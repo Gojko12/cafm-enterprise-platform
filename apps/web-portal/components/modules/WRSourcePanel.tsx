@@ -10,6 +10,8 @@ import { intervalFor } from "../../lib/dispatch";
 import { MultiSelectFilter } from "../common/MultiSelectFilter";
 import { startRequestDrag } from "../../lib/drag-preview";
 import { ResizeHandle } from "../common/TableColumns";
+import { DisputeViewFilter } from "../common/DisputeViewFilter";
+import type { DisputeViewMode, WRDispute } from "../../lib/disputes";
 
 type Person = DemoData["craftspeople"][number];
 const fields = [
@@ -25,9 +27,10 @@ const ljStatuses: Record<number, string> = { 0: "New Request for Quotation", 10:
 const preferenceKey = "cafm-wr-source-preferences-v1";
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
 
-export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpen, onAssign, onShow }: {
+export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpen, onAssign, onShow, disputeMap, disputeMode, onDisputeMode }: {
   requests: BaseWorkRequest[]; people: Person[]; buildings: DemoData["buildings"]; freezes: LocationFreeze[]; now: string;
   onOpen: (id: string) => void; onAssign: (id: string) => void; onShow: (id: string) => void;
+  disputeMap: Map<string, WRDispute[]>; disputeMode: DisputeViewMode; onDisputeMode: (mode: DisputeViewMode) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [mode, setMode] = useState<"card" | "list">("card");
@@ -83,7 +86,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
   });
   const options = { ...commonStatuses, ...(types.includes("LJ") ? ljStatuses : {}) };
   const activeStatuses = statuses.filter((value) => value in options);
-  const rows = requests.filter((wr) => types.includes(wr.WR_Type) &&
+  const rows = requests.filter((wr) => (disputeMode !== "only" || (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0) && types.includes(wr.WR_Type) &&
     (!activeStatuses.length || activeStatuses.includes(wr.Percentage)) &&
     (trades === null || trades.includes(wr.TradeName ?? "")) && (buildingsFilter === null || buildingsFilter.includes(wr.bl_id ?? "")) &&
     [wr.bl_id, wr.LevelName, wr.RoomCode, buildings.find((item) => item.bl_id === wr.bl_id)?.Name].some((value) => String(value ?? "").toLowerCase().includes(location.toLowerCase())) &&
@@ -101,6 +104,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
       </div>
       {storageError && <p role="alert" className="text-red-700">{storageError}</p>}
       <details open><summary className="cursor-pointer font-bold">Filter</summary>
+        <DisputeViewFilter value={disputeMode} onChange={onDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />
         <input aria-label="Search work requests" className="w-full border p-1" placeholder="Search work requests" value={search} onChange={(event) => setSearch(event.target.value)} />
         <div>{["PM", "FJ", "LJ"].map((type) => <label key={type} className="mr-2"><input type="checkbox" checked={types.includes(type)} onChange={(event) => { const checked = event.target.checked; toggle(setTypes, type, checked); if (type === "LJ" && !checked) setStatuses((old) => old.filter((status) => status in commonStatuses)); }} /> {type}</label>)}</div>
         <details><summary>WR Status {activeStatuses.length ? `(${activeStatuses.length})` : "(All)"}</summary><div className="max-h-40 overflow-auto">{Object.entries(options).map(([number, label]) => <label key={number} className="block"><input type="checkbox" checked={activeStatuses.includes(Number(number))} onChange={(event) => toggle(setStatuses, Number(number), event.target.checked)} /> {number}% {label}</label>)}</div><button className={button} onClick={() => setStatuses([])}>Clear</button></details>
@@ -112,12 +116,13 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
         <div role="group" aria-label="Schedule filter" className="flex flex-wrap">{([["unscheduled", "Unscheduled"], ["all", "Scheduled & Unscheduled"], ["scheduled", "Scheduled"]] as const).map(([value, label]) => <button key={value} type="button" className={button} aria-pressed={scheduleFilter === value} onClick={() => setScheduleFilter(value)}>{label}</button>)}</div>
       </details>
       <div className="max-h-[65vh] overflow-auto">
-        {mode === "card" ? rows.map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)}`}>
+        {mode === "card" ? rows.map((wr) => <article key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)} ${disputeMode === "highlight" ? disputeMap.get(wr.WR_ID)?.length ? "relative z-10 bg-rose-100 font-bold text-rose-950 shadow-lg ring-4 ring-rose-500" : "opacity-40" : ""}`}>
+          {!!disputeMap.get(wr.WR_ID)?.length && <p title={disputeMap.get(wr.WR_ID)?.map((item) => item.detail).join("\n")} className="text-rose-800">⚠ {disputeMap.get(wr.WR_ID)?.map((item) => item.label).join(", ")}</p>}
           {ordered.map(([id, label]) => <p key={id} className="truncate" title={`${label}: ${values(wr)[id]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
           {getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄ Freeze Active at Location</span>}
           <div><button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button> <button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button> {wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</div>
         </article>) : <table className="table-fixed text-left" style={{ width: ordered.reduce((total, [id]) => total + (widths[id] ?? 144), 230) }}><colgroup>{ordered.map(([id]) => <col key={id} style={{ width: widths[id] ?? 144 }} />)}<col style={{ width: 230 }} /></colgroup><thead><tr>{ordered.map(([id, label]) => <th key={id} className="relative"><div className="flex min-w-0"><button className="min-w-0 flex-1 truncate text-left" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button><button type="button" aria-label={`Move ${label} left in header`} onClick={() => moveField(id, -1)}>‹</button><button type="button" aria-label={`Move ${label} right in header`} onClick={() => moveField(id, 1)}>›</button></div><ResizeHandle label={label} width={widths[id] ?? 144} onResize={(width) => setWidths((current) => ({ ...current, [id]: width }))} /></th>)}<th>Actions</th></tr></thead><tbody>
-          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`border-l-4 ${tradeColor(wr.TradeName)}`}>{ordered.map(([id]) => <td key={id} className="overflow-hidden p-1" title={values(wr)[id]}><div className="truncate whitespace-nowrap">{cell(wr, id)}</div></td>)}<td className="whitespace-nowrap">{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
+          {rows.map((wr) => <tr key={wr.WR_ID} draggable onDragStart={(event) => startRequestDrag(event, wr)} className={`border-l-4 ${tradeColor(wr.TradeName)} ${disputeMode === "highlight" ? disputeMap.get(wr.WR_ID)?.length ? "bg-rose-100 font-bold text-rose-950 ring-4 ring-rose-500" : "opacity-40" : ""}`}>{ordered.map(([id]) => <td key={id} className="overflow-hidden p-1" title={values(wr)[id]}><div className="truncate whitespace-nowrap">{cell(wr, id)}</div></td>)}<td className="whitespace-nowrap">{!!disputeMap.get(wr.WR_ID)?.length && <span title={disputeMap.get(wr.WR_ID)?.map((item) => `${item.label}: ${item.detail}`).join("\n")}>⚠ Dispute </span>}{getCurrentLocationFreezes(wr, freezes, now).length > 0 && <span title={getCurrentLocationFreezes(wr, freezes, now).map(describeLocationFreeze).join("; ")}>❄</span>}<button className={button} onClick={() => onAssign(wr.WR_ID)}>Assign...</button><button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>{wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}</td></tr>)}
         </tbody></table>}
         {!rows.length && <p className="p-2">No matching work requests.</p>}
       </div>

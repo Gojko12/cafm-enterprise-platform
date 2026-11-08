@@ -79,7 +79,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       const tomorrow = addDays(today, 1);
       craftspeople.push({ id: `S${tag}-C${i + 1}`, SiteId: site, Name: ["Gregor", "Tomaž", "Blaž", "Eva", "Lukas", "Sara", "Marco", "Elena", "Klaus", "Ines", "Lidija", "Paolo"][i],
         LastName: ["GOJKOŠEK", "Gojkošek", "Gojkošek", "Veselič", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i],
-        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, baseShiftType: shift.shiftType, shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, shiftOverrides: { [tomorrow]: DEFAULT_SHIFTS[(["Late", "Early", "Night", "Early"] as const)[i % 4]], [addDays(today, 3)]: DEFAULT_SHIFTS[i % 2 ? "Early" : "Late"], [addDays(today, 8)]: DEFAULT_SHIFTS[i % 2 ? "Late" : "Early"] }, secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
+        username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, baseShiftType: shift.shiftType, shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, shiftOverrides: { [tomorrow]: DEFAULT_SHIFTS[(["Late", "Late", "Night", "Early"] as const)[i % 4]], [addDays(today, 3)]: DEFAULT_SHIFTS[i % 2 ? "Early" : "Late"], [addDays(today, 8)]: DEFAULT_SHIFTS[i % 2 ? "Late" : "Early"] }, secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
     }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
@@ -219,6 +219,15 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       example.CraftpersonAssignments = [{ craftpersonId: siteCraft[0].id, assignedStartDateTime: `${day}T08:00`, assignedEndDateTime: `${day}T11:00` }];
       example.AssignedCraftpersonIds = [siteCraft[0].id];
       example.StartDate_DateToPerform = day;
+    }
+    const disputeDay = addDays(calendarDate(new Date()), 1);
+    for (const type of ["PM", "FJ", "LJ"] as const) {
+      workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === type && ![27, 78, 100].includes(wr.Percentage)).slice(0, 2).forEach((wr, index) => {
+        const person = siteCraft[index];
+        wr.AssignedCraftpersonIds = [person.id];
+        wr.StartDate_DateToPerform = disputeDay;
+        wr.CraftpersonAssignments = [{ craftpersonId: person.id, assignedStartDateTime: `${disputeDay}T08:00`, assignedEndDateTime: `${disputeDay}T10:00` }];
+      });
     }
   }
   return { buildings, floors, rooms, equipment, blueprints, schedules, craftspeople, workRequests };

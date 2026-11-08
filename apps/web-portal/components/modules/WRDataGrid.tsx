@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
@@ -9,8 +9,11 @@ import { useApp } from "@/lib/hooks/useApp";
 import { gridStatusChange } from "@/lib/wr-grid";
 import { groupLongJobs } from "@/lib/wr-overview";
 import { ResizeHandle, useTableColumns } from "@/components/common/TableColumns";
+import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
+import { mapWRDisputes } from "@/lib/disputes";
+import type { DisputeViewMode } from "@/lib/disputes";
 
-type Column = "id" | "description" | "status" | "percentage" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created";
+type Column = "id" | "description" | "status" | "percentage" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes";
 const columns: { key: Column; label: string }[] = [
   { key: "id", label: "WR ID" }, { key: "description", label: "Title / Description" },
   { key: "status", label: "Status" }, { key: "percentage", label: "Substatus %" },
@@ -18,7 +21,7 @@ const columns: { key: Column; label: string }[] = [
   { key: "floor", label: "Floor" }, { key: "room", label: "Room" }, { key: "equipment", label: "Equipment" },
   { key: "cost", label: "Estimated Cost (EUR)" }, { key: "costType", label: "Cost Type" },
   { key: "craftperson", label: "Assigned Craftperson" }, { key: "due", label: "Due Date" },
-  { key: "margin", label: "Margin Date" }, { key: "created", label: "Created" },
+  { key: "margin", label: "Margin Date" }, { key: "created", label: "Created" }, { key: "disputes", label: "Disputes" },
 ];
 
 export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, requestType }: { requests: BaseWorkRequest[]; onOpen: (wr: BaseWorkRequest) => void; grouped?: boolean; onFilterCount?: (count: number) => void; requestType: "PM" | "FJ" | "LJ" }) {
@@ -33,6 +36,8 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
   const [bulkRoom, setBulkRoom] = useState("");
   const [bulkDue, setBulkDue] = useState("");
   const [error, setError] = useState("");
+  const [disputeMode, setDisputeMode] = useState<DisputeViewMode>("all");
+  const disputeMap = useMemo(() => mapWRDisputes(data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes), [data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes]);
   const value = (wr: BaseWorkRequest, key: Column): string => {
     switch (key) {
       case "id": return wr.WR_ID;
@@ -53,10 +58,11 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "due": return wr.DueDate ?? "";
       case "margin": return wr.MarginDate ?? "";
       case "created": return wr.CreatedDate;
+      case "disputes": return (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.label).join(", ");
     }
   };
   const config = useTableColumns(`work-requests-${requestType}`, columns.map(({ key, label }) => ({ id: key, label, value: (wr: BaseWorkRequest) => key === "cost" ? wr.EstimatedCostEur : key === "percentage" ? wr.Percentage : value(wr, key) })));
-  const visible = config.sorted(requests.filter((wr) => config.visible.every(({ id }) =>
+  const visible = config.sorted(requests.filter((wr) => (disputeMode !== "only" || (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0) && config.visible.every(({ id }) =>
     value(wr, id as Column).toLowerCase().includes((filters[id as Column] ?? "").trim().toLowerCase()))));
   const groups = grouped ? groupLongJobs(visible) : [];
   const displayed = grouped ? groups.filter((group) => !collapsed.includes(group.key)).flatMap((group) => group.requests) : visible;
@@ -103,12 +109,12 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
     });
     setSelected([]);
   };
-  const row = (wr: BaseWorkRequest) => <tr key={wr.WR_ID} className="border-t hover:bg-slate-50" onDoubleClick={() => onOpen(wr)}>
+  const row = (wr: BaseWorkRequest) => <tr key={wr.WR_ID} className={`border-t hover:bg-slate-50 ${disputeMode === "highlight" ? (disputeMap.get(wr.WR_ID)?.length ? "border-l-4 border-l-rose-600 bg-rose-50 ring-1 ring-rose-300" : "opacity-40") : ""}`} onDoubleClick={() => onOpen(wr)}>
     <td className="p-2" title={`Select ${wr.WR_ID}`} onDoubleClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${wr.WR_ID}`} checked={selected.includes(wr.WR_ID)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, wr.WR_ID] : current.filter((id) => id !== wr.WR_ID))} /></td>
-    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={value(wr, key)}><div className="truncate">{key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : value(wr, key) || "—"}</div></td>; })}
+    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : value(wr, key)}><div className="truncate">{key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{value(wr, key)}</span> : value(wr, key) || "—"}</div></td>; })}
     <td className="p-2" title="Open / Edit" onDoubleClick={(event) => event.stopPropagation()}><button className="block max-w-full truncate text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
   return <div className="space-y-2">
-    <div className="flex justify-end">{config.menu}</div>
+    <div className="flex justify-between"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{config.menu}</div>
     {error && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
     {selected.length > 0 && <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded border bg-white p-2 text-xs shadow">
       <strong>{selected.length} selected ({selected.filter((id) => !displayed.some((wr) => wr.WR_ID === id)).length} hidden) · Bulk Actions</strong>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
@@ -22,6 +22,9 @@ import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
 import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
 import { isOutsideShift } from "@/lib/craftperson-shifts";
 import { CraftpersonShiftWorkspace } from "@/components/modules/CraftpersonShiftWorkspace";
+import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
+import { getWRDisputes, mapWRDisputes } from "@/lib/disputes";
+import type { DisputeViewMode } from "@/lib/disputes";
 
 type Move = { id: string; from?: string; person: string; date: string; start?: string; end?: string };
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
@@ -47,6 +50,8 @@ function SchedulerContent() {
   const [quickPerson, setQuickPerson] = useState("");
   const [quickDate, setQuickDate] = useState(date);
   const [tab, setTab] = useState<"dispatch" | "availability" | "freezes">("dispatch");
+  const [disputeMode, setDisputeMode] = useState<DisputeViewMode>("all");
+  const disputeMap = useMemo(() => mapWRDisputes(data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes), [data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes]);
   const [firstHour, setFirstHour] = useState(6);
   const [lastHour, setLastHour] = useState(20);
   const [weekends, setWeekends] = useState(false);
@@ -89,11 +94,16 @@ function SchedulerContent() {
   const days = view === "day" ? 1 : view === "week" ? 7 : view === "two" ? 14 : new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
   const start = view === "month" ? `${date.slice(0, 7)}-01` : date;
   const dates = Array.from({ length: days }, (_, index) => addDays(start, index)).filter((day) => weekends || view === "day" || ![0, 6].includes(new Date(`${day}T12:00:00`).getDay()));
-  const visible = (wr: BaseWorkRequest) => (!isolateWrId || wr.WR_ID === isolateWrId) && types.includes(wr.WR_Type) && (types.includes("Frozen") || !wr.IsFrozen) && (types.includes("Completed") || ![78, 100].includes(wr.Percentage));
+  const visible = (wr: BaseWorkRequest) => (disputeMode !== "only" || (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0) && (!isolateWrId || wr.WR_ID === isolateWrId) && types.includes(wr.WR_Type) && (types.includes("Frozen") || !wr.IsFrozen) && (types.includes("Completed") || ![78, 100].includes(wr.Percentage));
   const filteredPeople = people.filter((person) => (trades === null || trades.includes(person.Trade)) &&
     (selectedPeople === null || selectedPeople.includes(person.id)) &&
     (buildings === null || siteRequests.some((wr) => wr.bl_id && buildings.includes(wr.bl_id) && wr.AssignedCraftpersonIds.includes(person.id))) &&
-    (availability === "All" || dates.some((day) => (activeAbsences(data.craftpersonAbsences, activeSiteId, person.id, day).length > 0) === (availability === "On leave"))));
+    (availability === "All" || dates.some((day) => (activeAbsences(data.craftpersonAbsences, activeSiteId, person.id, day).length > 0) === (availability === "On leave"))) &&
+    (disputeMode !== "only" || siteRequests.some((wr) => {
+      const slot = intervalFor(wr, person.id);
+      return visible(wr) && !!slot && dates.some((day) => slot.assignedStartDateTime < `${addDays(day, 1)}T00:00` && slot.assignedEndDateTime > `${day}T00:00`) &&
+        getWRDisputes({ ...wr, AssignedCraftpersonIds: [person.id], CraftpersonAssignments: [slot], StartDate_DateToPerform: undefined }, people, data.craftpersonAbsences, data.locationFreezes, siteRequests).length > 0;
+    })));
   const request = siteRequests.find((wr) => wr.WR_ID === open);
   const audit = (wr: BaseWorkRequest, text: string): BaseWorkRequest => {
     const now = new Date().toISOString();
@@ -213,6 +223,7 @@ function SchedulerContent() {
       <button className={button} onClick={() => moveDate(-1)}>◀ Prev</button><button className={button} onClick={() => setDate(calendarDate(new Date()))}>Today</button><button className={button} onClick={() => moveDate(1)}>Next ▶</button>
       <strong>{dates[0]} – {dates[dates.length - 1]}</strong>
       <select aria-label="Timeline" className={button} value={view} onChange={(e) => setView(e.target.value as typeof view)}><option value="day">Day</option><option value="week">Week</option><option value="two">2 Weeks</option><option value="month">Month</option></select>
+      <DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={siteRequests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />
       <MultiSelectFilter label="Trades" value={trades} onChange={setTrades} options={CLASSICAL_TRADES.map((item) => ({ value: item, label: item, className: `rounded border px-1 ${tradeColor(item)}` }))} />
       <MultiSelectFilter label="Buildings" value={buildings} onChange={setBuildings} options={data.buildings.filter((item) => item.SiteId === activeSiteId).map((item) => ({ value: item.bl_id, label: `${item.bl_id} · ${item.Name}` }))} />
       <select aria-label="Availability" className={button} value={availability} onChange={(e) => setAvailability(e.target.value)}><option>All</option><option>Only available</option><option>On leave</option></select>
@@ -223,8 +234,8 @@ function SchedulerContent() {
       <label><input type="checkbox" checked={weekends} onChange={(event) => setWeekends(event.target.checked)} /> Show Weekends</label>
     </div>
     <p>Shift Hours · <span className="bg-slate-100">Off-Shift</span> · <span className="bg-amber-100">🏖 Vacation</span> · <span className="bg-indigo-100">🎓 Training</span> · <span className="bg-rose-100">🤒 Sick Leave</span> · ❄ Location Freeze</p>
-    <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} onOpen={setOpen} onShow={showRequest} onAssign={(id) => { setQuickPerson(""); setQuickDate(date); setQuickAssign(id); }} />
-      <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
+    <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} disputeMap={disputeMap} disputeMode={disputeMode} onDisputeMode={setDisputeMode} onOpen={setOpen} onShow={showRequest} onAssign={(id) => { setQuickPerson(""); setQuickDate(date); setQuickAssign(id); }} />
+      <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
     {tab === "availability" && <CraftpersonShiftWorkspace key={activeSiteId} />}
