@@ -90,6 +90,8 @@ export const WR_Statuses: readonly WRStatusDefinition[] = Object.freeze([
 ]);
 
 export const WR_StatusesSchema = z.array(WRStatusDefinitionSchema);
+export const QAAuditStatusSchema = z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]);
+export const QASelectionModeSchema = z.enum(["ComputerRandom5Percent", "ManualInspectorPick", "QRScanOnSite"]);
 
 // Long Job Acceptance Gates Schema
 export const LJAcceptanceGateSchema = z.object({
@@ -213,8 +215,8 @@ export const BaseWorkRequestSchema = z.object({
   AuditInspectionStatus: z.enum(["To Be Inspected", "Passed Inspected", "PM WRs to be corrected"]).optional(),
   QA_InspectionStatus: z.enum(["Pending", "Passed", "ToBeCorrected"]).optional(),
   QA_InspectedBy: z.string().optional(),
-  QA_AuditStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
-  QA_SelectionMode: z.enum(["ComputerRandom5Percent", "ManualInspectorPick", "QRScanOnSite"]).optional(),
+  QA_AuditStatus: QAAuditStatusSchema.optional(),
+  QA_SelectionMode: QASelectionModeSchema.nullish(),
   QA_InspectedDate: z.string().optional(),
   QA_CompletionDate: z.string().optional(),
   QA_CorrectedDate: z.string().optional(),

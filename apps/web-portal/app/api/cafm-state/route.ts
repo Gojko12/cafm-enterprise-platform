@@ -107,6 +107,30 @@ async function load() {
   }
 }
 
+async function replaceDatabase(temporary: string) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(temporary, filename);
+      return;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (process.platform !== "win32" || (code !== "EPERM" && code !== "EBUSY") || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+
+function persistenceError(error: unknown) {
+  if (error instanceof z.ZodError || error instanceof SyntaxError) {
+    return "Could not persist the CAFM state: the existing database is invalid. The database was not replaced.";
+  }
+  const code = error instanceof Error && "code" in error ? error.code : undefined;
+  if (code === "ENOSPC") return "Could not persist the CAFM state: the server disk is full.";
+  if (code === "EACCES" || code === "EPERM") return "Could not persist the CAFM state: the server cannot write or replace the database file.";
+  if (code === "EBUSY") return "Could not persist the CAFM state: the database file is busy. Please retry.";
+  return "Could not persist the CAFM state. See the server log for details.";
+}
+
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin || !allowedOrigins.has(origin)) return new Response(null, { status: 403, headers: cors(request) });
@@ -168,17 +192,21 @@ export async function POST(request: Request) {
     } finally {
       await file.close();
     }
-    await rename(temporary, filename);
+    await replaceDatabase(temporary);
     temporary = undefined;
     return reply(request, next);
   } catch (error) {
     console.error("Could not persist CAFM state", error);
-    return reply(request, { error: "Could not persist the CAFM state." }, 500);
+    return reply(request, { error: persistenceError(error) }, 500);
   } finally {
     if (temporary) await unlink(temporary).catch((error) => console.error("Could not remove temporary state file", error));
     if (lock) {
-      await lock.close();
-      await unlink(lockFile);
+      try {
+        await lock.close();
+        await unlink(lockFile);
+      } catch (error) {
+        console.error("Could not release CAFM state write lock", error);
+      }
     }
   }
 }

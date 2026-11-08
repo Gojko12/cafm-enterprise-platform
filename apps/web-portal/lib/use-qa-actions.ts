@@ -20,7 +20,7 @@ export function useQAActions() {
   const commit = async (update: (requests: BaseWorkRequest[]) => BaseWorkRequest[]) => {
     const site = data.workRequests.filter((wr) => wr.SiteId === activeSiteId);
     const updated = update(site);
-    await commitSnapshot(data, { ...data, workRequests: [...data.workRequests.filter((wr) => wr.SiteId !== activeSiteId), ...updated] });
+    await commitSnapshot(data, { ...data, workRequests: [...data.workRequests.filter((wr) => wr.SiteId !== activeSiteId), ...updated] }, { optimistic: true });
   };
   return {
     autoSelect5PercentQAAudits: (options: QAOptions) => commit((wrs) => selectRandomAudits(wrs, options, actor, data.qaInspectorAssignments ?? [])),

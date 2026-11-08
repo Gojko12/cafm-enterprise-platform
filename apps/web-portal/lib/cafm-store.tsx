@@ -184,7 +184,7 @@ interface Store {
   data: DemoData;
   setData: React.Dispatch<React.SetStateAction<DemoData>>;
   reset: () => void;
-  commitSnapshot: (expected: DemoData, next: DemoData) => Promise<void>;
+  commitSnapshot: (expected: DemoData, next: DemoData, options?: { optimistic?: boolean }) => Promise<void>;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -392,22 +392,31 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     return () => { active = false; window.clearInterval(interval); };
   }, [ready, site, pendingKey, baseKey]);
 
-  const commitSnapshot = async (expected: DemoData, next: DemoData) => {
+  const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean }) => {
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
     if (busy.current) throw new Error("Synchronization is in progress. Try again.");
     const before = JSON.stringify(expected);
     if (JSON.stringify(current.current) !== before) throw new Error("Data changed since preview. Run the dry-run again.");
+    const optimistic = options?.optimistic === true;
+    const after = JSON.stringify(next);
     busy.current = true;
+    let committed = false;
+    if (optimistic) {
+      current.current = next;
+      setData(next);
+    }
     try {
       const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next });
+      committed = true;
       revision.current = result.revision;
-      acknowledged.current = JSON.stringify(next);
-      if (JSON.stringify(current.current) !== before) {
+      acknowledged.current = after;
+      if (JSON.stringify(current.current) !== (optimistic ? after : before)) {
         blocked.current = true;
-        throw new Error("Import was saved on the server, but local data changed during the commit. Local edits were retained; resolve the conflict.");
+        throw new Error("Changes were saved on the server, but local data changed during the commit. Local edits were retained; resolve the conflict.");
       }
       current.current = next;
       setData(next);
+      let cacheError: string | null = null;
       try {
         safeStorageSet(storageKey, acknowledged.current);
         safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
@@ -415,9 +424,20 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       } catch (error) {
         blocked.current = true;
         console.error("Could not cache committed import", error);
-        throw new Error("Import was saved on the server, but the browser cache could not be updated. Reload before editing.");
+        cacheError = "Changes were saved on the server, but the browser cache could not be updated. Reload before editing.";
       }
-      setSyncError(null);
+      setSyncError(cacheError);
+    } catch (error) {
+      if (optimistic && !committed) {
+        if (JSON.stringify(current.current) === after) {
+          current.current = expected;
+          setData(expected);
+        } else {
+          blocked.current = true;
+          setSyncError("The QA update could not be saved and local data changed during the request. Local edits were retained; resolve the conflict.");
+        }
+      }
+      throw error;
     } finally {
       busy.current = false;
     }
