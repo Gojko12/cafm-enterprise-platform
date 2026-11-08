@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CraftpersonAbsenceSchema, LocationFreezeSchema } from "@cafm/shared-schema";
+import { CraftpersonAbsenceSchema, LocationFreezeSchema, QAInspectorAssignmentSchema } from "@cafm/shared-schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +34,8 @@ const stateSchema = z.object({
   craftpersonAbsences: z.array(CraftpersonAbsenceSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
   siteRoleAssignments: records,
+  qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
+  qaFailureReasons: z.array(z.string().min(1)).optional(),
   workRequests: records,
   deletedWorkRequests: records.optional(),
   users: records,
@@ -70,6 +72,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   const scoped = ["buildings", "floors", "rooms", "desks", "equipment", "schedules", "craftspeople", "siteRoleAssignments", "workRequests", "tradeRoleMappings", "siteRoleMappings"] as const;
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
+  if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;
   if (state.locationFreezes?.some((item) => item.siteId !== site ||

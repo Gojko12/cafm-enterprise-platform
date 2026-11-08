@@ -5,7 +5,8 @@ import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useCafmStore } from "./cafm-store";
 import { useSiteContext } from "./contexts/SiteContext";
 import { useApp } from "./hooks/useApp";
-import { qaVerdict, selectAudit, selectRandomAudits, swapAudit } from "./qa-audits";
+import { qaVerdict, selectAudit, selectRandomAudits, swapAudit, transitionAudit } from "./qa-audits";
+import { canInspectWR } from "./qa-settings";
 import type { QAOptions } from "./qa-audits";
 
 export function useQAActions() {
@@ -13,21 +14,37 @@ export function useQAActions() {
   const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const actor = { name: activePerson, role: currentRole };
+  const requireInspector = (wr: BaseWorkRequest) => {
+    if (!canInspectWR(activePerson, wr, data.qaInspectorAssignments)) throw new Error(`${wr.WR_ID}: ${activePerson} is not permitted to inspect this trade and work request type.`);
+  };
   const commit = async (update: (requests: BaseWorkRequest[]) => BaseWorkRequest[]) => {
     const site = data.workRequests.filter((wr) => wr.SiteId === activeSiteId);
     const updated = update(site);
     await commitSnapshot(data, { ...data, workRequests: [...data.workRequests.filter((wr) => wr.SiteId !== activeSiteId), ...updated] });
   };
   return {
-    autoSelect5PercentQAAudits: (options: QAOptions) => commit((wrs) => selectRandomAudits(wrs, options, actor)),
-    swapRandomQAAuditWR: (id: string) => commit((wrs) => swapAudit(wrs, id, actor)),
+    autoSelect5PercentQAAudits: (options: QAOptions) => commit((wrs) => selectRandomAudits(wrs, options, actor, data.qaInspectorAssignments ?? [])),
+    swapRandomQAAuditWR: (id: string) => commit((wrs) => {
+      const target = wrs.find((wr) => wr.WR_ID === id);
+      if (!target) throw new Error("Work request is no longer available.");
+      requireInspector(target);
+      const allowed = wrs.filter((wr) => canInspectWR(activePerson, wr, data.qaInspectorAssignments));
+      const changed = new Map(swapAudit(allowed, id, actor).map((wr) => [wr.WR_ID, wr]));
+      return wrs.map((wr) => changed.get(wr.WR_ID) ?? wr);
+    }),
     manualSelectForQAAudit: (ids: string[], mode: "ManualInspectorPick" | "QRScanOnSite") => commit((wrs) => {
       if (!ids.length || ids.some((id) => !wrs.some((wr) => wr.WR_ID === id))) throw new Error("One or more selected work requests are unavailable.");
-      return wrs.map((wr) => ids.includes(wr.WR_ID) ? selectAudit(wr, mode, actor) : wr);
+      return wrs.map((wr) => { if (!ids.includes(wr.WR_ID)) return wr; requireInspector(wr); return selectAudit(wr, mode, actor); });
+    }),
+    transitionAudits: (ids: string[], action: "confirm" | "unselect" | "direct") => commit((wrs) => {
+      if (!ids.length || ids.some((id) => !wrs.some((wr) => wr.WR_ID === id))) throw new Error("One or more selected work requests are unavailable.");
+      return wrs.map((wr) => { if (!ids.includes(wr.WR_ID)) return wr; requireInspector(wr); return transitionAudit(wr, action, actor); });
     }),
     submitQAVerdict: (id: string, verdict: "Pass" | "Fail" | "SubmitCorrection" | "VerifyClose", payload: Parameters<typeof qaVerdict>[3] & { followUpType?: "FJ" | "LJ" }) => commit((wrs) => {
       const parent = wrs.find((wr) => wr.WR_ID === id);
       if (!parent) throw new Error("Work request is no longer available.");
+      if (verdict !== "SubmitCorrection") requireInspector(parent);
+      if (verdict === "Fail" && !(data.qaFailureReasons ?? []).some((reason) => payload.issue === reason || payload.issue?.startsWith(`${reason} — `))) throw new Error("Select a predefined failure reason.");
       let updated = qaVerdict(parent, verdict, actor, payload);
       if (verdict !== "Fail" || !payload.followUpType) return wrs.map((wr) => wr.WR_ID === id ? updated : wr);
       const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
@@ -62,6 +79,8 @@ export function useQAActions() {
       const text = finding.trim();
       const wr = wrs.find((item) => item.WR_ID === id);
       if (!wr || wr.WR_Type !== "PM" || ![...(wr.ChecklistSteps ?? []), ...(wr.ChecklistInstances ?? [])].some((step) => step.StepId === stepId)) throw new Error("Checklist step is no longer available.");
+      requireInspector(wr);
+      if (wr.QA_AuditStatus !== "ToBeInspected") throw new Error("Confirm the inspection before adding a finding.");
       if (!text) throw new Error("Enter an inspector finding.");
       const now = new Date().toISOString();
       const entry = { id: crypto.randomUUID(), timestamp: now, performedBy: actor.name, actionType: "QA inspector finding", stepReference: stepId, details: text };
@@ -70,6 +89,7 @@ export function useQAActions() {
     addAuditPhoto: (id: string, photo: NonNullable<BaseWorkRequest["QA_AuditPhotos"]>[number]) => commit((wrs) => {
       const wr = wrs.find((item) => item.WR_ID === id);
       if (!wr || !wr.QA_AuditStatus || wr.QA_AuditStatus === "None") throw new Error("Select the work request for audit before attaching a photo.");
+      requireInspector(wr);
       const now = new Date().toISOString();
       return wrs.map((item) => item.WR_ID !== id ? item : { ...item, UpdatedAt: now, QA_AuditPhotos: [...(item.QA_AuditPhotos ?? []), photo], Activity: [...(item.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `QA audit photo added: ${photo.name}` }] });
     }),

@@ -18,6 +18,7 @@ import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { assignPerson } from "@/lib/dispatch";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
+import { hasOpenQARework } from "@/lib/qa-settings";
 
 const TABS = [
   "Work request details",
@@ -182,6 +183,10 @@ export function PMWorkRequestPopup({
   });
 
   const applyStatus = (choice: StatusChoice) => {
+    if (choice.percentage === 100 && hasOpenQARework(workRequest)) {
+      window.alert("QA rework must be verified before closing.");
+      return;
+    }
     if (choice.percentage === 78 && workRequest.Percentage !== 50 && workRequest.Percentage !== 55) {
       window.alert("Technically Completed is available only from 50% Issued or 55% On Hold.");
       return;
@@ -580,7 +585,6 @@ export function PMWorkRequestPopup({
         </nav>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-          <QAAuditPanel wr={workRequest} />
           {activeTab === "Work request details" && <div className="space-y-4">
             <WRDetailsEditor workRequest={workRequest} />
             {renderGroup("Work Request",
@@ -813,60 +817,8 @@ export function PMWorkRequestPopup({
           </section>}
 
           {activeTab === "AuditLog" && <section className="space-y-4 rounded border bg-white p-4">
+            <QAAuditPanel wr={workRequest} />
             <QAChecklistReview key={workRequest.WR_ID} wr={workRequest} />
-            {(!workRequest.QA_AuditStatus || workRequest.QA_AuditStatus === "None") && <>
-            <h3 className="font-semibold">QA inspection controls</h3>
-            <p className="text-sm">QA status: <strong>{workRequest.QA_InspectionStatus ?? "Pending"}</strong></p>
-            <label className="block text-sm">QA_IssueDescription
-              <textarea value={workRequest.QA_IssueDescription ?? ""} onChange={(event) =>
-                updateWorkRequest((current) => ({ ...current, QA_IssueDescription: event.target.value }))}
-                className="mt-1 block w-full rounded border p-2" rows={2} />
-            </label>
-            <label className="block text-sm">QA_CorrectionComment
-              <textarea value={workRequest.QA_CorrectionComment ?? ""} onChange={(event) =>
-                updateWorkRequest((current) => ({ ...current, QA_CorrectionComment: event.target.value }))}
-                className="mt-1 block w-full rounded border p-2" rows={2} />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={workRequest.Percentage !== 78} onClick={() => updateWorkRequest((current) => ({
-                ...current, QA_InspectionStatus: "Passed", AuditInspectionStatus: "Passed Inspected",
-              }), `Passed inspection marked by ${actorName}`)}
-                className="rounded bg-green-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Mark Passed Inspection</button>
-              <button type="button" disabled={workRequest.Percentage !== 78} onClick={() => {
-                const reason = window.prompt("Correction reason (required):", workRequest.QA_IssueDescription ?? "");
-                if (!reason?.trim()) { window.alert("A correction reason is required."); return; }
-                updateWorkRequest((current) => ({
-                  ...current, QA_InspectionStatus: "ToBeCorrected",
-                  AuditInspectionStatus: "PM WRs to be corrected", QA_IssueDescription: reason.trim(),
-                }), `Sent to PM WRs to be corrected: ${reason.trim()} (${actorName})`);
-              }} className="rounded bg-red-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Send to &quot;PM WRs to be corrected&quot;</button>
-              {workRequest.QA_InspectionStatus === "Passed" && <button type="button"
-                onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
-                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white">Complete (100%)</button>}
-            </div>
-            <label className="block max-w-md text-sm">Inspection status
-              <select aria-label="QA inspection status" value={workRequest.AuditInspectionStatus ?? "To Be Inspected"}
-                onChange={(event) => {
-                  const value = event.target.value as NonNullable<BaseWorkRequest["AuditInspectionStatus"]>;
-                  if (value !== "To Be Inspected" && workRequest.Percentage !== 78) {
-                    window.alert("QA inspection is available only after Technically Completed (78%).");
-                    return;
-                  }
-                  updateWorkRequest((current) => ({
-                    ...current, AuditInspectionStatus: value,
-                    QA_InspectionStatus: value === "Passed Inspected" ? "Passed" : value === "PM WRs to be corrected" ? "ToBeCorrected" : "Pending",
-                  }),
-                    `QA inspection status changed to ${value} by ${actorName}`);
-                }} className="mt-1 block w-full rounded border px-3 py-2">
-                {["To Be Inspected", "Passed Inspected", "PM WRs to be corrected"].map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            <div className="flex gap-2 text-xs">
-              <span className="rounded bg-amber-100 px-2 py-1">To Be Inspected</span>
-              <span className="rounded bg-green-100 px-2 py-1">Passed Inspected</span>
-              <span className="rounded bg-red-100 px-2 py-1">PM WRs to be corrected</span>
-            </div>
-            </>}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-left text-sm">
                 <thead className="bg-slate-50"><tr><th className="p-3">Timestamp</th><th className="p-3">Performed by</th><th className="p-3">Action</th><th className="p-3">Step reference</th><th className="p-3">Details</th></tr></thead>

@@ -16,6 +16,7 @@ import {
 } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useCafmStore } from "@/lib/cafm-store";
+import { QAInspectorSettings } from "@/components/modules/QASettings";
 
 const ROLE_NAMES: Record<LJRole, string> = {
   ESA_TM: "ESA Trade Manager",
@@ -212,5 +213,6 @@ export default function SiteRoleAssignmentsPage() {
         <div className="flex justify-end gap-2"><button type="button" onClick={() => { setEditing(null); setFormOpen(false); setError(""); }} className="rounded border px-4 py-2 text-sm">Cancel</button><button type="submit" className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white">Save Assignment</button></div>
       </form>
     </div>}
+    <QAInspectorSettings />
   </div>;
 }

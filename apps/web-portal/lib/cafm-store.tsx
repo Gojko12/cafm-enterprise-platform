@@ -7,6 +7,7 @@ import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserA
 import type { DemoData } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
 import { resolveAbsencePerson } from "./absence-identity";
+import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -86,6 +87,7 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     tradeRoleMappings: data.tradeRoleMappings.filter((item) => item.SiteId === site),
     siteRoleMappings: data.siteRoleMappings.filter((item) => item.SiteId === site),
     siteRoleAssignments: data.siteRoleAssignments.filter((item) => item.SiteId === site),
+    qaInspectorAssignments: (data.qaInspectorAssignments ?? []).filter((item) => item.siteId === site),
   };
 }
 
@@ -173,6 +175,8 @@ function seedData(): DemoData {
       SiteId: site, assignments: Object.fromEntries(SITE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
     })),
     siteRoleAssignments,
+    qaInspectorAssignments: sites.flatMap((siteId) => ["Mark", "Thomas", "Yvonne"].map((personName) => ({ id: `${siteId}-qa-${personName}`, siteId, personName, trades: [...CLASSICAL_TRADES], wrTypes: ["PM", "FJ", "LJ"] }))),
+    qaFailureReasons: [...DEFAULT_QA_FAILURE_REASONS],
   };
 }
 
@@ -199,7 +203,6 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const baseKey = `${BASE_KEY}:${site}`;
   const [ready, setReady] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [cacheWarning, setCacheWarning] = useState(false);
   const revision = useRef(0);
   const acknowledged = useRef("");
   const current = useRef(data);
@@ -282,7 +285,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           acknowledged.current = JSON.stringify(initial);
         }
         connected.current = true;
-        if (!blocked.current && !safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }))) setCacheWarning(true);
+        if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
       } catch (error) {
         setSyncError(error instanceof Error ? error.message : "Could not load server state.");
       }
@@ -304,11 +307,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     if (!ready) return;
     try {
       const saved = safeStorageSet(storageKey, JSON.stringify(data));
-      let pendingSaved = true;
       if (saved && JSON.stringify(data) !== acknowledged.current) {
-        pendingSaved = safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
+        safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
       }
-      if (!saved || !pendingSaved) setCacheWarning(true);
     } catch (error) {
       console.error("Could not save demo data", error);
       setSyncError("Could not save demo data to local storage.");
@@ -353,7 +354,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (active) setData(next);
           }
           connected.current = true;
-          if (!safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }))) setCacheWarning(true);
+          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
         }
         const snapshot = current.current;
         const serialized = JSON.stringify(snapshot);
@@ -362,16 +363,16 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           revision.current = result.revision;
           acknowledged.current = serialized;
           offlineEdits.current = false;
-          if (!safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }))) setCacheWarning(true);
+          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
           if (JSON.stringify(current.current) === serialized) localStorage.removeItem(pendingKey);
-          else if (!safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }))) setCacheWarning(true);
+          else safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
         } else {
           const result = await stateRequest(site, personRef.current, "GET");
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             const next = scopeData({ ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...result.state } as DemoData, site);
             revision.current = result.revision;
             acknowledged.current = JSON.stringify(next);
-            if (!safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }))) setCacheWarning(true);
+            safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
             current.current = next;
             if (active) setData(next);
           }
@@ -408,7 +409,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       current.current = next;
       setData(next);
       try {
-        if (!safeStorageSet(storageKey, acknowledged.current) || !safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }))) setCacheWarning(true);
+        safeStorageSet(storageKey, acknowledged.current);
+        safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
         localStorage.removeItem(pendingKey);
       } catch (error) {
         blocked.current = true;
@@ -438,7 +440,6 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
     {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}
-    {cacheWarning && <div role="status" className="bg-amber-100 p-2 text-sm text-amber-900">Browser storage is full. Disk synchronization continues; unsynced changes may not survive a reload.</div>}
     {ready ? children : <div>Loading saved CAFM data...</div>}
   </StoreContext.Provider>;
 }

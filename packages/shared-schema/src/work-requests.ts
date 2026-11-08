@@ -213,7 +213,7 @@ export const BaseWorkRequestSchema = z.object({
   AuditInspectionStatus: z.enum(["To Be Inspected", "Passed Inspected", "PM WRs to be corrected"]).optional(),
   QA_InspectionStatus: z.enum(["Pending", "Passed", "ToBeCorrected"]).optional(),
   QA_InspectedBy: z.string().optional(),
-  QA_AuditStatus: z.enum(["None", "SelectedForAudit", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
+  QA_AuditStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
   QA_SelectionMode: z.enum(["ComputerRandom5Percent", "ManualInspectorPick", "QRScanOnSite"]).optional(),
   QA_InspectedDate: z.string().optional(),
   QA_CompletionDate: z.string().optional(),

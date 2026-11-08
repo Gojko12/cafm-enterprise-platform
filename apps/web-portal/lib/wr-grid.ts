@@ -1,8 +1,10 @@
 import { WR_Statuses } from "@cafm/shared-schema";
 import type { BaseWorkRequest, UserRole } from "@cafm/shared-schema";
+import { hasOpenQARework } from "./qa-settings";
 
 export function gridStatusChange(wr: BaseWorkRequest, percentage: number, role: UserRole): BaseWorkRequest {
   if (wr.Percentage === percentage) return wr;
+  if (percentage === 100 && hasOpenQARework(wr)) throw new Error(`${wr.WR_ID}: QA rework must be verified before closing.`);
   if (wr.WR_Type === "LJ") throw new Error(`${wr.WR_ID}: use the LJ Actions panel so role and acceptance gates are checked.`);
   const configured = WR_Statuses.find((status) => status.ESAWorkType === wr.ESAWorkType && status.Percentage === percentage);
   if (!configured) throw new Error(`${wr.WR_ID}: ${percentage}% is not configured in WR_Statuses; use the full popup.`);

@@ -6,3 +6,4 @@ export * from "./operations.js";
 export * from "./rbac.js";
 export * from "./site-role-assignments.js";
 export * from "./dispatch.js";
+export * from "./qa-inspector.js";

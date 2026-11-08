@@ -7,6 +7,7 @@ import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest, LJRole } from "@cafm/shared-schema";
 import { useCafmStore, ASSIGNMENT_ROLES } from "@/lib/cafm-store";
 import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
+import { hasOpenQARework } from "@/lib/qa-settings";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
@@ -18,6 +19,7 @@ const TABS = [
   "Acceptances: SAT, Drawing & Inventory (78% - 94%)",
   "Financial Closure & Yellow Page (94% - 100%)",
   "Attached Documents",
+  "QA Inspection",
 ] as const;
 type Tab = (typeof TABS)[number];
 const ROLE_LABEL: Record<string, string> = {
@@ -112,6 +114,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
     }) }));
   };
   const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[], allowBackward = false) => {
+    if (percentage === 100 && hasOpenQARework(workRequest)) { window.alert("QA rework must be verified before closing."); return; }
     if (percentage < 0 || percentage > 100) return;
     if (allowedRoles && !hasPermission(allowedRoles)) {
       window.alert(`This stage requires an assigned role: ${allowedRoles.join(", ")}.`);
@@ -339,7 +342,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
           className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <QAAuditPanel wr={workRequest} />
+        {tab === "QA Inspection" && <QAAuditPanel wr={workRequest} />}
         {tab === TABS[0] && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
           <section className="rounded border border-blue-200 bg-white shadow-sm">
