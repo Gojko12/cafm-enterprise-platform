@@ -28,12 +28,13 @@ body,
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
     "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   background-color: #f9fafb;
+  overflow-x: hidden;
 }
 
 /* Mobile App Layout */
 .mobile-app {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100dvh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -45,6 +46,42 @@ body,
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+}
+.mobile-app button {
+  min-height: 44px;
+}
+.mobile-app img, .mobile-app svg, .mobile-app canvas {
+  max-width: 100%;
+}
+.mobile-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.desktop-frame-toggle {
+  display: none;
+}
+@media (min-width: 768px) {
+  .desktop-frame-toggle {
+    display: block;
+    position: fixed;
+    z-index: 110;
+    right: 12px;
+    top: 8px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid #94a3b8;
+    border-radius: 6px;
+    background: white;
+  }
+  .mobile-app.phone-frame {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    width: min(390px, 100vw);
+    height: min(844px, 100dvh);
+    transform: translate(-50%, -50%);
+    border: 2px solid #334155;
+    border-radius: 24px;
+    box-shadow: 0 12px 40px #0004;
+  }
 }
 
 /* Header */
@@ -84,7 +121,7 @@ body,
 /* Tabs */
 .mobile-technician-home {
   padding-top: env(safe-area-inset-top, 0);
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: 0;
 }
 
 /* Cards */

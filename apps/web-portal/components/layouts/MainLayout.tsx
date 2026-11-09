@@ -12,6 +12,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { SiteId } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import type { SiteRoleAssignment } from "@cafm/shared-schema";
+import { PhoneShare } from "@/components/common/PhoneShare";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -123,11 +124,19 @@ export function Sidebar() {
 }
 
 export function TopBar() {
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const [mobileUrl, setMobileUrl] = React.useState("");
+  React.useEffect(() => {
+    const configured = process.env.NEXT_PUBLIC_MOBILE_APP_URL;
+    if (configured) setMobileUrl(configured);
+    else if (["localhost", "127.0.0.1"].includes(window.location.hostname)) setMobileUrl(`${window.location.protocol}//${window.location.hostname}:3001/`);
+  }, []);
   const { setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
   const { activeSiteId, setActiveSiteId, activePerson, setActivePerson } = useSiteContext();
   const { data: storeData, reset } = useCafmStore();
   const { governance } = useActiveUserPermissions();
-
+      <button onClick={() => setShareOpen(true)} className="rounded border px-3 py-2 text-sm">📱 Share / Open on Phone</button>
+      {shareOpen && <PhoneShare initialUrl={mobileUrl} onClose={() => setShareOpen(false)} />}
   const getSiteName = (siteId: SiteId): string => {
     const siteNames: Record<SiteId, string> = {
       "SITE-01": "ESOC Darmstadt",

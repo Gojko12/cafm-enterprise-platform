@@ -32,8 +32,9 @@ import { FieldUpdateModal } from "./components/FieldUpdateModal";
 import { fieldReasonLabels, urgencyLabels } from "../../web-portal/lib/field-updates";
 import { stable } from "./lib/portal-sync";
 import { AuditInspection } from "./components/AuditInspection";
+import { PhoneShare } from "../../web-portal/components/common/PhoneShare";
 
-type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers" | "audit-assurance";
+type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers" | "audit-assurance" | "settings";
 const siteContextSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
   locationFreezes: z.array(LocationFreezeSchema),
@@ -82,6 +83,16 @@ export default function App() {
   // State
   const [engine, setEngine] = useState<OfflineEngine | null>(null);
   const [isSimulatedOffline, setIsSimulatedOffline] = useState(false);
+  const [browserOnline, setBrowserOnline] = useState(navigator.onLine);
+  const [apiReachable, setApiReachable] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncNotice, setSyncNotice] = useState("");
+  const [installError, setInstallError] = useState(false);
+  const [phoneFrame, setPhoneFrame] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [apiBase, setApiBase] = useState("");
+  const [settingsError, setSettingsError] = useState("");
+  const resumedSync = useRef(false);
   const [myWRs, setMyWRs] = useState<BaseWorkRequest[]>([]);
   const [unassignedWRs, setUnassignedWRs] = useState<BaseWorkRequest[]>([]);
   const [siteWRs, setSiteWRs] = useState<BaseWorkRequest[]>([]);
@@ -134,6 +145,25 @@ export default function App() {
 
   useEffect(() => {
     setEngine(initOfflineEngine());
+    try { setApiBase(localStorage.getItem("cafm_api_base_url") ?? ""); }
+    catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not read the API base setting."); }
+  }, []);
+  useEffect(() => {
+    const online = () => setBrowserOnline(navigator.onLine);
+    const connection = (event: Event) => { if (event instanceof CustomEvent) setApiReachable(event.detail === true); };
+    const installation = () => setInstallError(true);
+    window.addEventListener("online", online); window.addEventListener("offline", online);
+    window.addEventListener("cafm-sync-connection", connection); window.addEventListener("cafm-offline-install-error", installation);
+    return () => { window.removeEventListener("online", online); window.removeEventListener("offline", online); window.removeEventListener("cafm-sync-connection", connection); window.removeEventListener("cafm-offline-install-error", installation); };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const update = () => { void getDB().then(async (db) => {
+      const [mutations, photos] = await Promise.all([db.countFromIndex("syncQueue", "by-status", "PENDING"), db.countFromIndex("photoQueue", "by-status", "PENDING")]);
+      if (active) setPendingCount(mutations + photos);
+    }).catch((error: unknown) => { console.error("Could not count queued changes:", error); if (active) setSyncNotice("Could not read the offline queue."); }); };
+    update(); const interval = window.setInterval(update, 2000);
+    return () => { active = false; window.clearInterval(interval); };
   }, []);
 
   useEffect(() => {
@@ -171,7 +201,7 @@ export default function App() {
     void refreshData().catch((error) => console.error("Could not load offline data:", error));
     if (isSimulatedOffline) return;
     const sync = () => {
-      void engine.syncNow().then(refreshData).catch((error) => console.error("Background sync failed:", error));
+      void engine.syncNow().then((status) => { if (status.synced || resumedSync.current) { setSyncNotice(`Synchronization complete. ${status.synced} changes sent; ${status.pending} remain queued.`); resumedSync.current = false; } return refreshData(); }).catch((error) => console.error("Background sync failed:", error));
     };
     sync();
     const interval = window.setInterval(sync, 5000);
@@ -182,10 +212,13 @@ export default function App() {
     if (!engine) throw new Error("The offline engine is not ready.");
     const result = await engine.syncAfterChanges();
     await refreshData();
+    setSyncNotice(result.pending ? `Synchronized ${result.synced} changes; ${result.pending} remain queued.` : `Synchronization complete. ${result.synced} changes sent.`);
     return result;
   };
 
   const handleToggleOfflineMode = (isOffline: boolean) => {
+    engine?.configureSync(activeSiteId, currentTechnicianId, isOffline);
+    resumedSync.current = !isOffline;
     setIsSimulatedOffline(isOffline);
   };
 
@@ -329,7 +362,7 @@ export default function App() {
   };
   const person = technicians.find((item) => item.id === currentTechnicianId);
   const access = findProfile(profiles, person, activeSiteId);
-  const vpaTrades = access?.vpaTrades ?? (person ? CLASSICAL_TRADES : []);
+  const vpaTrades = access?.vpaTrades ?? (person ? [...CLASSICAL_TRADES] : []);
   const technicianName = person ? `${person.Name} ${person.LastName}` : currentTechnicianId;
   const saveSelected = async (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => {
     if (!engine || !selectedWR) throw new Error("Offline storage or work request is not ready.");
@@ -411,6 +444,7 @@ export default function App() {
 
   // Render based on current view
   const renderContent = () => {
+    if (currentView === "settings") return <section className="space-y-4 p-4 pb-32"><h1 className="text-xl font-bold">Settings</h1><button className="rounded border bg-white p-3" onClick={() => setShareOpen(true)}>📱 Share / Open on Phone (QR &amp; URL)</button><label className="block">API base URL (blank uses same origin)<input className="block w-full border p-2" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://example.com" /></label>{settingsError && <p role="alert" className="text-red-700">{settingsError}</p>}<button className="rounded border bg-white p-2" onClick={() => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } }}>Save API base</button><p className="text-sm">Offline refresh requires a previously installed production build over HTTPS or localhost.</p></section>;
     switch (currentView) {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} />;
@@ -515,7 +549,9 @@ export default function App() {
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-50 mobile-app">
+    <>
+    <button className="desktop-frame-toggle" onClick={() => setPhoneFrame((value) => !value)}>{phoneFrame ? "🖥️ Full Width" : "📱 Phone Frame (390×844)"}</button>
+    <div className={`fixed inset-0 bg-gray-50 mobile-app ${phoneFrame ? "phone-frame" : ""}`}>
       {/* Header */}
       <MobileHeader
         activeSiteId={activeSiteId}
@@ -532,8 +568,13 @@ export default function App() {
         }}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}
+        isOffline={isSimulatedOffline || !browserOnline || !apiReachable}
+        pendingCount={pendingCount}
         onToggleOfflineMode={handleToggleOfflineMode}
       />
+      {(isSimulatedOffline || !browserOnline || !apiReachable) && <p role="status" className="bg-amber-100 px-3 py-2 text-sm text-amber-950">📴 OFFLINE MODE — Timer sessions, checklist answers, photos &amp; Sophia inspections are saved on device ({pendingCount} changes queued).</p>}
+      {installError && <p role="alert" className="bg-amber-100 p-2 text-sm">Offline app installation failed. Keep this page open and reconnect before refreshing.</p>}
+      {syncNotice && <p role="status" className="bg-emerald-100 p-2 text-sm text-emerald-900">{syncNotice}<button className="ml-2 underline" onClick={() => setSyncNotice("")}>Dismiss</button></p>}
 
       <section aria-label="Active running timers" className={`relative z-40 shrink-0 px-3 py-1 ${timers.length ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>
         <div className="flex items-center justify-between gap-2"><strong className="text-xs">{timers.length ? `⏱ Active Running Timers (${timers.length})` : "⏱ No active timers running"}</strong>{timers.length > 0 && <button className="text-xs text-emerald-300 underline" onClick={() => navigateSafely(() => setCurrentView("timers"))}>View all</button>}</div>
@@ -578,14 +619,17 @@ export default function App() {
             <div className="text-xs font-medium text-gray-700">Reports</div>
           </button>
           <button
-            className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors opacity-50 cursor-not-allowed"
-            aria-label="Settings tab (disabled)"
-            title="Coming in next phase"
+            className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors"
+            aria-label="Settings tab"
+            aria-current={currentView === "settings" ? "page" : undefined}
+            onClick={() => navigateSafely(() => setCurrentView("settings"))}
           >
             <div className="text-xl">⚙️</div>
             <div className="text-xs font-medium text-gray-700">Settings</div>
           </button>
         </nav>
+      {shareOpen && <PhoneShare initialUrl={`${window.location.origin}${window.location.pathname}`} onClose={() => setShareOpen(false)} />}
     </div>
+    </>
   );
 }

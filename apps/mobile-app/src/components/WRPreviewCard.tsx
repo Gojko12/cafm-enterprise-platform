@@ -60,11 +60,11 @@ export const WRPreviewCard: React.FC<WRPreviewCardProps> = ({ wr, onClick }) => 
       aria-label={`Work Request ${wr.WR_ID || "unknown"}`}
     >
       {/* Row 1: WR_ID | Description/Code | Trade */}
-      <div className="flex items-start gap-2 mb-2">
-        <div className="font-bold text-sm text-gray-900 min-w-20">
+      <div className="flex flex-wrap items-start gap-2 mb-2">
+        <div className="font-bold text-sm text-gray-900 break-all">
           {wr.WR_ID || "WR-?"}
         </div>
-        <div className="flex-1 text-sm text-gray-700 truncate">
+        <div className="min-w-0 flex-1 text-sm text-gray-700 break-words">
           {wr.Description || "No description"}
         </div>
         <div className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded whitespace-nowrap">
@@ -73,7 +73,7 @@ export const WRPreviewCard: React.FC<WRPreviewCardProps> = ({ wr, onClick }) => 
       </div>
 
       {/* Row 2: MarginDate | DueDate */}
-      <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+      <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-2">
         <span>
           Margin: {wr.MarginDate ? formatDateShort(wr.MarginDate) : "—"}
         </span>

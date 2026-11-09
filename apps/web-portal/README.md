@@ -28,6 +28,14 @@ to both clients and is not per-user authorization. Keep the servers on a
 trusted machine and network. This mode does not provide production RBAC or
 security isolation against a user who can access the demo token.
 
+The top-bar phone-sharing dialog accepts a mobile URL or uses
+`NEXT_PUBLIC_MOBILE_APP_URL` when configured. On localhost it suggests port
+3001, which cannot be reached from a phone via `localhost`; enter the mobile
+app's externally reachable HTTPS URL instead. The Vite mobile server can proxy
+same-origin API requests to the portal, but it exposes the demo's browser-visible
+token and does not add authentication. Use an authenticated, access-restricted
+tunnel and consult the mobile README before sharing.
+
 ### Bulk import and export
 
 The import/export page downloads CSV or XLSX templates for buildings, floors,

@@ -68,6 +68,7 @@ export class OfflineEngine {
   private site: SiteId = "SITE-01";
   private person = "TECH-001";
   private simulatedOffline = false;
+  private syncAbort: AbortController | null = null;
   private onlineChangeListeners: Array<(isOnline: boolean) => void> = [];
   private syncStatusListeners: Array<(status: SyncStatus) => void> = [];
 
@@ -95,6 +96,7 @@ export class OfflineEngine {
   }
 
   configureSync(site: SiteId, person: string, simulatedOffline = false): void {
+    if (simulatedOffline || site !== this.site || person !== this.person) this.syncAbort?.abort();
     this.site = site;
     this.person = person;
     this.simulatedOffline = simulatedOffline;
@@ -328,6 +330,8 @@ export class OfflineEngine {
     }
 
     this.syncInProgress = true;
+    const controller = new AbortController();
+    this.syncAbort = controller;
     let finishSync!: () => void;
     this.syncFinished = new Promise<void>((resolve) => { finishSync = resolve; });
     const status: SyncStatus = { synced: 0, failed: 0, pending: 0, lastSyncTime: null };
@@ -343,7 +347,7 @@ export class OfflineEngine {
       if (this.simulatedOffline || !this.isOnline) {
         throw new Error("Device is offline. Changes remain on this device.");
       }
-      const result = await synchronizePortal(db, this.site, this.person, syncItems, photoItems);
+      const result = await synchronizePortal(db, this.site, this.person, syncItems, photoItems, controller.signal);
       status.synced = result.synced;
       status.pending = result.pending;
       status.lastSyncTime = result.lastSyncTime;
@@ -351,6 +355,7 @@ export class OfflineEngine {
       return status;
     } finally {
       this.syncInProgress = false;
+      this.syncAbort = null;
       this.syncFinished = null;
       finishSync();
     }

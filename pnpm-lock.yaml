@@ -19,6 +19,15 @@ importers:
       idb:
         specifier: ^8.0.4
         version: 8.0.4
+      qrcode.react:
+        specifier: ^4.2.0
+        version: 4.2.0(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -35,24 +44,33 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.5
+      '@types/react':
+        specifier: ^18.3.1
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.1
+        version: 18.3.7(@types/react@18.3.31)
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(supports-color@7.2.0)(vite@5.4.21(@types/node@22.20.5))
+      autoprefixer:
+        specifier: ^10.4.17
+        version: 10.6.2(postcss@8.5.32)
       eslint:
         specifier: ^9.0.0
         version: 9.39.5(jiti@1.21.7)(supports-color@7.2.0)
       jsdom:
         specifier: ^24.1.0
         version: 24.1.3(supports-color@7.2.0)
+      postcss:
+        specifier: ^8.4.31
+        version: 8.5.32
       prettier:
         specifier: ^3.3.0
         version: 3.9.10
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
+      tailwindcss:
+        specifier: ^3.4.0
+        version: 3.4.19
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
@@ -89,6 +107,9 @@ importers:
       next:
         specifier: ^14.1.0
         version: 14.2.35(@babel/core@7.29.13(supports-color@7.2.0))(@opentelemetry/api@1.10.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      qrcode.react:
+        specifier: ^4.2.0
+        version: 4.2.0(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -2916,6 +2937,11 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  qrcode.react@4.2.0:
+    resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   qs@6.16.2:
     resolution: {integrity: sha512-VYdnB5S7/0IeXzBacUtwNAaM6d7Y/PgYnNC7bJCI6meqA/OgnsQbZMtVW8Dt2D1PHgbHGtYmhSoEIgvt7xZ2ZA==}
@@ -6715,6 +6741,10 @@ snapshots:
       punycode: 2.3.1
 
   punycode@2.3.1: {}
+
+  qrcode.react@4.2.0(react@18.3.1):
+    dependencies:
+      react: 18.3.1
 
   qs@6.16.2:
     dependencies:

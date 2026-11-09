@@ -60,12 +60,20 @@ export function stable(value: unknown): string {
   return JSON.stringify(value);
 }
 
-async function request(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
+async function request(site: SiteId, person: string, method: "GET" | "POST", body?: unknown, signal?: AbortSignal) {
   const token = import.meta.env.VITE_CAFM_SYNC_TOKEN ||
     (import.meta.env.DEV && typeof window !== "undefined" && window.location.hostname === "localhost"
       ? "cafm-local-development-sync-token-2026" : undefined);
   if (!token || token.length < 32) throw new Error("Synchronization is not configured. Changes remain on this device.");
-  const response = await fetch("http://localhost:3000/api/cafm-state", {
+  const override = localStorage.getItem("cafm_api_base_url")?.trim() || import.meta.env.VITE_API_BASE_URL?.trim();
+  let endpoint = "/api/cafm-state";
+  if (override) {
+    const base = new URL(override, window.location.origin);
+    if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error("The API base URL must be an HTTP(S) URL without credentials, query or fragment.");
+    if (window.location.protocol === "https:" && base.protocol !== "https:") throw new Error("An HTTPS app requires an HTTPS API base URL.");
+    endpoint = `${base.href.replace(/\/+$/, "")}/api/cafm-state`;
+  }
+  const options: RequestInit = {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -75,7 +83,19 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
     },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
-  });
+    signal,
+  };
+  let response: Response;
+  try {
+    response = await fetch(endpoint, options);
+    if (!override && response.status === 404 && ["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.protocol === "http:") {
+      response = await fetch("http://localhost:3000/api/cafm-state", options);
+    }
+    window.dispatchEvent(new CustomEvent("cafm-sync-connection", { detail: true }));
+  } catch (error) {
+    if (!signal?.aborted) window.dispatchEvent(new CustomEvent("cafm-sync-connection", { detail: false }));
+    throw new Error(`Could not reach the CAFM sync API. Changes remain on this device. ${error instanceof Error ? error.message : ""}`);
+  }
   const data: unknown = await response.json();
   if (!response.ok) {
     const message = data && typeof data === "object" && "error" in data ? String(data.error) : `HTTP ${response.status}`;
@@ -94,9 +114,9 @@ function replaceRequest(state: State, wr: BaseWorkRequest) {
 
 export async function synchronizePortal(
   db: IDBPDatabase<MobileAppDB>, site: SiteId, person: string,
-  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[],
+  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal,
 ) {
-  const response = await request(site, person, "GET");
+  const response = await request(site, person, "GET", undefined, signal);
   if (!response.state) throw new Error("The portal has no state for this site. Open the portal and retry.");
   const state = response.state;
   if (state.buildings.some((item) => item.SiteId !== site) ||
@@ -255,7 +275,7 @@ export async function synchronizePortal(
   const changed = selected.some((item) => !(response.state?.mobileMutationIds ?? []).includes(item.QueueId)) ||
     selectedPhotos.some((item) => !(response.state?.mobileMutationIds ?? []).includes(item.QueueId));
   state.mobileMutationIds = [...applied];
-  if (changed) await request(site, person, "POST", { revision: response.revision, state });
+  if (changed) await request(site, person, "POST", { revision: response.revision, state }, signal);
 
   const syncedAt = new Date().toISOString();
   const tx = db.transaction(["workRequests", "buildings", "floors", "rooms", "equipment", "checklists", "schedules", "syncQueue", "photoQueue", "syncMetadata"], "readwrite");

@@ -199,7 +199,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
 }
 
 function authorize(request: Request) {
-  const localDevelopment = process.env.NODE_ENV === "development" && new URL(request.url).hostname === "localhost";
+  const localDevelopment = process.env.NODE_ENV === "development" && ["localhost", "127.0.0.1"].includes(new URL(request.url).hostname);
   const expected = process.env.CAFM_SYNC_TOKEN || (localDevelopment ? "cafm-local-development-sync-token-2026" : undefined);
   if (!expected || expected.length < 32) return false;
   const provided = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";

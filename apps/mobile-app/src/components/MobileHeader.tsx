@@ -10,6 +10,8 @@ interface MobileHeaderProps {
   onSyncNow?: () => Promise<SyncStatus>;
   isSimulatedOffline?: boolean;
   onToggleOfflineMode?: (isOffline: boolean) => void;
+  isOffline: boolean;
+  pendingCount: number;
   technicianId: string;
   technicians: Array<{ id: string; Name: string; LastName: string; Trade: string }>;
   vpaTrades?: readonly string[];
@@ -22,12 +24,13 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   onSyncNow,
   isSimulatedOffline = false,
   onToggleOfflineMode,
+  isOffline,
+  pendingCount,
   technicianId,
   technicians,
   vpaTrades,
   onTechnicianChange,
 }) => {
-  const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
@@ -36,7 +39,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
     try {
       if (onSyncNow) {
         const status = await onSyncNow();
-        setPendingCount(status.pending);
+        if (status.pending > 0) console.info(`${status.pending} changes remain queued.`);
       } else {
         throw new Error("Synchronization is not available.");
       }
@@ -83,12 +86,10 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
             {/* Online/Offline Toggle */}
             <button
               onClick={handleOfflineToggle}
-              className={`w-4 h-4 rounded-full transition-colors ${
-                isSimulatedOffline ? "bg-red-500" : "bg-green-500"
-              }`}
-              title={isSimulatedOffline ? "Offline mode" : "Online mode"}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${isOffline ? "bg-amber-100 text-amber-900" : "bg-green-100 text-green-900"}`}
+              title={isSimulatedOffline ? "Resume network synchronization" : "Simulate offline mode"}
               aria-label={isSimulatedOffline ? "Switch to online mode" : "Switch to offline mode"}
-            />
+            >{isSimulatedOffline ? "📴 Simulated Offline" : isOffline ? "📴 Connection unavailable" : "🟢 Online · Simulate Offline"}</button>
           </div>
 
           {/* Pending Sync Badge */}
