@@ -79,6 +79,14 @@ const qaStagedVerdictSchema = z.object({
   verdict: z.enum(["Pass", "Fail"]), inspector: z.string().min(1), stagedAt: z.string().min(1),
   failureReason: z.string().optional(), additionalNotes: z.string().optional(), issueDescription: z.string().optional(),
   reopenTo50: z.boolean(), spawnFollowUpFJ: z.boolean(),
+  previousStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
+});
+const qaChallengeSchema = z.object({
+  id: z.string().min(1), wrId: z.string().min(1), teamLeaderName: z.string().min(1), createdAt: z.string().min(1),
+  challengeReason: z.string().trim().min(1), isReadByInspector: z.boolean(),
+  readByInspectorAt: z.string().optional(), readByInspectorName: z.string().optional(),
+  resolutionStatus: z.enum(["Pending", "Accepted_ReopenCancelled", "Rejected_ReworkRequired"]),
+  inspectorResponse: z.string().optional(), resolvedAt: z.string().optional(),
 });
 const qaReportSchema = z.object({
   id: z.string().min(1), siteId: siteSchema, createdAt: z.string().min(1), inspector: z.string().min(1),
@@ -99,8 +107,11 @@ const workRequestRecord = z.object({
   WR_ID: z.string().min(1),
   QA_AuditStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
   qaStagedVerdict: qaStagedVerdictSchema.optional(),
+  qaTeamLeaderChallenges: z.array(qaChallengeSchema).optional(),
+  qaReinspectionCount: z.number().int().nonnegative().optional(),
   technicianFieldUpdates: z.array(technicianFieldUpdateSchema).optional(),
-}).catchall(z.unknown()).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." });
+}).catchall(z.unknown()).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." })
+  .refine((wr) => !wr.qaTeamLeaderChallenges?.some((challenge) => challenge.wrId !== wr.WR_ID), { path: ["qaTeamLeaderChallenges"], message: "Challenge WR ID must match its work request." });
 const stateSchema = z.object({
   sites: z.array(z.string().min(1)),
   buildings: records,

@@ -1,4 +1,4 @@
-import { CLASSICAL_TRADES, EQUIPMENT_STATUSES } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, EQUIPMENT_STATUSES, WR_Statuses } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Building, Equipment, Floor, PM_ChecklistStandard, PM_Schedule, Room, SiteId } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
 import { DEFAULT_SHIFTS } from "./craftperson-shifts";
@@ -265,6 +265,18 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       if (index === 2) { wr.QA_InspectionStatus = "ToBeCorrected"; wr.AuditInspectionStatus = "PM WRs to be corrected"; }
       if (index === 1 || index === 4) { wr.QA_InspectionStatus = "Passed"; wr.AuditInspectionStatus = "Passed Inspected"; }
     });
+    const challenged = qaExamples[2], ready = qaExamples[3];
+    if (challenged) {
+      const issued = WR_Statuses.find((status) => status.ESAWorkType === challenged.ESAWorkType && status.Percentage === 50);
+      if (!issued) throw new Error(`Missing 50% QA seed status for ${challenged.ESAWorkType}.`);
+      Object.assign(challenged, issued, { WorkRequestSubstatus: "Re-opened (50% - QA Failed)", qaReinspectionCount: 0 });
+      challenged.qaTeamLeaderChallenges = [{ id: `qa-challenge-${site}`, wrId: challenged.WR_ID, teamLeaderName: "Claudia", createdAt: "2026-10-15T10:00:00Z", challengeReason: "The filter was replaced during the visit; please review the technician's photos before requiring another visit.", isReadByInspector: false, resolutionStatus: "Pending" }];
+    }
+    if (ready) {
+      const completed = WR_Statuses.find((status) => status.ESAWorkType === ready.ESAWorkType && status.Percentage === 78);
+      if (!completed) throw new Error(`Missing 78% QA seed status for ${ready.ESAWorkType}.`);
+      Object.assign(ready, completed, { QA_AuditStatus: "QA_Failed_ActionRequired", QA_InspectionStatus: "ToBeCorrected", AuditInspectionStatus: "PM WRs to be corrected", qaReinspectionCount: 0 });
+    }
     for (const type of ["PM", "FJ", "LJ"] as const) {
       for (let i = 0; i < 2; i++) {
         const id = `DEMO-${site}-${type}-UNASSIGNED-${i + 1}`;

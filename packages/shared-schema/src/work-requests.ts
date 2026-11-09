@@ -158,7 +158,16 @@ export const QAStagedVerdictSchema = z.object({
   verdict: z.enum(["Pass", "Fail"]), inspector: z.string().min(1), stagedAt: z.string().min(1),
   failureReason: z.string().optional(), additionalNotes: z.string().optional(), issueDescription: z.string().optional(),
   reopenTo50: z.boolean(), spawnFollowUpFJ: z.boolean(),
+  previousStatus: QAAuditStatusSchema.optional(),
 });
+export const QATeamLeaderChallengeSchema = z.object({
+  id: z.string().min(1), wrId: z.string().min(1), teamLeaderName: z.string().min(1),
+  createdAt: z.string().min(1), challengeReason: z.string().trim().min(1), isReadByInspector: z.boolean(),
+  readByInspectorAt: z.string().optional(), readByInspectorName: z.string().optional(),
+  resolutionStatus: z.enum(["Pending", "Accepted_ReopenCancelled", "Rejected_ReworkRequired"]),
+  inspectorResponse: z.string().optional(), resolvedAt: z.string().optional(),
+});
+export type QATeamLeaderChallenge = z.infer<typeof QATeamLeaderChallengeSchema>;
 export const QAAuditReportSchema = z.object({
   id: z.string().min(1), siteId: SiteIdSchema, createdAt: z.string().min(1), inspector: z.string().min(1),
   executiveSummary: z.string(), recipients: z.array(z.string().trim().min(1)),
@@ -302,6 +311,8 @@ export const BaseWorkRequestSchema = z.object({
   QA_InspectedBy: z.string().optional(),
   QA_AuditStatus: QAAuditStatusSchema.optional(),
   qaStagedVerdict: QAStagedVerdictSchema.optional(),
+  qaTeamLeaderChallenges: z.array(QATeamLeaderChallengeSchema).optional(),
+  qaReinspectionCount: z.number().int().nonnegative().optional(),
   QA_SelectionMode: QASelectionModeSchema.nullish(),
   QA_InspectedDate: z.string().optional(),
   QA_CompletionDate: z.string().optional(),
@@ -342,7 +353,8 @@ export const BaseWorkRequestSchema = z.object({
   RequiresInventoryUpdate: z.boolean().default(false),
   AcceptanceGates: z.array(LJAcceptanceGateSchema).default([]),
   UpdatedAt: z.string().min(1).optional(),
-}).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." });
+}).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." })
+  .refine((wr) => !wr.qaTeamLeaderChallenges?.some((challenge) => challenge.wrId !== wr.WR_ID), { path: ["qaTeamLeaderChallenges"], message: "Challenge WR ID must match its work request." });
 
 export type BaseWorkRequest = z.infer<typeof BaseWorkRequestSchema>;
 export type ChecklistHistoryEntry = z.infer<typeof ChecklistHistoryEntrySchema>;

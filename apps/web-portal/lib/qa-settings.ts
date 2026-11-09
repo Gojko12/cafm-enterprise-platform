@@ -14,5 +14,6 @@ export function canInspectWR(person: string, wr: BaseWorkRequest, assignments: Q
     !!wr.TradeName && entry.trades.includes(wr.TradeName) && entry.wrTypes.includes(wr.WR_Type));
 }
 export function hasOpenQARework(wr: BaseWorkRequest) {
-  return wr.WR_Type !== "LJ" && (wr.QA_AuditStatus === "QA_Failed_ActionRequired" || wr.QA_AuditStatus === "QA_Corrected");
+  return wr.WR_Type !== "LJ" && (wr.QA_AuditStatus === "QA_Failed_ActionRequired" || wr.QA_AuditStatus === "QA_Corrected" ||
+    (["QA_Staged_Pass", "QA_Staged_Fail"].includes(wr.QA_AuditStatus ?? "") && ["QA_Failed_ActionRequired", "QA_Corrected"].includes(wr.qaStagedVerdict?.previousStatus ?? "")));
 }

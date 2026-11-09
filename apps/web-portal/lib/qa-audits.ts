@@ -8,7 +8,7 @@ export type QAOptions = { dateFrom?: string; dateTo?: string; wrTypes?: Array<Ba
 type Actor = { name: string; role: UserRole };
 export const isQAEligibleType = (wr: BaseWorkRequest) => wr.WR_Type === "PM" || wr.WR_Type === "FJ";
 export const isQACompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (wr.Percentage === 78 || wr.Percentage === 100);
-export const isQAQuotaCompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (isQACompleted(wr) || (!!wr.QA_CompletionDate && ["QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(wr.QA_AuditStatus ?? "")));
+export const isQAQuotaCompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (isQACompleted(wr) || (!!wr.QA_CompletionDate && (["QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(wr.QA_AuditStatus ?? "") || ["QA_Failed_ActionRequired", "QA_Corrected"].includes(wr.qaStagedVerdict?.previousStatus ?? ""))));
 export const qaStatus = (wr: BaseWorkRequest) => wr.QA_AuditStatus ?? "None";
 export function qaDate(wr: BaseWorkRequest) { return (wr.QA_CompletionDate || wr.UpdatedAt || wr.CreatedDate).slice(0, 10); }
 export function qaMatches(wr: BaseWorkRequest, options: QAOptions) {
