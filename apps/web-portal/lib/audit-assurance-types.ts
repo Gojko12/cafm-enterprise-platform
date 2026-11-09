@@ -31,6 +31,7 @@ export const AuditFindingSchema = z.object({
   duplicateOfFindingId: z.string().optional(), previousYearFindingId: z.string().optional(), isRecurring: z.boolean().optional(), isDisputed: z.boolean().optional(),
   correctiveActionType: z.enum(["None", "IndividualWR", "CollectiveWorkPackage", "NextPMVisit", "InvestmentProject"]).optional(),
   linkedWrId: z.string().optional(), workPackageId: z.string().optional(), linkedPmScheduleId: z.string().optional(), investmentProjectId: z.string().optional(),
+  investmentProposal: z.object({ id: nonempty, estimatedCapexEUR: z.number().nonnegative(), lifecycleJustification: nonempty, createdBy: nonempty, createdAt: nonempty }).optional(),
   assuranceState: z.enum(assuranceStates),
   evidence: z.object({ beforePhotos: z.array(z.string()), afterPhotos: z.array(z.string()), measurements: z.string().optional(), certificates: z.array(z.string()), updatedDrawings: z.array(z.string()), replacedParts: z.array(z.string()), laborCostEUR: z.number().nonnegative(), materialCostEUR: z.number().nonnegative(), submittedBy: z.string().optional(), submittedAt: z.string().optional(), evidenceAccepted: z.boolean().optional(), evidenceReviewerNotes: z.string().optional() }),
   verification: z.object({ method: z.enum(["InternalReviewer", "AuditCompany_SOCOTEC", "NextInspection", "ControlledLowRiskRule"]).optional(), verifiedBy: z.string().optional(), verifiedAt: z.string().optional(), verificationOutcome: z.enum(["VerifiedClosed", "RejectedReworkRequired"]).optional(), notes: z.string().optional() }),

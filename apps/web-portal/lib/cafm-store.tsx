@@ -10,6 +10,7 @@ import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles, resolveEffectivePermissions } from "./access-profiles";
 import { seedAssurance } from "./audit-assurance-seed";
+import { reconcileAssurance } from "./assurance-workflow";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -395,7 +396,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           connected.current = true;
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
         }
-        const snapshot = current.current;
+        const snapshot = reconcileAssurance(current.current);
+        if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
         const serialized = JSON.stringify(snapshot);
         if (serialized !== acknowledged.current) {
           const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: snapshot });
@@ -441,6 +443,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     const before = JSON.stringify(expected);
     if (JSON.stringify(current.current) !== before) throw new Error("Data changed since preview. Run the dry-run again.");
     const optimistic = options?.optimistic === true;
+    next = reconcileAssurance(next);
     const after = JSON.stringify(next);
     busy.current = true;
     let committed = false;
@@ -499,7 +502,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
 
   const setUserData: React.Dispatch<React.SetStateAction<DemoData>> = (update) => {
     if (!connected.current) offlineEdits.current = true;
-    setData(update);
+    setData((previous) => reconcileAssurance(typeof update === "function" ? update(previous) : update));
   };
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
     {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}

@@ -6,6 +6,7 @@ import { z } from "zod";
 // Bypass Next's optimized barrel cache, which can retain an outdated export table.
 import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema } from "@/lib/audit-assurance-types";
+import { reconcileAssurance } from "@/lib/assurance-workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -285,7 +286,7 @@ export async function POST(request: Request) {
     const otherIds = new Set(Object.entries(database.sites).filter(([id]) => id !== site).flatMap(([, envelope]) => envelope.state.workRequests.map((wr) => wr.WR_ID)));
     const duplicate = parsed.data.state.workRequests.find((wr) => typeof wr.OriginatingWR_ID === "string" && !existing.has(wr.WR_ID) && otherIds.has(wr.WR_ID));
     if (duplicate) return reply(request, { error: `Follow-up work request ID ${String(duplicate.WR_ID)} is already in use at another site.` }, 409);
-    const next = { revision: (current?.revision ?? 0) + 1, state: parsed.data.state };
+    const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(parsed.data.state) };
     database.sites[site] = next;
     temporary = path.join(directory, `cafm-db-${randomUUID()}.tmp`);
     const file = await open(temporary, "wx", 0o600);
