@@ -58,7 +58,7 @@ export default function TechnicalAuditsPage() {
     (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id)) &&
     ((profile.isTeamLeader || profile.isSiteAdmin || profile.isSuperAdmin) ? (!profile.vpaTrades.length || profile.vpaTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId)) :
       !!permissions && (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && permissions.auditWRTypes.includes(wr.WR_Type) && permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId)) &&
-    (["QA_Failed_ActionRequired", "QA_Corrected"].includes(qaStatus(wr)) || ["QA_Failed_ActionRequired", "QA_Corrected"].includes(wr.qaStagedVerdict?.previousStatus ?? "") || wr.WorkRequestSubstatus.includes("Re-opened") || !!wr.qaTeamLeaderChallenges?.length));
+    (["QA_Failed_ActionRequired", "QA_Corrected"].includes(qaStatus(wr)) || ["QA_Failed_ActionRequired", "QA_Corrected"].includes(wr.qaStagedVerdict?.previousStatus ?? "") || (wr.WorkRequestSubstatus ?? "").includes("Re-opened") || !!wr.qaTeamLeaderChallenges?.length));
   const unread = rework.reduce((count, wr) => count + (wr.qaTeamLeaderChallenges ?? []).filter((challenge) => !challenge.isReadByInspector).length, 0);
   const completed = requests.filter((wr) => qaMatches(wr, { dateFrom: start || undefined, dateTo: end || undefined }));
   const queue = requests.filter((wr) => ["ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail"].includes(qaStatus(wr)) && !wr.qaStagedVerdict?.previousStatus);
@@ -77,7 +77,7 @@ export default function TechnicalAuditsPage() {
   const total = quota(completed);
   const filtered = completed.filter((wr) => (types === null || types.includes(wr.WR_Type)) && (trades === null || trades.includes(wr.TradeName ?? "")));
   const pickGap = Math.max(0, (target === "" ? quota(filtered).target : Number(target)) - quota(filtered).count);
-  const rows = tab === "queue" ? queue : tab === "qr" ? requests.filter((wr) => isQACompleted(wr) && wr.EquipmentCodes.includes(equipment)) : completed;
+  const rows = tab === "queue" ? queue : tab === "qr" ? requests.filter((wr) => isQACompleted(wr) && (wr.EquipmentCodes ?? []).includes(equipment)) : completed;
   const selectedRows = rows.filter((wr) => selected.includes(wr.WR_ID));
   const columns = [
     { id: "select", label: "Select", value: (wr: BaseWorkRequest) => wr.WR_ID, render: (wr: BaseWorkRequest) => <input type="checkbox" checked={selected.includes(wr.WR_ID)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelected((old) => event.target.checked ? [...old, wr.WR_ID] : old.filter((item) => item !== wr.WR_ID))} /> },
@@ -87,7 +87,7 @@ export default function TechnicalAuditsPage() {
     { id: "mode", label: "Selection Mode", value: (wr: BaseWorkRequest) => wr.QA_SelectionMode === "ComputerRandom5Percent" ? "🤖 Computer Picked" : wr.QA_SelectionMode === "ManualInspectorPick" ? "👤 Human Picked" : wr.QA_SelectionMode ?? "—" },
     { id: "trade", label: "Trade", value: (wr: BaseWorkRequest) => wr.TradeName },
     { id: "location", label: "Building / Room", value: (wr: BaseWorkRequest) => `${wr.bl_id} / ${wr.RoomCode ?? ""}` },
-    { id: "equipment", label: "Equipment", value: (wr: BaseWorkRequest) => wr.EquipmentCodes.join(", ") },
+    { id: "equipment", label: "Equipment", value: (wr: BaseWorkRequest) => (wr.EquipmentCodes ?? []).join(", ") },
     { id: "person", label: "Completed By", value: (wr: BaseWorkRequest) => wr.AssignedCraftpersonIds.join(", ") },
     { id: "hours", label: "Actual / Estimated", value: (wr: BaseWorkRequest) => `${((wr.TotalTimeMinutes ?? 0) / 60).toFixed(1)} / ${wr.ExpectedHours ?? 0} h` },
     { id: "inspector", label: "Inspector", value: (wr: BaseWorkRequest) => wr.QA_InspectedBy },

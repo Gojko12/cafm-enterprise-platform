@@ -10,7 +10,7 @@ import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles, resolveEffectivePermissions } from "./access-profiles";
 import { seedAssurance, seedAuditTemplates } from "./audit-assurance-seed";
-import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
+import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
@@ -105,7 +105,7 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     auditInspections: (data.auditInspections ?? []).filter((item) => item.siteId === site),
     auditTemplates: (data.auditTemplates ?? []).filter((item) => item.siteId === site),
     auditImports: (data.auditImports ?? []).filter((item) => item.siteId === site),
-    auditAssurance: data.auditAssurance && { ...data.auditAssurance, equipmentInspections: data.auditAssurance.equipmentInspections.filter((item) => item.siteId === site) },
+    auditAssurance: { ...data.auditAssurance, checkpointTemplates: withStandardCheckpointTemplates(data.auditAssurance?.checkpointTemplates ?? []), equipmentInspections: (data.auditAssurance?.equipmentInspections ?? []).filter((item) => item.siteId === site), kmisConfig: data.auditAssurance?.kmisConfig ?? defaultKmisConfig },
   };
 }
 
@@ -198,7 +198,7 @@ function seedData(): DemoData {
     auditFindings: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditFindings),
     auditInspections: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditInspections),
     auditTemplates: seedAuditTemplates(sites),
-    auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [], kmisConfig: defaultKmisConfig },
+    auditAssurance: { checkpointTemplates: withStandardCheckpointTemplates(), equipmentInspections: [], kmisConfig: defaultKmisConfig },
     users,
     userAccessProfiles: seedAccessProfiles(sites, seeded.craftspeople, users),
     roleDefinitions: defaultRoleDefinitions(),

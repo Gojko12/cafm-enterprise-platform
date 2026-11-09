@@ -181,7 +181,11 @@ export async function synchronizePortal(
     const asset = state.equipment.find((e) => e.EquipmentCode === sheet.equipmentId && e.SiteId === site);
     if (!profile || !profile.permissions.canAuditDoInspection || !(profile.isQAInspector || profile.isSuperAdmin) || !asset || (profile.vpaBuildingIds.length > 0 && !profile.vpaBuildingIds.includes(asset.bl_id)) || !profile.permissions.auditTrades.some((trade) => trade === asset.PrimaryTradeId)) throw new Error("Inspection is outside the inspector's current authorization; it remains on the device.");
     const route = state.auditInspections?.find((r) => r.id === sheet.routeId);
-    if (!route || route.inspector !== sheet.inspectorName || stable(route) !== stable(item.Payload.baseRoute)) throw new Error("The inspection route changed on the portal; the local inspection was retained.");
+    if (!route || stable(route) !== stable(item.Payload.baseRoute)) throw new Error("The inspection route changed on the portal; the local inspection was retained.");
+    const currentSheet = (state.auditAssurance?.equipmentInspections ?? []).find((s) => s.campaignId === sheet.campaignId && s.equipmentId === sheet.equipmentId) ?? null;
+    if (stable(currentSheet) !== stable(item.Payload.baseSheet ?? null)) throw new Error("The inspection sheet changed on the portal; the local inspection was retained.");
+    const relatedFindings = (state.auditFindings ?? []).filter((f) => f.campaignId === sheet.campaignId && f.equipmentId === sheet.equipmentId);
+    if (stable(relatedFindings) !== stable(item.Payload.baseFindings ?? [])) throw new Error("Related findings changed on the portal; the local inspection was retained.");
     if (stable(sheet.scoringConfig) !== stable(state.auditAssurance?.kmisConfig ?? defaultKmisConfig)) throw new Error("KMIS settings changed on the portal; the local inspection was retained for review.");
     Object.assign(state, completeEquipmentInspection(state, sheet));
     applied.add(item.QueueId);

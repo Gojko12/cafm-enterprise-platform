@@ -181,7 +181,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;
   if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.auditInspections?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
-  if (state.auditAssurance?.equipmentInspections.some((sheet) => sheet.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === sheet.campaignId && campaign.selectedEquipmentIds.includes(sheet.equipmentId)) || !state.equipment.some((asset) => asset.SiteId === site && asset.EquipmentCode === sheet.equipmentId && asset.bl_id === sheet.buildingId && asset.RoomCode === sheet.roomId))) return false;
+  if ((state.auditAssurance?.equipmentInspections ?? []).some((sheet) => sheet.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === sheet.campaignId && campaign.selectedEquipmentIds.includes(sheet.equipmentId)) || !state.equipment.some((asset) => asset.SiteId === site && asset.EquipmentCode === sheet.equipmentId && asset.bl_id === sheet.buildingId && asset.RoomCode === sheet.roomId))) return false;
   if (state.auditTemplates?.some((item) => item.siteId !== site)) return false;
   if (state.auditImports?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
