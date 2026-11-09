@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 // Bypass Next's optimized barrel cache, which can retain an outdated export table.
 import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
+import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema } from "@/lib/audit-assurance-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,6 +131,9 @@ const stateSchema = z.object({
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),
   qaAuditReports: z.array(qaReportSchema).optional(),
+  auditCampaigns: z.array(AuditCampaignSchema).optional(),
+  auditFindings: z.array(AuditFindingSchema).optional(),
+  auditInspections: z.array(AuditInspectionSchema).optional(),
   workRequests: z.array(workRequestRecord),
   deletedWorkRequests: records.optional(),
   users: records,
@@ -168,6 +172,9 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
   if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
   if (state.qaAuditReports?.some((item) => item.siteId !== site)) return false;
+  if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;
+  if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
+  if (state.auditInspections?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;

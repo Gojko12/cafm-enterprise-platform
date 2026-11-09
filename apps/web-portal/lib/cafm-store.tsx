@@ -9,6 +9,7 @@ import { section20Seed } from "./section20-seed";
 import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles, resolveEffectivePermissions } from "./access-profiles";
+import { seedAssurance } from "./audit-assurance-seed";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -97,6 +98,9 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     siteRoleAssignments: data.siteRoleAssignments.filter((item) => item.SiteId === site),
     qaInspectorAssignments: (data.qaInspectorAssignments ?? []).filter((item) => item.siteId === site),
     qaAuditReports: (data.qaAuditReports ?? []).filter((item) => item.siteId === site),
+    auditCampaigns: (data.auditCampaigns ?? []).filter((item) => item.siteId === site),
+    auditFindings: (data.auditFindings ?? []).filter((item) => item.siteId === site),
+    auditInspections: (data.auditInspections ?? []).filter((item) => item.siteId === site),
   };
 }
 
@@ -185,6 +189,9 @@ function seedData(): DemoData {
       { id: `${site}-leave-3`, siteId: site, craftpersonId: `S${site.slice(-2)}-C3`, absenceType: "Training" as const, startDate: "2026-11-11", endDate: "2026-11-11", isFullDay: false, startTime: "09:00", endTime: "13:00", unavailableHoursPerDay: 4, status: "Approved" as const, notes: "Safety training" },
     ]),
     ...seeded,
+    auditCampaigns: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditCampaigns),
+    auditFindings: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditFindings),
+    auditInspections: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditInspections),
     users,
     userAccessProfiles: seedAccessProfiles(sites, seeded.craftspeople, users),
     roleDefinitions: defaultRoleDefinitions(),
@@ -283,7 +290,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        initial = scopeData(withAccessProfileDefaults({ ...defaults, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
+        initial = scopeData(withAccessProfileDefaults({ ...defaults, auditCampaigns: [], auditFindings: [], auditInspections: [], ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople,
           userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site), site);
@@ -307,7 +314,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
             throw new Error("Invalid server state.");
           }
-          const remoteData = { ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+          const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], craftpersonAbsences: [], locationFreezes: [], ...remote.state,
             roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
             userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
           initial = scopeData(withAccessProfileDefaults(remoteData, site), site);
@@ -377,7 +384,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
               throw new Error("Invalid server state.");
             }
-            const remoteData = { ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], craftpersonAbsences: [], locationFreezes: [], ...remote.state,
               roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
@@ -402,7 +409,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           const result = await stateRequest(site, personRef.current, "GET");
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
-            const remoteData = { ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...result.state,
+            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], craftpersonAbsences: [], locationFreezes: [], ...result.state,
               roleDefinitions: "roleDefinitions" in result.state ? result.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in result.state ? result.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);

@@ -29,6 +29,7 @@ const NAV_ITEMS = [
     { href: "/site-role-assignments", label: "Site Role Assignments", icon: Lock },
     { href: "/smart-pm", label: "SmartPM", icon: Zap },
     { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
+    { href: "/audit-assurance", label: "Audit & Assurance", icon: Clipboard },
     { href: "/scheduler", label: "Scheduler", icon: Calendar },
   ]},
   { section: "Administration", items: [
