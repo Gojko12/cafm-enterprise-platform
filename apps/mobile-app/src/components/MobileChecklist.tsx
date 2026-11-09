@@ -5,7 +5,7 @@ import { generateTechnicianSteps } from "../../../web-portal/lib/technician-step
 
 type Result = NonNullable<BaseWorkRequest["ChecklistResults"]>[number];
 
-export function MobileChecklist({ wr, steps, save, exit, followUp, complete, addSteps, todoMode = false }: {
+export function MobileChecklist({ wr, steps, save, exit, followUp, complete, addSteps, todoMode = false, timerLabel, timerRunning, navigationRef }: {
   wr: BaseWorkRequest;
   steps: PM_StepDefinition[];
   save: (results: Result[], baseline: Result[]) => Promise<void>;
@@ -14,6 +14,9 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
   complete?: () => void;
   addSteps?: (titles: string[], scope?: string) => Promise<void>;
   todoMode?: boolean;
+  timerLabel: string;
+  timerRunning: boolean;
+  navigationRef: React.MutableRefObject<((destination: () => void) => void) | null>;
 }) {
   const [values, setValues] = useState<Result[]>(wr.ChecklistResults ?? []);
   const [index, setIndex] = useState(0);
@@ -60,6 +63,10 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
     setLeaving(true);
     void flush().then(() => { destination(); if (stays) setLeaving(false); }).catch(() => setLeaving(false));
   };
+  useEffect(() => {
+    navigationRef.current = (destination) => { if (!leaving) leaveSafely(destination); };
+    return () => { navigationRef.current = null; };
+  });
   const appendSteps = async (generated: boolean) => {
     if (!addSteps || readingRef.current) { setError("Wait for the photo to finish loading."); return; }
     setLeaving(true);
@@ -89,9 +96,10 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
       <div className="space-y-2 rounded bg-slate-50 p-3">{result && !result.passed && !todoMode && <p className="text-rose-700">{step.RequiresCommentOnFailure !== false ? "Comment required" : "Comment optional"} · {step.RequiresPhotoOnFailure !== false ? "Photo required" : "Photo optional"}</p>}<label className="block text-sm">Technician Step Comment<textarea aria-label="Technician comment" className="block w-full rounded border p-2" value={result?.comment ?? ""} onChange={(e) => change(step, { comment: e.target.value })} /></label>{todoMode && <p className="text-xs text-slate-600">Add before and after photos as needed.</p>}<label className="inline-flex cursor-pointer rounded border bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">📷 + Add Photo<input type="file" className="hidden" accept="image/*" disabled={reading} onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (!file) return; if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Choose an image no larger than 2 MB."); return; } readingRef.current = true; setReading(true); const reader = new FileReader(); reader.onerror = () => setError("Could not read photo."); reader.onload = () => { if (typeof reader.result === "string") change(step, { photoPaths: [...(latest.current.find((item) => item.stepId === step.StepId)?.photoPaths ?? []), reader.result] }); else setError("Could not read photo."); }; reader.onloadend = () => { readingRef.current = false; setReading(false); }; reader.readAsDataURL(file); }} /></label><div className="flex flex-wrap gap-2">{result?.photoPaths?.map((url, i) => <a key={i} href={url} target="_blank" rel="noreferrer"><img src={url} alt={`Step photo ${i + 1}`} className="h-20 w-20 rounded border object-cover" /></a>)}</div>{followUp && <button className="block rounded bg-emerald-700 px-3 py-2 text-white" onClick={() => leaveSafely(followUp, true)}>+ Open Follow-Up FJ</button>}</div>
     </article>;
   };
-  return <div className="space-y-3 p-4 pt-48 pb-24"><div className="sticky top-36 z-30 space-y-2 rounded border bg-white p-3"><button disabled={leaving} className="text-blue-700" onClick={() => leaveSafely(exit)}>← Exit to WR Overview (Progress Auto-Saved)</button><div className="flex gap-2"><button aria-pressed={!all} onClick={() => setAll(false)}>Step-by-Step Mode</button><button aria-pressed={all} onClick={() => setAll(true)}>All Steps List Mode</button></div><div className="flex flex-wrap gap-1">{steps.map((step, i) => <button key={step.StepId} className={`rounded-full border px-2 py-1 text-xs ${!all && i === index ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => { setIndex(i); setAll(false); }}>Step {i + 1}{values.some((item) => item.stepId === step.StepId && item.value !== "") ? " ✓" : ""}</button>)}</div><p className="text-xs">{reading ? "Loading photo…" : saving ? "Saving…" : error ? "Progress not saved" : JSON.stringify(values) !== saved.current ? "Changes pending…" : "Progress saved locally"}</p></div>
+  return <div className="space-y-3 p-4 pb-24"><div className="sticky top-0 z-30 space-y-2 rounded border bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><button disabled={leaving} className="text-blue-700" onClick={() => leaveSafely(exit)}>← Exit to WR Overview (Progress Auto-Saved)</button><button disabled={leaving} className="rounded-full bg-emerald-100 px-2 py-1 text-sm text-emerald-800" onClick={() => leaveSafely(exit)}>⏱ {timerLabel}</button></div><div className="flex gap-2"><button aria-pressed={!all} onClick={() => setAll(false)}>Step-by-Step Mode</button><button aria-pressed={all} onClick={() => setAll(true)}>All Steps List Mode</button></div><div className="flex flex-wrap gap-1">{steps.map((step, i) => <button key={step.StepId} className={`rounded-full border px-2 py-1 text-xs ${!all && i === index ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => { setIndex(i); setAll(false); }}>Step {i + 1}{values.some((item) => item.stepId === step.StepId && item.value !== "") ? " ✓" : ""}</button>)}</div><p className="text-xs">{reading ? "Loading photo…" : saving ? "Saving…" : error ? "Progress not saved" : JSON.stringify(values) !== saved.current ? "Changes pending…" : "Progress saved locally"}</p></div>
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}
-    <fieldset disabled={leaving} className="space-y-3">
+    {!timerRunning && <p role="alert" className="rounded bg-amber-50 p-2 text-amber-900">Your timer is no longer running. Return to the work request and start timing to continue.</p>}
+    <fieldset disabled={leaving || !timerRunning} className="space-y-3">
     {addSteps && <section className="space-y-2 rounded border bg-white p-3"><h2 className="font-semibold">Technician To-Do Builder</h2><p className="text-xs text-slate-600">Suggestions use a local rule-based parser; review safety and site requirements before work.</p><textarea aria-label="Rough scope" className="w-full rounded border p-2" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Describe the work scope" /><button className="rounded bg-blue-700 px-3 py-2 text-white" onClick={() => void appendSteps(true)}>✨ AI Generate To-Do Steps</button><div className="flex gap-2"><input aria-label="New step title" className="min-w-0 flex-1 rounded border p-2" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="New step title" /><button className="rounded bg-slate-800 px-3 py-2 text-white" onClick={() => void appendSteps(false)}>+ Add Step</button></div></section>}
     {all ? steps.map(renderStep) : steps[index] ? renderStep(steps[index]) : <p>No checklist steps available.</p>}
     {!all && <div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex(index - 1)}>← Previous</button><button disabled={index >= steps.length - 1} onClick={() => setIndex(index + 1)}>Next →</button></div>}

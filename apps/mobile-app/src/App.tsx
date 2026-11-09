@@ -27,9 +27,10 @@ import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
 import { ExecutionHub } from "./components/ExecutionHub";
+import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
 import { stable } from "./lib/portal-sync";
 
-type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check";
+type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers";
 const siteContextSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
   locationFreezes: z.array(LocationFreezeSchema),
@@ -63,6 +64,13 @@ export default function App() {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
   const [openCompletion, setOpenCompletion] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [loadedSite, setLoadedSite] = useState<SiteId | null>(null);
+  const [timerStorageError, setTimerStorageError] = useState("");
+  const [focusTimer, setFocusTimer] = useState(false);
+  const checklistNavigation = useRef<((destination: () => void) => void) | null>(null);
+  const hubNavigation = useRef<(() => boolean) | null>(null);
+  const savingWR = useRef(false);
   const activeSelection = useRef({ activeSiteId, currentTechnicianId });
   activeSelection.current = { activeSiteId, currentTechnicianId };
 
@@ -76,6 +84,7 @@ export default function App() {
   const [floors, setFloors] = useState<Floor[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [siteEquipment, setSiteEquipment] = useState<Equipment[]>([]);
 
   // Selected items for views
   const [selectedWR, setSelectedWR] = useState<BaseWorkRequest | null>(null);
@@ -104,6 +113,7 @@ export default function App() {
     const technician = people.find((item) => item.id === currentTechnicianId);
     if (!technician && people.length) { setCurrentTechnicianId(people[0].id); return; }
     setSiteWRs(siteRequests);
+    setLoadedSite(activeSiteId);
     setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId) || wr.AssignedCraftpersonIds.includes(currentTechnicianId)));
     const access = findProfile(siteContext.userAccessProfiles, technician, activeSiteId);
     const trades = access?.vpaTrades ?? (technician ? CLASSICAL_TRADES : []);
@@ -112,6 +122,7 @@ export default function App() {
     setFloors(storedFloors.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
     setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
     setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id) && !!item.PrimaryTradeId && trades.some((trade) => trade === item.PrimaryTradeId)));
+    setSiteEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId));
     setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedCraftpersonIds.length && !wr.CraftpersonAssignments?.length && !!technician && trades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && buildingAllowed(wr.bl_id)));
     setSelectedWR((current) => current ? siteRequests.find((wr) => wr.WR_ID === current.WR_ID) ?? current : null);
   }, [activeSiteId, currentTechnicianId]);
@@ -119,6 +130,30 @@ export default function App() {
   useEffect(() => {
     setEngine(initOfflineEngine());
   }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (loadedSite !== activeSiteId) return;
+    const activeTimers: Record<string, { wrId: string; craftpersonId: string; craftpersonName: string; startedAt: string }> = {};
+    for (const wr of siteWRs) for (const session of wr.timeSessions ?? []) {
+      if (!session.endedAt) activeTimers[JSON.stringify([activeSiteId, wr.WR_ID, session.craftpersonId, session.id])] = { wrId: wr.WR_ID, craftpersonId: session.craftpersonId, craftpersonName: session.craftpersonName, startedAt: session.startedAt };
+    }
+    try { localStorage.setItem(`cafm-active-timers:${activeSiteId}`, JSON.stringify(activeTimers)); setTimerStorageError(""); }
+    catch { setTimerStorageError("Could not save the timer index to local storage. Timers remain in offline work request storage."); }
+  }, [siteWRs, activeSiteId, loadedSite]);
+
+  useEffect(() => {
+    if (focusTimer && currentView === "hub") {
+      const target = document.getElementById("work-timer");
+      target?.scrollIntoView({ block: "center" });
+      target?.focus({ preventScroll: true });
+      setFocusTimer(false);
+    }
+  }, [focusTimer, currentView, selectedWR]);
 
   useEffect(() => {
     setFilter("trade", undefined);
@@ -162,7 +197,7 @@ export default function App() {
   };
 
   const handleOpenWR = (wrId: string) => {
-    const wr = [...myWRs, ...unassignedWRs].find((w) => w.WR_ID === wrId);
+    const wr = siteWRs.find((w) => w.WR_ID === wrId);
     if (wr) {
       setSelectedWR(wr);
       const sourceSteps = wr.ChecklistSteps?.length ? wr.ChecklistSteps : wr.ChecklistInstances ?? [];
@@ -293,6 +328,9 @@ export default function App() {
   const technicianName = person ? `${person.Name} ${person.LastName}` : currentTechnicianId;
   const saveSelected = async (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => {
     if (!engine || !selectedWR) throw new Error("Offline storage or work request is not ready.");
+    if (savingWR.current) throw new Error("Another work request save is in progress. Try again.");
+    savingWR.current = true;
+    try {
     const current = await engine.getWorkRequest(selectedWR.WR_ID);
     if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
     const changed = change(current), now = new Date().toISOString();
@@ -302,6 +340,7 @@ export default function App() {
     setSiteWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
     setMyWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
     setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+    } finally { savingWR.current = false; }
   };
   const createFollowUp = async () => {
     if (!access?.permissions.canOpenFollowUpFJ) throw new Error("You are not permitted to create a follow-up FJ.");
@@ -322,15 +361,37 @@ export default function App() {
     setFollowUpOpen(true);
   };
   const finishChecklist = () => { if (!access?.permissions.canCompleteWR78) return; setOpenCompletion(true); setCurrentView("hub"); };
+  const timers = siteWRs.flatMap((wr) => (wr.timeSessions ?? []).filter((session) => session.craftpersonId === currentTechnicianId && !session.endedAt).map((session) => ({ wr, session })));
+  const selectedTimer = selectedWR?.timeSessions?.find((session) => session.craftpersonId === currentTechnicianId && !session.endedAt);
+  const navigateSafely = (destination: () => void) => {
+    if (creatingFollowUp) { alert("Wait for the current save to finish before navigating."); return; }
+    if (followUpOpen) { alert("Close the follow-up editor before navigating."); return; }
+    if (currentView === "checklist") {
+      if (!checklistNavigation.current) { alert("Checklist is not ready to leave yet."); return; }
+      checklistNavigation.current(destination);
+    } else if (savingWR.current) alert("Wait for the current save to finish before navigating.");
+    else if (currentView !== "hub" || hubNavigation.current?.()) destination();
+  };
+  const openTimerWR = (id: string) => navigateSafely(() => {
+    if (!siteWRs.some((wr) => wr.WR_ID === id)) { alert("This work request is no longer available on this site."); return; }
+    setOpenCompletion(false);
+    handleOpenWR(id);
+    setFocusTimer(true);
+  });
+  const checklistTimerProps = {
+    timerRunning: !!selectedTimer,
+    timerLabel: selectedTimer ? `Timer Running: ${timerClock(selectedTimer.startedAt, now)}` : "Timer stopped",
+    navigationRef: checklistNavigation,
+  };
 
   // Render based on current view
   const renderContent = () => {
     switch (currentView) {
       case "hub":
-        return selectedWR ? <ExecutionHub wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
-        if (selectedWR.WR_Type === "PM") return <MobileChecklist key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
+        if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
           const now = new Date().toISOString();
           const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
           for (const result of changed) {
@@ -342,7 +403,7 @@ export default function App() {
           const todo = selectedWR.todoSteps ?? [];
           const todoSteps: PM_StepDefinition[] = [...todo].sort((a, b) => a.order - b.order).map((step) => ({ StepId: step.id, StepNumber: step.order, StepTitle: step.title, Instruction: step.instruction, InputType: "Boolean", favourableBoolean: true, RequiresPhotoOnFailure: false, RequiresCommentOnFailure: false }));
           const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? "true" : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
-          return <MobileChecklist key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode addSteps={(selectedWR.WR_Type === "FJ" ? access?.permissions.canDefineChecklistFJ : access?.permissions.canDefineChecklistLJ) ? async (titles, scope) => saveSelected((current) => {
+          return <MobileChecklist {...checklistTimerProps} key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode addSteps={(selectedWR.WR_Type === "FJ" ? access?.permissions.canDefineChecklistFJ : access?.permissions.canDefineChecklistLJ) ? async (titles, scope) => saveSelected((current) => {
             const existing = current.todoSteps ?? [];
             const start = Math.max(0, ...existing.map((step) => step.order));
             return { ...current, ...(scope !== undefined ? { roughScopeNotes: scope } : {}), todoSteps: [...existing, ...titles.map((title, index) => ({ id: crypto.randomUUID(), order: start + index + 1, title, completed: false }))] };
@@ -358,6 +419,8 @@ export default function App() {
             }) };
           }, "Technician task progress saved.")} />;
         }
+      case "timers":
+        return <TimersPage timers={timers} requests={siteWRs} technician={currentTechnicianId} equipment={siteEquipment} now={now} open={openTimerWR} />;
       case "scanner":
         return (
           <QRScanner
@@ -387,7 +450,7 @@ export default function App() {
         ) : null;
 
       case "qa-spot-check":
-        return selectedEquipment ? <div className="space-y-3 p-4 pt-40"><h2 className="text-xl font-bold">QA spot-check · {selectedEquipment.EquipmentCode}</h2><button onClick={() => setCurrentView("inspection")}>Back to equipment</button>{siteWRs.filter((wr) => (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && !!access?.permissions.canAuditChooseWRs && access.permissions.auditWRTypes.includes(wr.WR_Type) && access.permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id)) && wr.EquipmentCodes.includes(selectedEquipment.EquipmentCode) && (wr.Percentage === 78 || wr.Percentage === 100)).map((wr) => <div key={wr.WR_ID} className="rounded border bg-white p-3"><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p>QA: {wr.QA_AuditStatus ?? "None"}</p><button disabled={!!wr.QA_AuditStatus && wr.QA_AuditStatus !== "None"} onClick={() => {
+        return selectedEquipment ? <div className="space-y-3 p-4"><h2 className="text-xl font-bold">QA spot-check · {selectedEquipment.EquipmentCode}</h2><button onClick={() => setCurrentView("inspection")}>Back to equipment</button>{siteWRs.filter((wr) => (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && !!access?.permissions.canAuditChooseWRs && access.permissions.auditWRTypes.includes(wr.WR_Type) && access.permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id)) && wr.EquipmentCodes.includes(selectedEquipment.EquipmentCode) && (wr.Percentage === 78 || wr.Percentage === 100)).map((wr) => <div key={wr.WR_ID} className="rounded border bg-white p-3"><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p>QA: {wr.QA_AuditStatus ?? "None"}</p><button disabled={!!wr.QA_AuditStatus && wr.QA_AuditStatus !== "None"} onClick={() => {
           if (!engine) { alert("Offline engine is not ready."); return; }
           const now = new Date().toISOString();
           const next: BaseWorkRequest = { ...wr, QA_CompletionDate: (wr.UpdatedAt ?? wr.CreatedDate).slice(0, 10), QA_AuditStatus: "SelectedForAudit", QA_SelectionMode: "QRScanOnSite", UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: currentTechnicianId, actorRole: "MobileTechnician", createdAt: now, text: "Selected for QA audit by equipment QR spot-check." }] };
@@ -397,7 +460,7 @@ export default function App() {
       case "home":
       default:
         return (
-          <div className="pt-40 pb-20">
+          <div className="pb-20">
             <AdvancedFilterPanel
               trades={vpaTrades}
               buildings={buildings}
@@ -439,22 +502,26 @@ export default function App() {
             alert("Return to the work request list before switching sites.");
             return;
           }
-          setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
+          setLoadedSite(null); setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setSiteEquipment([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
         }}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}
         onToggleOfflineMode={handleToggleOfflineMode}
       />
 
+      <section aria-label="Active running timers" className={`relative z-40 shrink-0 px-3 py-1 ${timers.length ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>
+        <div className="flex items-center justify-between gap-2"><strong className="text-xs">{timers.length ? `⏱ Active Running Timers (${timers.length})` : "⏱ No active timers running"}</strong>{timers.length > 0 && <button className="text-xs text-emerald-300 underline" onClick={() => navigateSafely(() => setCurrentView("timers"))}>View all</button>}</div>
+        {timers.length > 0 && <div className="mt-1 flex max-h-36 gap-2 overflow-auto">{timers.map((timer) => <TimerCard key={timer.session.id} timer={timer} equipment={siteEquipment} now={now} open={openTimerWR} compact />)}</div>}
+        {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
+      </section>
       {/* Main Content */}
       <main className="h-screen overflow-y-auto flex flex-col">{renderContent()}</main>
       {followUpOpen && selectedWR && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" aria-label="Create Follow-Up FJ" className="w-full max-w-lg space-y-3 rounded bg-white p-4"><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea aria-label="Follow-up description" className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} />{followUpError && <p role="alert" className="text-rose-700">{followUpError}</p>}<div className="flex gap-2"><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); setFollowUpError(""); void createFollowUp().catch((error: unknown) => setFollowUpError(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button><button disabled={creatingFollowUp} className="rounded border p-2" onClick={() => setFollowUpOpen(false)}>Cancel</button></div></div></div>}
 
       {/* Bottom Navigation Tabs */}
-      {currentView === "home" && (
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-center justify-around z-40 mobile-nav">
           <button
-            onClick={() => setCurrentView("home")}
+            onClick={() => navigateSafely(() => setCurrentView("home"))}
             className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors"
             aria-label="Home tab"
             aria-current={currentView === "home" ? "page" : undefined}
@@ -463,12 +530,16 @@ export default function App() {
             <div className="text-xs font-medium text-gray-700">Work Requests</div>
           </button>
           <button
-            onClick={() => setCurrentView("scanner")}
+            onClick={() => navigateSafely(() => setCurrentView("scanner"))}
             className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors"
             aria-label="Scanner tab"
           >
             <div className="text-xl">📱</div>
             <div className="text-xs font-medium text-gray-700">Scan QR</div>
+          </button>
+          <button onClick={() => navigateSafely(() => setCurrentView("timers"))} className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors" aria-current={currentView === "timers" ? "page" : undefined}>
+            <div className="text-xl">⏱</div>
+            <div className="text-xs font-medium text-gray-700">Timers ({timers.length})</div>
           </button>
           <button
             className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors opacity-50 cursor-not-allowed"
@@ -487,7 +558,6 @@ export default function App() {
             <div className="text-xs font-medium text-gray-700">Settings</div>
           </button>
         </nav>
-      )}
     </div>
   );
 }

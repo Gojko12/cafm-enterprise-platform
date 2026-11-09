@@ -61,7 +61,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50 mobile-header">
+    <header className="relative shrink-0 bg-white border-b border-gray-200 z-50 mobile-header">
       <div className="max-w-full px-4 py-3">
         {/* Row 1: Site Badge and Status Indicator */}
         <div className="flex items-center justify-between mb-2">

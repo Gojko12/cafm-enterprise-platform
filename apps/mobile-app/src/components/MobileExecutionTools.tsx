@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
@@ -10,7 +10,8 @@ export function laborFor(current: BaseWorkRequest, sessions: Session[], technici
   const assignment = current.CraftpersonAssignments?.find((entry) => entry.craftpersonId === technician);
   const ownSessions = sessions.filter((session) => session.craftpersonId === technician && session.endedAt);
   const older = (current.MobileWorkSessions ?? []).filter((session) => session.TechnicianId === technician && !sessions.some((item) => item.id === session.SessionId));
-  const recorded = ownSessions.length || older.length ? ownSessions.reduce((sum, session) => sum + session.durationMinutes, 0) + older.reduce((sum, session) => sum + session.TotalTimeMinutes, 0) : existing?.recordedTimerMinutes ?? legacy?.recordedTimerMinutes ?? assignment?.recordedTimerMinutes ?? legacy?.workingTimeMinutes ?? 0;
+  const sessionMinutes = ownSessions.reduce((sum, session) => sum + session.durationMinutes, 0) + older.reduce((sum, session) => sum + session.TotalTimeMinutes, 0);
+  const recorded = Math.max(sessionMinutes, existing?.recordedTimerMinutes ?? legacy?.recordedTimerMinutes ?? assignment?.recordedTimerMinutes ?? legacy?.workingTimeMinutes ?? 0);
   const opinion = existing?.technicianOpinionMinutes ?? legacy?.technicianOpinionMinutes ?? assignment?.technicianOpinionMinutes;
   const override = existing?.teamLeaderOverrideMinutes ?? legacy?.teamLeaderOverrideMinutes ?? assignment?.teamLeaderOverrideMinutes;
   return { ...existing, craftpersonId: technician, name: existing?.name ?? legacy?.name ?? assignment?.name ?? person?.Name ?? technician, lastName: existing?.lastName ?? legacy?.lastName ?? assignment?.lastName ?? person?.LastName ?? "", trade: existing?.trade ?? legacy?.trade ?? assignment?.trade ?? person?.Trade, hourlyRate: existing?.hourlyRate ?? legacy?.hourlyRate ?? assignment?.hourlyRate ?? person?.HourlyRate ?? 0, recordedTimerMinutes: recorded, technicianOpinionMinutes: opinion, teamLeaderOverrideMinutes: override, effectiveMinutes: override ?? opinion ?? recorded, lastModifiedBy: technician, lastModifiedAt: modifiedAt };
@@ -21,44 +22,42 @@ export function stopTechnicianTimer(current: BaseWorkRequest, technician: string
   if (!running) return current;
   const end = Date.now(), startTime = Date.parse(running.startedAt);
   if (!Number.isFinite(startTime) || end < startTime) throw new Error("The timer timestamps are invalid; the session was not stopped.");
-  const minutes = Math.round((end - startTime) / 60000);
+  const minutes = Math.max(1, Math.round(Math.floor((end - startTime) / 1000) / 60));
   const sessions = (current.timeSessions ?? []).map((session) => session.id === running.id ? { ...session, endedAt: new Date(end).toISOString(), durationMinutes: minutes } : session);
-  const entry = laborFor(current, sessions, technician, new Date(end).toISOString(), person);
+  const previous = laborFor(current, current.timeSessions ?? [], technician, new Date(end).toISOString(), person);
+  const entry = { ...laborFor(current, sessions, technician, new Date(end).toISOString(), person), recordedTimerMinutes: previous.recordedTimerMinutes + minutes };
+  entry.effectiveMinutes = entry.teamLeaderOverrideMinutes ?? entry.technicianOpinionMinutes ?? entry.recordedTimerMinutes;
   return { ...current, timeSessions: sessions, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), entry], TotalTimeMinutes: current.TotalTimeMinutes + minutes };
 }
 
-export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save }: {
+export function startTechnicianTimer(current: BaseWorkRequest, technician: string, technicianName: string): BaseWorkRequest {
+  if ((current.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt)) throw new Error("A timer is already running on this work request.");
+  return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt: new Date().toISOString(), durationMinutes: 0 }] };
+}
+
+export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save, now }: {
   wr: BaseWorkRequest;
   technician: string;
   technicianName: string;
   person?: { Name: string; LastName: string; Trade: string; HourlyRate: number };
   mode?: "timer" | "todo";
+  now: number;
   save: (change: (current: BaseWorkRequest) => BaseWorkRequest, message: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [now, setNow] = useState(Date.now());
   const [opinion, setOpinion] = useState(() => {
     const value = wr.laborEntries?.find((entry) => entry.craftpersonId === technician)?.technicianOpinionMinutes;
     return value === undefined ? "" : String(value);
   });
   const active = (wr.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [active]);
   const execute = async (change: (current: BaseWorkRequest) => BaseWorkRequest, message: string) => {
     setBusy(true); setError("");
     try { await save(change, message); return true; }
     catch (problem) { setError(problem instanceof Error ? problem.message : "Could not save your changes."); return false; }
     finally { setBusy(false); }
   };
-  const start = () => void execute((current) => {
-    if ((current.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt)) throw new Error("A timer is already running on this work request.");
-    const startedAt = new Date().toISOString();
-    return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt, durationMinutes: 0 }] };
-  }, "Started work timer.");
+  const start = () => void execute((current) => startTechnicianTimer(current, technician, technicianName), "Started work timer.");
   const stop = () => void execute((current) => {
     const running = (current.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
     if (!running) throw new Error("The running session is no longer available.");
@@ -68,7 +67,7 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
   const completedSessions = (wr.timeSessions ?? []).filter((item) => item.craftpersonId === technician && item.endedAt);
   const total = completedSessions.reduce((sum, item) => sum + item.durationMinutes, 0);
   const clock = [Math.floor(elapsed / 3600), Math.floor(elapsed / 60) % 60, elapsed % 60].map((n) => String(n).padStart(2, "0")).join(":");
-  return <section className="space-y-3 rounded border bg-white p-4">
+  return <section id="work-timer" tabIndex={-1} className="space-y-3 rounded border bg-white p-4 focus:ring-4 focus:ring-emerald-400">
     {mode === "timer" && <>
     <h2 className="font-bold">Work timer</h2>
     <p className="font-mono text-3xl font-semibold">{clock}</p>

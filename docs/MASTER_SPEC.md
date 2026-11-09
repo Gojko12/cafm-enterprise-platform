@@ -779,3 +779,9 @@ Include a toggle in the `Actions` header:
 - Existing profiles without role assignments are migrated without changing their permissions, using a custom role when no default matches. Known role-title placeholders are removed from the profile directory. Migration uses the existing revision-checked sync; demo reset replaces site data.
 - Super Admin governance initializes an empty site with demo data using its current revision. A site with missing or invalid data, a conflicting write, or unavailable synchronization reports an error rather than overwriting it.
 - The identity switcher and shared sync token remain unauthenticated demo mechanisms; role definitions and UI governance do not provide server-side authorization.
+
+## 42. Mobile Concurrent Timers and Checklist Gate
+
+- A technician must have an open timer session on a PM, FJ or LJ before editing its checklist or to-do steps. The execution hub can start the timer and open the checklist in one action. If synchronization ends the session while the checklist is open, editing is locked until timing is restarted; unsaved progress can still be saved and the view exited.
+- Multiple work requests can be timed concurrently. Open and completed sessions remain authoritative on each offline work request and synchronize through the existing revision-checked queue. A per-site localStorage index is rebuilt from the offline requests for quick inspection; it does not replace them as the source of truth. Stopping a session records at least one minute and preserves the technician's opinion and team-leader override.
+- The mobile header includes a running-timers bar, and the Timers tab lists running sessions and sessions completed today for the selected site and technician. Timer cards open the work request hub and focus its stopwatch. Navigation out of a checklist waits for its pending save and refuses to discard an in-progress photo read or failed save.
