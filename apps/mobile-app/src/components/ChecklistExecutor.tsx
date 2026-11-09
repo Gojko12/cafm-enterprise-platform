@@ -1,3 +1,4 @@
+import { notify } from "../lib/toast";
 import React, { useEffect, useState } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 
@@ -175,11 +176,11 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
 
   const handleNextStep = () => {
     if (stepFailed && currentStep.RequiresPhotoOnFailure !== false && !failurePhoto) {
-      alert("Photo is required when a step fails");
+      notify("Photo is required when a step fails");
       return;
     }
     if (stepFailed && currentStep.RequiresCommentOnFailure !== false && !failureComment.trim()) {
-      alert("A comment is required when a step fails");
+      notify("A comment is required when a step fails");
       return;
     }
 
@@ -221,12 +222,12 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
 
   const handleSubmitChecklist = async () => {
     if (stepFailed && currentStep.RequiresPhotoOnFailure !== false && !failurePhoto) {
-      alert("Photo is required when a step fails");
+      notify("Photo is required when a step fails");
       return;
     }
 
     if (stepFailed && currentStep.RequiresCommentOnFailure !== false && !failureComment.trim()) {
-      alert("A comment is required when a step fails");
+      notify("A comment is required when a step fails");
       return;
     }
     const currentValue = stepValues.find((item) => item.StepId === currentStep.StepId);
@@ -240,11 +241,11 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
     ).map((item) => item.StepId));
     const missing = steps.filter((step) => step.IsRequired !== false && !answered.has(step.StepId));
     if (!currentValue && currentStep.IsRequired !== false) {
-      alert(`Answer the current step before submitting: ${currentStep.StepTitle}`);
+      notify(`Answer the current step before submitting: ${currentStep.StepTitle}`);
       return;
     }
     if (missing.length) {
-      alert(`Complete the required answers for: ${missing.map((step) => step.StepTitle).join(", ")}`);
+      notify(`Complete the required answers for: ${missing.map((step) => step.StepTitle).join(", ")}`);
       return;
     }
     const checkedValues = finalValues.map((item) => item.StepId === currentStep.StepId
@@ -253,7 +254,7 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
     try {
       await onStepComplete?.(checkedValues);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Could not save the completed checklist.");
+      notify(error instanceof Error ? error.message : "Could not save the completed checklist.");
     }
   };
 

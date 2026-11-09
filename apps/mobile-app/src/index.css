@@ -50,6 +50,19 @@ body,
 .mobile-app button {
   min-height: 44px;
 }
+.mobile-app .overflow-x-auto {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.mobile-app .overflow-x-auto::-webkit-scrollbar {
+  display: none;
+}
+.mobile-filter-panel .grid-cols-\[5\.5rem_minmax\(0\,1fr\)_auto_auto\] {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.mobile-filter-panel .grid-cols-\[5\.5rem_minmax\(0\,1fr\)_auto_auto\] > span {
+  grid-column: 1 / -1;
+}
 .mobile-app img, .mobile-app svg, .mobile-app canvas {
   max-width: 100%;
 }

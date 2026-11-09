@@ -12,6 +12,7 @@ interface AdvancedFilterPanelProps {
   currentFilters: FilterCriteria;
   onFiltersChange: (filters: FilterCriteria) => void;
   onApplyFilters: () => void;
+  resultCount: number;
 }
 
 export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
@@ -23,6 +24,7 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   currentFilters,
   onFiltersChange,
   onApplyFilters,
+  resultCount,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const selectedBuilding = useMemo(
@@ -67,20 +69,19 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   };
 
   return (
-    <div className="bg-white border-b border-gray-200 mobile-filter-panel">
+    <div className="mobile-filter-panel">
       {/* Toggle Button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-3 font-medium text-left text-sm hover:bg-gray-50 flex items-center justify-between"
+        className="rounded-full border bg-white px-3 py-2 text-sm font-medium"
         aria-expanded={isExpanded}
       >
-        <span>Advanced Filters</span>
-        <span className={`transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>
+        <span>⚡ Filter ({Object.values(currentFilters).filter((value) => value instanceof Set ? value.size > 0 : Boolean(value)).length})</span>
       </button>
 
       {/* Expanded Content */}
       {isExpanded && (
-        <div className="px-4 py-4 border-t border-gray-100 space-y-4 pb-4">
+        <div className="fixed inset-0 z-50 flex items-end bg-slate-900/50" onClick={() => setIsExpanded(false)}><div role="dialog" aria-modal="true" aria-label="Advanced filters" className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-white px-4 py-4 space-y-4 pb-4" onClick={(event) => event.stopPropagation()}>
           {/* Location Pickers */}
           <div className="space-y-3">
             <LocationEquipmentPickerGroup
@@ -184,7 +185,7 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex gap-2 border-t border-gray-100 pt-3">
+          <div className="sticky bottom-0 flex gap-2 border-t border-gray-100 bg-white pt-3 pb-[env(safe-area-inset-bottom)]">
             <button
               onClick={handleResetFilters}
               className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded hover:bg-gray-300 transition-colors"
@@ -192,12 +193,12 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
               Reset
             </button>
             <button
-              onClick={onApplyFilters}
+              onClick={() => { onApplyFilters(); setIsExpanded(false); }}
               className="flex-1 px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded hover:bg-blue-600 transition-colors"
             >
-              Apply Filter
+              Show Results ({resultCount})
             </button>
-          </div>
+          </div></div>
         </div>
       )}
     </div>

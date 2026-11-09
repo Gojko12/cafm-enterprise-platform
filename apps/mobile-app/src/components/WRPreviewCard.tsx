@@ -51,7 +51,7 @@ export const WRPreviewCard: React.FC<WRPreviewCardProps> = ({ wr, onClick }) => 
   return (
     <div
       onClick={onClick}
-      className={`border rounded-lg p-4 mb-3 cursor-pointer hover:shadow-md transition-shadow ${colorClass}`}
+      className={`rounded-2xl bg-white p-3.5 mb-3 cursor-pointer shadow-sm border border-slate-200/80 space-y-2 hover:shadow-md transition-shadow ${colorClass.replace(/bg-\S+/g, "")}`}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -73,6 +73,7 @@ export const WRPreviewCard: React.FC<WRPreviewCardProps> = ({ wr, onClick }) => 
       </div>
 
       {/* Row 2: MarginDate | DueDate */}
+      <p className="text-xs text-slate-500">{[wr.bl_id, wr.LevelName, wr.RoomCode, wr.EquipmentCodes.join(", ")].filter(Boolean).join(" · ")}</p>
       <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-2">
         <span>
           Margin: {wr.MarginDate ? formatDateShort(wr.MarginDate) : "—"}

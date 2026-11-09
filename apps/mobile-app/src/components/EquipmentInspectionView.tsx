@@ -1,3 +1,4 @@
+import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { Equipment, BaseWorkRequest, Building, Floor, Room } from "@cafm/shared-schema";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
@@ -85,7 +86,7 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
 
   const handleFJComplete = async () => {
     if (!fjDescription.trim()) {
-      alert("Please enter a description");
+      notify("Please enter a description");
       return;
     }
     const equipmentCode =
@@ -93,7 +94,7 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
         ? Array.from(selectedEquipmentCodes)[0]
         : undefined;
     if (!equipmentCode || !selectedBuilding || !selectedFloor || !selectedRoom) {
-      alert("Select one equipment item and a complete building, floor, and room.");
+      notify("Select one equipment item and a complete building, floor, and room.");
       return;
     }
     try {
@@ -110,13 +111,13 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
       setFjPhoto(null);
     } catch (error) {
       console.error("Could not create Fast Job", error);
-      alert("Could not save the Fast Job. Please try again.");
+      notify("Could not save the Fast Job. Please try again.");
     }
   };
 
   const handleLJComplete = async () => {
     if (!ljDescription.trim() || !selectedBuilding || !selectedFloor) {
-      alert("Enter a description and select a building and floor.");
+      notify("Enter a description and select a building and floor.");
       return;
     }
     try {
@@ -131,7 +132,7 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
       setLjDescription("");
     } catch (error) {
       console.error("Could not create Long Job", error);
-      alert("Could not save the Long Job. Please try again.");
+      notify("Could not save the Long Job. Please try again.");
     }
   };
 

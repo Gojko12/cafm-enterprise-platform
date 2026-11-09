@@ -1,3 +1,4 @@
+import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 import { formatDistanceToNow } from "date-fns";
@@ -61,7 +62,7 @@ export const WorkSessionTimer: React.FC<WorkSessionTimerProps> = ({
   const handleConfirmOverride = () => {
     const minutes = parseInt(overrideMinutes, 10);
     if (isNaN(minutes) || !overrideReason.trim()) {
-      alert("Please enter valid time and reason");
+      notify("Please enter valid time and reason");
       return;
     }
 

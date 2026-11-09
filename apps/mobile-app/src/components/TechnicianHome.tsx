@@ -1,3 +1,4 @@
+import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 import { WRPreviewCard } from "./WRPreviewCard";
@@ -12,6 +13,7 @@ interface TechnicianHomeProps {
   onReport: (wrId: string) => void;
   technician: string;
   now: number;
+  filterControl?: React.ReactNode;
 }
 
 export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
@@ -22,6 +24,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   onReport,
   technician,
   now,
+  filterControl,
 }) => {
   const [activeTab, setActiveTab] = useState<"my-wrs" | "unassigned">("my-wrs");
   const [type, setType] = useState<"All" | "PM" | "FJ" | "LJ">("All");
@@ -32,7 +35,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   const handleClaimWR = async (wrId: string) => {
     if (onClaimWR) {
       try { await onClaimWR(wrId); }
-      catch (error) { alert(error instanceof Error ? error.message : "Could not claim the work request."); return; }
+      catch (error) { notify(error instanceof Error ? error.message : "Could not claim the work request."); return; }
       setClaimMessage(`WR ${wrId} claimed successfully`);
       setShowClaimToast(true);
       setTimeout(() => setShowClaimToast(false), 3000);
@@ -43,7 +46,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   const typed = (activeTab === "my-wrs" ? myWRs : unassignedWRs).filter((wr) => type === "All" || wr.WR_Type === type);
   const dateOf = (wr: BaseWorkRequest) => scheduledSlot(wr, technician)?.assignedStartDateTime.slice(0, 10) ?? wr.StartDate_DateToPerform;
   const overdue = (wr: BaseWorkRequest) => isOverdue(wr, new Date(now), technician);
-  const displayWRs = typed.filter((wr) => activeTab !== "my-wrs" || agenda === "agenda" || agenda === "all" || (agenda === "overdue" ? overdue(wr) : agenda === "today" ? dateOf(wr) === currentDate : !!dateOf(wr) && dateOf(wr)! > currentDate));
+  const displayWRs = typed.filter((wr) => agenda === "agenda" || agenda === "all" || (agenda === "overdue" ? overdue(wr) : agenda === "today" ? dateOf(wr) === currentDate : !!dateOf(wr) && dateOf(wr)! > currentDate));
   const group = (wr: BaseWorkRequest) => {
     if (overdue(wr)) return "🚨 Overdue / Behind Planned Schedule";
     const date = dateOf(wr);
@@ -64,7 +67,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
     <div className="flex flex-col h-full mobile-technician-home">
       {/* Tab Switcher */}
       <div className="border-b border-gray-200 bg-white sticky top-0 z-30">
-        <div className="flex items-center gap-4 px-4">
+        <div className="flex items-center gap-2 px-3">
           <button
             onClick={() => setActiveTab("my-wrs")}
             className={`py-3 px-2 font-medium text-sm border-b-2 transition-colors ${
@@ -87,15 +90,9 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
           >
             Unassigned ({unassignedWRs.length})
           </button>
+          <div className="ml-auto">{filterControl}</div>
         </div>
-        <div className="flex gap-2 bg-white px-4 py-2">{(["All", "PM", "FJ", "LJ"] as const).map((item) => <button key={item} aria-pressed={type === item} onClick={() => setType(item)} className={`rounded-full px-3 py-1 text-sm ${type === item ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>{item}</button>)}</div>
-        {activeTab === "my-wrs" && <div className="flex gap-2 overflow-x-auto px-4 pb-2">{([
-          ["agenda", "📅 Daily To-Do Agenda"],
-          ["overdue", `🚨 Overdue Only (${typed.filter(overdue).length})`],
-          ["today", `📆 Today (${typed.filter((wr) => dateOf(wr) === currentDate).length})`],
-          ["upcoming", `⏭ Tomorrow & Upcoming (${typed.filter((wr) => !!dateOf(wr) && dateOf(wr)! > currentDate).length})`],
-          ["all", `All Assigned (${typed.length})`],
-        ] as const).map(([value, label]) => <button key={value} aria-pressed={agenda === value} onClick={() => setAgenda(value)} className={`whitespace-nowrap rounded-full px-3 py-1 text-xs ${agenda === value ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>)}</div>}
+        <div className="flex gap-2 overflow-x-auto bg-white px-4 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"><button className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${agenda === "all" ? "bg-blue-600 text-white" : "bg-slate-100"}`} onClick={() => { setAgenda("all"); setType("All"); }}>All</button><button className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${agenda === "overdue" ? "bg-blue-600 text-white" : "bg-slate-100"}`} onClick={() => setAgenda("overdue")}>🚨 Overdue</button><button className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${agenda === "today" ? "bg-blue-600 text-white" : "bg-slate-100"}`} onClick={() => setAgenda("today")}>📅 Today</button>{(["PM", "FJ", "LJ"] as const).map((item) => <button key={item} aria-pressed={type === item} onClick={() => setType(item)} className={`rounded-full px-3 py-1 text-sm ${type === item ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>{item}</button>)}</div>
       </div>
 
       {/* Content Area */}

@@ -1,3 +1,4 @@
+import { notify } from "./lib/toast";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { initOfflineEngine, OfflineEngine } from "./lib/offline-engine";
 import { getDB } from "./lib/db";
@@ -87,12 +88,14 @@ export default function App() {
   const [apiReachable, setApiReachable] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncNotice, setSyncNotice] = useState("");
+  const [toast, setToast] = useState("");
   const [installError, setInstallError] = useState(false);
   const [phoneFrame, setPhoneFrame] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [apiBase, setApiBase] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const resumedSync = useRef(false);
+  const lastBackgroundError = useRef("");
   const [myWRs, setMyWRs] = useState<BaseWorkRequest[]>([]);
   const [unassignedWRs, setUnassignedWRs] = useState<BaseWorkRequest[]>([]);
   const [siteWRs, setSiteWRs] = useState<BaseWorkRequest[]>([]);
@@ -127,7 +130,12 @@ export default function App() {
     setFreezes(siteContext.locationFreezes.filter((item) => item.siteId === activeSiteId));
     setProfiles(siteContext.userAccessProfiles.filter((item) => item.siteId === activeSiteId));
     const technician = people.find((item) => item.id === currentTechnicianId);
-    if (!technician && people.length) { setCurrentTechnicianId(people[0].id); return; }
+    if (!technician && people.length) {
+      const saved = localStorage.getItem(`cafm-technician:${activeSiteId}`);
+      const preferred = people.find((item) => item.id === saved) ?? people.find((item) => normalizePerson(`${item.Name} ${item.LastName}`) === "gregor gojkosek") ?? people[0];
+      setCurrentTechnicianId(preferred.id);
+      return;
+    }
     setSiteWRs(siteRequests);
     setLoadedSite(activeSiteId);
     setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId) || wr.AssignedCraftpersonIds.includes(currentTechnicianId)));
@@ -148,6 +156,19 @@ export default function App() {
     try { setApiBase(localStorage.getItem("cafm_api_base_url") ?? ""); }
     catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not read the API base setting."); }
   }, []);
+  useEffect(() => {
+    const show = (event: Event) => { if (event instanceof CustomEvent && typeof event.detail === "string") setToast(event.detail); };
+    window.addEventListener("cafm-toast", show);
+    return () => window.removeEventListener("cafm-toast", show);
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(""), 5000);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+  useEffect(() => {
+    if (currentTechnicianId) localStorage.setItem(`cafm-technician:${activeSiteId}`, currentTechnicianId);
+  }, [activeSiteId, currentTechnicianId]);
   useEffect(() => {
     const online = () => setBrowserOnline(navigator.onLine);
     const connection = (event: Event) => { if (event instanceof CustomEvent) setApiReachable(event.detail === true); };
@@ -201,7 +222,7 @@ export default function App() {
     void refreshData().catch((error) => console.error("Could not load offline data:", error));
     if (isSimulatedOffline) return;
     const sync = () => {
-      void engine.syncNow().then((status) => { if (status.synced || resumedSync.current) { setSyncNotice(`Synchronization complete. ${status.synced} changes sent; ${status.pending} remain queued.`); resumedSync.current = false; } return refreshData(); }).catch((error) => console.error("Background sync failed:", error));
+      void engine.syncNow().then((status) => { lastBackgroundError.current = ""; window.dispatchEvent(new Event("cafm-sync-success")); if (status.synced || resumedSync.current) { setSyncNotice(`Synchronization complete. ${status.synced} changes sent; ${status.pending} remain queued.`); resumedSync.current = false; } return refreshData(); }).catch((error: unknown) => { const message = error instanceof Error ? error.message : "Background sync failed."; if (message.includes("already in progress") || message.includes("aborted")) return; console.error("Background sync failed:", error); if (lastBackgroundError.current !== message) { lastBackgroundError.current = message; notify(message); } });
     };
     sync();
     const interval = window.setInterval(sync, 5000);
@@ -256,7 +277,7 @@ export default function App() {
       setSelectedEquipment(eq);
       setCurrentView("inspection");
     } else {
-      alert(`Equipment ${equipmentCode} not found`);
+      notify(`Equipment ${equipmentCode} not found`);
     }
   };
 
@@ -389,8 +410,8 @@ export default function App() {
     const request: BaseWorkRequest = { WR_ID: `FJ-${crypto.randomUUID()}`, WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}.` }] };
     await persistCreatedRequest(request);
     setFollowUpOpen(false);
-    try { await handleSyncNow(); alert(`Follow-up ${request.WR_ID} saved and synchronized.`); }
-    catch (error) { alert(`Follow-up ${request.WR_ID} saved offline. Synchronization failed: ${error instanceof Error ? error.message : "Retry Sync Now."}`); }
+    try { await handleSyncNow(); notify(`Follow-up ${request.WR_ID} saved and synchronized.`); }
+    catch (error) { notify(`Follow-up ${request.WR_ID} saved offline. Synchronization failed: ${error instanceof Error ? error.message : "Retry Sync Now."}`); }
   };
   const openFollowUp = () => {
     if (!selectedWR || !access?.permissions.canOpenFollowUpFJ) return;
@@ -422,16 +443,16 @@ export default function App() {
   const timers = siteWRs.flatMap((wr) => (wr.timeSessions ?? []).filter((session) => session.craftpersonId === currentTechnicianId && !session.endedAt).map((session) => ({ wr, session })));
   const selectedTimer = selectedWR?.timeSessions?.find((session) => session.craftpersonId === currentTechnicianId && !session.endedAt);
   const navigateSafely = (destination: () => void) => {
-    if (creatingFollowUp) { alert("Wait for the current save to finish before navigating."); return; }
-    if (followUpOpen || fieldWR) { alert("Close the open editor before navigating."); return; }
+    if (creatingFollowUp) { notify("Wait for the current save to finish before navigating."); return; }
+    if (followUpOpen || fieldWR) { notify("Close the open editor before navigating."); return; }
     if (currentView === "checklist") {
-      if (!checklistNavigation.current) { alert("Checklist is not ready to leave yet."); return; }
+      if (!checklistNavigation.current) { notify("Checklist is not ready to leave yet."); return; }
       checklistNavigation.current(destination);
-    } else if (savingWR.current) alert("Wait for the current save to finish before navigating.");
+    } else if (savingWR.current) notify("Wait for the current save to finish before navigating.");
     else if (currentView !== "hub" || hubNavigation.current?.()) destination();
   };
   const openTimerWR = (id: string) => navigateSafely(() => {
-    if (!siteWRs.some((wr) => wr.WR_ID === id)) { alert("This work request is no longer available on this site."); return; }
+    if (!siteWRs.some((wr) => wr.WR_ID === id)) { notify("This work request is no longer available on this site."); return; }
     setOpenCompletion(false);
     handleOpenWR(id);
     setFocusTimer(true);
@@ -444,10 +465,10 @@ export default function App() {
 
   // Render based on current view
   const renderContent = () => {
-    if (currentView === "settings") return <section className="space-y-4 p-4 pb-32"><h1 className="text-xl font-bold">Settings</h1><button className="rounded border bg-white p-3" onClick={() => setShareOpen(true)}>📱 Share / Open on Phone (QR &amp; URL)</button><label className="block">API base URL (blank uses same origin)<input className="block w-full border p-2" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://example.com" /></label>{settingsError && <p role="alert" className="text-red-700">{settingsError}</p>}<button className="rounded border bg-white p-2" onClick={() => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } }}>Save API base</button><p className="text-sm">Offline refresh requires a previously installed production build over HTTPS or localhost.</p></section>;
+    if (currentView === "settings") return <section className="space-y-4 p-4 pb-32"><h1 className="text-xl font-bold">Profile</h1><div className="rounded-xl border bg-white p-3"><strong>{technicianName || "Select technician"}</strong><p>{activeSiteId} · {access?.primaryRole ?? "Technician"}</p><p className="text-sm">VPA trades: {vpaTrades.join(", ") || "None"}</p></div><button className="rounded border bg-white p-3" onClick={() => handleToggleOfflineMode(!isSimulatedOffline)}>{isSimulatedOffline ? "🟢 Resume online" : "📴 Simulate offline"}</button><div className="rounded-xl border bg-white p-3"><strong>Field reports</strong><p>{siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} submitted updates</p></div><button className="rounded border bg-white p-3" onClick={() => setShareOpen(true)}>📱 Share / Open on Phone (QR &amp; URL)</button><details className="rounded-xl border bg-white p-3"><summary>Advanced Developer Options</summary><label className="block">API base URL (blank uses same origin)<input className="block w-full border p-2" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://example.com" /></label>{settingsError && <p role="alert" className="text-red-700">{settingsError}</p>}<button className="rounded border bg-white p-2" onClick={() => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } }}>Save API base</button></details><p className="text-sm">Offline refresh requires a previously installed production build over HTTPS or localhost.</p></section>;
     switch (currentView) {
       case "audit-assurance":
-        return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} />;
+        return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
       case "hub":
         return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
@@ -481,6 +502,7 @@ export default function App() {
       case "scanner":
         return (
           <QRScanner
+            equipment={equipment}
             onScanComplete={handleScanEquipment}
             onCancel={() => setCurrentView("home")}
           />
@@ -508,23 +530,25 @@ export default function App() {
 
       case "qa-spot-check":
         return selectedEquipment ? <div className="space-y-3 p-4"><h2 className="text-xl font-bold">QA spot-check · {selectedEquipment.EquipmentCode}</h2><button onClick={() => setCurrentView("inspection")}>Back to equipment</button>{siteWRs.filter((wr) => (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && !!access?.permissions.canAuditChooseWRs && access.permissions.auditWRTypes.includes(wr.WR_Type) && access.permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id)) && wr.EquipmentCodes.includes(selectedEquipment.EquipmentCode) && (wr.Percentage === 78 || wr.Percentage === 100)).map((wr) => <div key={wr.WR_ID} className="rounded border bg-white p-3"><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p>QA: {wr.QA_AuditStatus ?? "None"}</p><button disabled={!!wr.QA_AuditStatus && wr.QA_AuditStatus !== "None"} onClick={() => {
-          if (!engine) { alert("Offline engine is not ready."); return; }
+          if (!engine) { notify("Offline engine is not ready."); return; }
           const now = new Date().toISOString();
           const next: BaseWorkRequest = { ...wr, QA_CompletionDate: (wr.UpdatedAt ?? wr.CreatedDate).slice(0, 10), QA_AuditStatus: "SelectedForAudit", QA_SelectionMode: "QRScanOnSite", UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: currentTechnicianId, actorRole: "MobileTechnician", createdAt: now, text: "Selected for QA audit by equipment QR spot-check." }] };
-          void engine.saveWorkRequest(next, wr).then(refreshData).then(() => alert("Selected for audit. Sync to the web portal when online.")).catch((error: unknown) => alert(error instanceof Error ? error.message : "Could not select audit."));
+          void engine.saveWorkRequest(next, wr).then(refreshData).then(() => notify("Selected for audit. Sync to the web portal when online.")).catch((error: unknown) => notify(error instanceof Error ? error.message : "Could not select audit."));
         }}>Inspect This WR (QR Spot-Check)</button></div>)}</div> : null;
 
       case "home":
       default:
         return (
           <div className="pb-20">
-            <AdvancedFilterPanel
+            <TechnicianHome
+              filterControl={<AdvancedFilterPanel
               trades={vpaTrades}
               buildings={buildings}
               floors={floors}
               rooms={rooms}
               equipment={equipment}
               currentFilters={filters}
+              resultCount={applyFilters(myWRs, filters).length + applyFilters(unassignedWRs, filters).length}
               onFiltersChange={(newFilters) => {
                 if (newFilters.trade !== filters.trade) setAppliedFilters((current) => ({ ...current, trade: newFilters.trade }));
                 Object.entries(newFilters).forEach(([key, value]) => {
@@ -532,9 +556,7 @@ export default function App() {
                 });
               }}
               onApplyFilters={handleApplyFilters}
-            />
-
-            <TechnicianHome
+            />}
               myWRs={applyFilters(myWRs, appliedFilters)}
               unassignedWRs={applyFilters(unassignedWRs, appliedFilters)}
               onClaimWR={access?.permissions.canClaimUnassignedWR ? handleClaimWR : undefined}
@@ -557,11 +579,12 @@ export default function App() {
         activeSiteId={activeSiteId}
         technicianId={currentTechnicianId}
         technicians={technicians}
+        profiles={profiles}
         vpaTrades={vpaTrades}
-        onTechnicianChange={(id) => { if (currentView !== "home" || fieldWR) { alert("Close the editor and return to the work request list before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
+        onTechnicianChange={(id) => { if ((currentView !== "home" && currentView !== "settings") || fieldWR) { notify("Close the editor before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
         onSiteChange={(site) => {
-          if (currentView !== "home" || fieldWR) {
-            alert("Close the editor and return to the work request list before switching sites.");
+          if ((currentView !== "home" && currentView !== "settings") || fieldWR) {
+            notify("Close the editor before switching sites.");
             return;
           }
           setLoadedSite(null); setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setSiteEquipment([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
@@ -570,63 +593,32 @@ export default function App() {
         isSimulatedOffline={isSimulatedOffline}
         isOffline={isSimulatedOffline || !browserOnline || !apiReachable}
         pendingCount={pendingCount}
-        onToggleOfflineMode={handleToggleOfflineMode}
       />
+      {toast && <div role="status" className="absolute left-3 right-3 top-16 z-[100] rounded-xl bg-slate-800 p-3 text-sm text-white shadow-lg">{toast}<button className="float-right" onClick={() => setToast("")} aria-label="Dismiss">✕</button></div>}
       {(isSimulatedOffline || !browserOnline || !apiReachable) && <p role="status" className="bg-amber-100 px-3 py-2 text-sm text-amber-950">📴 OFFLINE MODE — Timer sessions, checklist answers, photos &amp; Sophia inspections are saved on device ({pendingCount} changes queued).</p>}
       {installError && <p role="alert" className="bg-amber-100 p-2 text-sm">Offline app installation failed. Keep this page open and reconnect before refreshing.</p>}
       {syncNotice && <p role="status" className="bg-emerald-100 p-2 text-sm text-emerald-900">{syncNotice}<button className="ml-2 underline" onClick={() => setSyncNotice("")}>Dismiss</button></p>}
 
-      <section aria-label="Active running timers" className={`relative z-40 shrink-0 px-3 py-1 ${timers.length ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>
+      {timers.length > 0 && <section aria-label="Active running timers" className="relative z-40 shrink-0 bg-emerald-800 px-3 py-1 text-white">
         <div className="flex items-center justify-between gap-2"><strong className="text-xs">{timers.length ? `⏱ Active Running Timers (${timers.length})` : "⏱ No active timers running"}</strong>{timers.length > 0 && <button className="text-xs text-emerald-300 underline" onClick={() => navigateSafely(() => setCurrentView("timers"))}>View all</button>}</div>
         {timers.length > 0 && <div className="mt-1 flex max-h-36 gap-2 overflow-auto">{timers.map((timer) => <TimerCard key={timer.session.id} timer={timer} equipment={siteEquipment} now={now} open={openTimerWR} compact />)}</div>}
         {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
-      </section>
+      </section>}
+      {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
       {/* Main Content */}
       <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{renderContent()}</main>
       {fieldWR && <FieldUpdateModal key={fieldWR} wrId={fieldWR} submit={submitFieldUpdate} close={() => setFieldWR(null)} />}
       {followUpOpen && selectedWR && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" aria-label="Create Follow-Up FJ" className="w-full max-w-lg space-y-3 rounded bg-white p-4"><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea aria-label="Follow-up description" className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} />{followUpError && <p role="alert" className="text-rose-700">{followUpError}</p>}<div className="flex gap-2"><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); setFollowUpError(""); void createFollowUp().catch((error: unknown) => setFollowUpError(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button><button disabled={creatingFollowUp} className="rounded border p-2" onClick={() => setFollowUpOpen(false)}>Cancel</button></div></div></div>}
 
       {/* Bottom Navigation Tabs */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-center justify-around z-40 mobile-nav">
-          <button
-            onClick={() => navigateSafely(() => setCurrentView("home"))}
-            className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors"
-            aria-label="Home tab"
-            aria-current={currentView === "home" ? "page" : undefined}
-          >
-            <div className="text-xl">📋</div>
-            <div className="text-xs font-medium text-gray-700">Work Requests</div>
-          </button>
-          <button
-            onClick={() => navigateSafely(() => setCurrentView("scanner"))}
-            className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors"
-            aria-label="Scanner tab"
-          >
-            <div className="text-xl">📱</div>
-            <div className="text-xs font-medium text-gray-700">Scan QR</div>
-          </button>
-          <button onClick={() => navigateSafely(() => setCurrentView("audit-assurance"))} className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors" aria-current={currentView === "audit-assurance" ? "page" : undefined}>🔎<span className="block text-xs">Audit</span></button>
-          <button onClick={() => navigateSafely(() => setCurrentView("timers"))} className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors" aria-current={currentView === "timers" ? "page" : undefined}>
-            <div className="text-xl">⏱</div>
-            <div className="text-xs font-medium text-gray-700">Timers ({timers.length})</div>
-          </button>
-          <button
-            className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors opacity-50 cursor-not-allowed"
-            aria-label="Reports tab (disabled)"
-            title="Coming in next phase"
-          >
-            <div className="text-xl">📊</div>
-            <div className="text-xs font-medium text-gray-700">Reports</div>
-          </button>
-          <button
-            className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors"
-            aria-label="Settings tab"
-            aria-current={currentView === "settings" ? "page" : undefined}
-            onClick={() => navigateSafely(() => setCurrentView("settings"))}
-          >
-            <div className="text-xl">⚙️</div>
-            <div className="text-xs font-medium text-gray-700">Settings</div>
-          </button>
+        <nav className="mobile-nav fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+          {([
+            ["home", "WRs", "M9 5h6M9 3h6v4H9z M6 5H4v16h16V5h-2 M8 11h8 M8 15h8"],
+            ["scanner", "Scan QR", "M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5 M8 8h3v3H8z M14 8h2v2h-2z M8 14h2v2H8z M14 14h3v3h-3z"],
+            ["audit-assurance", "Audit", "M12 3 4 6v5c0 5 3 8 8 10 5-2 8-5 8-10V6z M8 12l3 3 5-6"],
+            ["timers", "Timers", "M9 2h6 M12 7V4 M12 12v4l3 2 M20 13a8 8 0 1 1-16 0 8 8 0 0 1 16 0z"],
+            ["settings", "Profile", "M4 7h16 M4 17h16 M8 4v6 M16 14v6"],
+          ] as const).map(([view, label, icon]) => <button key={view} onClick={() => navigateSafely(() => setCurrentView(view))} className={`relative flex flex-1 flex-col items-center gap-1 py-2 text-xs ${currentView === view ? "text-blue-700" : "text-slate-600"}`} aria-current={currentView === view ? "page" : undefined}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={icon} /></svg>{view === "timers" && timers.length > 0 && <span className="absolute right-4 top-0 rounded-full bg-emerald-600 px-1 text-white">{timers.length}</span>}{label}</button>)}
         </nav>
       {shareOpen && <PhoneShare initialUrl={`${window.location.origin}${window.location.pathname}`} onClose={() => setShareOpen(false)} />}
     </div>

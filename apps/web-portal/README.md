@@ -12,15 +12,19 @@ also synchronize it to `.data/cafm-db.json` through `/api/cafm-state`. Reset
 Demo Data replaces the selected site's state after confirmation. Conflicting
 local edits are retained and reported instead of silently overwritten.
 
-Local development on localhost uses a publicly known fallback token, so the
-portal and mobile development servers sync without Firebase credentials or
-token configuration. In other modes the token must be configured explicitly.
-To override it, generate a random token of at least 32 characters locally; set `CAFM_SYNC_TOKEN` and
+When no server token is configured, the API accepts unauthenticated reads and
+writes. **Anyone who can reach the API can read or modify all site data**;
+CORS and same-origin checks are not authentication. Do not expose this mode to
+the public internet or use it for sensitive or production data. Deploy behind
+an authenticated access-restricted proxy.
+
+To require a shared token, generate a random token of at least 32 characters locally; set `CAFM_SYNC_TOKEN` (or `CAFM_API_TOKEN`) and
 `NEXT_PUBLIC_CAFM_SYNC_TOKEN` to that value in the web portal's `.env.local`,
 and `VITE_CAFM_SYNC_TOKEN` to the same value in the mobile app's `.env.local`.
-Restart both development servers after changing the variables. Open the portal
-for a site first so it can initialize that site's server state. No Firebase
-credentials are required for this local sync.
+Restart both development servers after changing the variables. When a site's
+server state is absent, the first mobile sync initializes its demo seed with
+revision checking; existing site state is not replaced. No Firebase credentials
+are required for this local sync.
 
 Cross-origin access is limited to localhost ports 3000 and 3001; same-origin
 requests are also accepted. Site and person
@@ -44,9 +48,9 @@ From the repository root, install the pnpm workspace dependencies and run
 with `/mobile/` as its base, copies it into the portal's public directory, and
 builds Next.js. The copied directory is generated and ignored by Git. To serve
 the result locally, run `pnpm --dir apps/web-portal exec next start`.
-The supplied Render configuration uses this pipeline; cloud deployment
-configuration must also supply the token variables described above at build
-and runtime. Deploy behind HTTPS and an authenticated access-restricted proxy:
+The supplied Render configuration uses this pipeline. When a token is configured,
+set the corresponding client variables at build time as described above.
+Deploy behind HTTPS and an authenticated access-restricted proxy:
 the shared token is visible in the browser and is not user authentication.
 
 By default, the API uses `.data/cafm-db.json` on writable local disk. On Vercel

@@ -11,6 +11,7 @@ import type { IDBPDatabase } from "idb";
 import type { MobileAppDB, OfflinePhotoQueueEntry, SyncQueueEntry } from "./db";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema } from "../../../web-portal/lib/audit-assurance-types";
 import { AuditAssuranceSchema, EquipmentInspectionSheetSchema, completeEquipmentInspection, defaultKmisConfig } from "../../../web-portal/lib/equipment-inspection";
+import { seedSiteData } from "../../../web-portal/lib/demo-seed";
 
 const workRequestSchema = z.custom<BaseWorkRequest>((value) => BaseWorkRequestSchema.safeParse(value).success);
 const stateSchema = z.object({
@@ -48,6 +49,9 @@ const sessionSchema = z.object({
   TimerOverrideReason: z.string().optional(), Status: z.literal("STOPPED"),
 });
 type State = z.infer<typeof stateSchema>;
+class SyncRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 
 export function stable(value: unknown): string {
   if (value === undefined) return "undefined";
@@ -61,10 +65,7 @@ export function stable(value: unknown): string {
 }
 
 async function request(site: SiteId, person: string, method: "GET" | "POST", body?: unknown, signal?: AbortSignal) {
-  const token = import.meta.env.VITE_CAFM_SYNC_TOKEN ||
-    (import.meta.env.DEV && typeof window !== "undefined" && window.location.hostname === "localhost"
-      ? "cafm-local-development-sync-token-2026" : undefined);
-  if (!token || token.length < 32) throw new Error("Synchronization is not configured. Changes remain on this device.");
+  const token = import.meta.env.VITE_CAFM_SYNC_TOKEN;
   const override = localStorage.getItem("cafm_api_base_url")?.trim() || import.meta.env.VITE_API_BASE_URL?.trim();
   let endpoint = "/api/cafm-state";
   if (override) {
@@ -76,7 +77,7 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
   const options: RequestInit = {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       "X-CAFM-Site-Id": site,
       "X-CAFM-Person": person,
       ...(body ? { "Content-Type": "application/json" } : {}),
@@ -99,7 +100,7 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
   const data: unknown = await response.json();
   if (!response.ok) {
     const message = data && typeof data === "object" && "error" in data ? String(data.error) : `HTTP ${response.status}`;
-    throw new Error(`Synchronization failed: ${message}`);
+    throw new SyncRequestError(`Synchronization failed: ${message}`, response.status);
   }
   const parsed = responseSchema.safeParse(data);
   if (!parsed.success) throw new Error("The portal returned invalid synchronization data.");
@@ -116,8 +117,18 @@ export async function synchronizePortal(
   db: IDBPDatabase<MobileAppDB>, site: SiteId, person: string,
   queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal,
 ) {
-  const response = await request(site, person, "GET", undefined, signal);
-  if (!response.state) throw new Error("The portal has no state for this site. Open the portal and retry.");
+  let response = await request(site, person, "GET", undefined, signal);
+  if (!response.state) {
+    try {
+      response = await request(site, person, "POST", { revision: response.revision, state: seedSiteData(site) }, signal);
+    } catch (error) {
+      if (!(error instanceof SyncRequestError) || error.status !== 409) throw error;
+      const current = await request(site, person, "GET", undefined, signal);
+      if (!current.state) throw error;
+      response = current;
+    }
+  }
+  if (!response.state) throw new Error("The portal did not initialize this site. Retry synchronization.");
   const state = response.state;
   if (state.buildings.some((item) => item.SiteId !== site) ||
       state.floors.some((item) => item.SiteId !== site) ||

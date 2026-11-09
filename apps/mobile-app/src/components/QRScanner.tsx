@@ -1,134 +1,79 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import type { Equipment } from "@cafm/shared-schema";
+
+type Detector = { detect: (image: ImageBitmap | HTMLVideoElement) => Promise<Array<{ rawValue: string }>> };
+type DetectorConstructor = new (options: { formats: string[] }) => Detector;
+const detector = () => (window as Window & { BarcodeDetector?: DetectorConstructor }).BarcodeDetector;
 
 interface QRScannerProps {
+  equipment: Equipment[];
   onScanComplete?: (equipmentCode: string) => void;
   onCancel?: () => void;
 }
 
-export const QRScanner: React.FC<QRScannerProps> = ({ onScanComplete, onCancel }) => {
-  const [scannedCode, setScannedCode] = useState("");
+export const QRScanner: React.FC<QRScannerProps> = ({ equipment, onScanComplete, onCancel }) => {
+  const [code, setCode] = useState("");
   const [error, setError] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        // For MVP: simulate QR decoding with manual input
-        // In production, would use jsQR or similar library
-        setError("QR decoding requires additional library. Use manual input below.");
+  const [running, setRunning] = useState(false);
+  const video = useRef<HTMLVideoElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const stream = useRef<MediaStream>();
+  const frame = useRef<number>();
+  const stop = () => {
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    stream.current?.getTracks().forEach((track) => track.stop());
+    stream.current = undefined;
+    setRunning(false);
+  };
+  useEffect(() => () => { if (frame.current !== undefined) cancelAnimationFrame(frame.current); stream.current?.getTracks().forEach((track) => track.stop()); }, []);
+  const start = async () => {
+    try {
+      const Constructor = detector();
+      if (!Constructor) throw new Error("Live QR decoding is unavailable on this device. Choose an asset or enter its code.");
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access requires HTTPS and a supported device.");
+      stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+      if (!video.current) { stop(); return; }
+      video.current.srcObject = stream.current;
+      await video.current.play();
+      setRunning(true); setError("");
+      const scanner = new Constructor({ formats: ["qr_code"] });
+      const scan = async () => {
+        if (!stream.current || !video.current) return;
+        try {
+          const found = await scanner.detect(video.current);
+          if (found[0]?.rawValue) { const value = found[0].rawValue.trim(); stop(); onScanComplete?.(value); return; }
+          frame.current = requestAnimationFrame(() => { void scan(); });
+        } catch (problem) { stop(); setError(problem instanceof Error ? problem.message : "Camera scan failed."); }
       };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+      void scan();
+    } catch (problem) { stop(); setError(problem instanceof Error ? problem.message : "Could not start camera."); }
   };
-
-  const handleManualInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.toUpperCase();
-    setScannedCode(value);
-    setError("");
+  const photo = async (file?: File) => {
+    if (!file) return;
+    try {
+      const Constructor = detector();
+      if (!Constructor) throw new Error("QR decoding is unavailable on this device. Choose an asset or enter its code.");
+      const bitmap = await createImageBitmap(file);
+      try {
+        const found = await new Constructor({ formats: ["qr_code"] }).detect(bitmap);
+        if (!found[0]?.rawValue) throw new Error("No QR code found in the photo.");
+        onScanComplete?.(found[0].rawValue.trim());
+      } finally { bitmap.close(); }
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Could not decode image."); }
   };
-
-  const handleScan = () => {
-    if (!scannedCode.trim()) {
-      setError("Please enter or scan an equipment code");
-      return;
-    }
-
-    // Validate equipment code format (basic check)
-    if (!/^[A-Z0-9]+$/.test(scannedCode)) {
-      setError("Invalid equipment code format");
-      return;
-    }
-
-    if (onScanComplete) {
-      onScanComplete(scannedCode);
-    }
-    setScannedCode("");
-  };
-
-  return (
-    <div className="flex flex-col h-full bg-white mobile-qr-scanner">
-      {/* Header */}
-      <div className="px-4 py-4 border-b border-gray-200">
-        <h2 className="text-lg font-bold">QR Scanner</h2>
-        <p className="text-xs text-gray-600 mt-1">Scan equipment QR or enter code manually</p>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 px-4 py-6 space-y-4 overflow-y-auto">
-        {/* Camera Input */}
-        <div>
-          <label className="text-sm font-medium text-gray-700 block mb-2">
-            Camera Scan (QR or Barcode)
-          </label>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFileSelect}
-            capture="environment"
-            className="w-full px-3 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-400 transition-colors"
-            aria-label="Capture QR code image"
-          />
-          <p className="text-xs text-gray-500 mt-2">
-            Open camera on your device or select an image
-          </p>
-        </div>
-
-        {/* Manual Input */}
-        <div className="border-t border-gray-200 pt-4">
-          <label className="text-sm font-medium text-gray-700 block mb-2">
-            Or Enter Code Manually
-          </label>
-          <input
-            type="text"
-            placeholder="e.g. EQP-2026-00001"
-            value={scannedCode}
-            onChange={handleManualInput}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg text-center text-lg font-mono"
-            aria-label="Enter equipment code manually"
-          />
-        </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="p-3 bg-red-50 border border-red-300 text-red-700 text-sm rounded">
-            {error}
-          </div>
-        )}
-
-        {/* Info Box */}
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-xs text-blue-800">
-            <strong>Tip:</strong> Scan the QR code on the equipment tag. If unavailable, manually
-            enter the equipment code printed on the label.
-          </p>
-        </div>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-2">
-        <button
-          onClick={onCancel}
-          className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 font-medium rounded hover:bg-gray-300 transition-colors"
-          aria-label="Cancel scanning"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleScan}
-          disabled={!scannedCode.trim()}
-          className="flex-1 px-4 py-3 bg-green-500 text-white font-medium rounded hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          aria-label="Process scanned code"
-        >
-          Process
-        </button>
-      </div>
+  return <section className="space-y-3 p-4 pb-28">
+    <h2 className="text-xl font-bold">Scan equipment</h2>
+    <div className="relative mx-auto flex aspect-square max-h-72 items-center justify-center overflow-hidden rounded-2xl bg-slate-950">
+      <video ref={video} className="absolute inset-0 h-full w-full object-cover" muted playsInline />
+      <div className="pointer-events-none relative h-40 w-40 rounded-2xl border-4 border-emerald-400 shadow-[0_0_24px_#34d399]" />
     </div>
-  );
+    <button className="w-full rounded-xl bg-blue-700 p-3 text-white" onClick={() => running ? stop() : void start()}>{running ? "Stop camera" : "📷 Start Live Camera Scan"}</button>
+    <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { void photo(event.target.files?.[0]); event.target.value = ""; }} />
+    <button className="w-full rounded-xl border bg-white p-3" onClick={() => input.current?.click()}>🖼️ Scan from Camera Photo</button>
+    {error && <p role="alert" className="rounded bg-red-50 p-2 text-red-800">{error}</p>}
+    <label className="block font-semibold">Search or Select Equipment<input className="mt-1 w-full rounded border p-3 font-normal" value={code} onChange={(event) => setCode(event.target.value)} placeholder="Code or name" /></label>
+    <button className="rounded border bg-white p-3" disabled={!code.trim()} onClick={() => onScanComplete?.(code.trim())}>Open entered code</button>
+    <div className="max-h-64 space-y-2 overflow-auto">{equipment.filter((item) => `${item.EquipmentCode} ${item.EquipmentName}`.toLowerCase().includes(code.toLowerCase())).map((item) => <button key={item.EquipmentCode} className="block w-full rounded-xl border bg-white p-3 text-left" onClick={() => onScanComplete?.(item.EquipmentCode)}><strong>{item.EquipmentCode}</strong><span className="block text-sm">{item.EquipmentName}</span></button>)}</div>
+    <button className="rounded border p-3" onClick={onCancel}>Cancel</button>
+  </section>;
 };
