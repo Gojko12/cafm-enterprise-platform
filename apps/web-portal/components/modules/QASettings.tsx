@@ -37,14 +37,14 @@ export function QAInspectorSettings() {
 
 export function QAFailureReasonSettings() {
   const { data, commitSnapshot } = useCafmStore();
-  const { permissions } = useActiveUserPermissions();
+  const { profile, permissions } = useActiveUserPermissions();
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const reasons = data.qaFailureReasons ?? [];
-  const allowed = !!permissions?.canManageFailureReasons;
+  const allowed = !!(permissions?.canAuditDoInspection && permissions.canManageFailureReasons && (profile?.isQAInspector || profile?.isSuperAdmin));
   const save = async (next: string[]) => {
     if (!allowed) { setError("Only a QA inspector or Site Administrator can manage failure reasons."); return false; }
     setBusy(true); setError("");

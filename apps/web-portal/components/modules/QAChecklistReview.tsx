@@ -3,21 +3,19 @@
 import React, { useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useQAActions } from "@/lib/use-qa-actions";
-import { useCafmStore } from "@/lib/cafm-store";
-import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { canInspectWR } from "@/lib/qa-settings";
+import { useActiveUserPermissions } from "@/lib/cafm-store";
 import { isQACompleted, qaStatus } from "@/lib/qa-audits";
 
 export function QAChecklistReview({ wr }: { wr: BaseWorkRequest }) {
   const { annotateStep } = useQAActions();
-  const { data } = useCafmStore();
-  const { activePerson } = useSiteContext();
+  const { profile, permissions } = useActiveUserPermissions();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   if (wr.WR_Type !== "PM" || (!isQACompleted(wr) && qaStatus(wr) === "None")) return null;
-  const allowed = canInspectWR(activePerson, wr, data.qaInspectorAssignments) && qaStatus(wr) === "ToBeInspected";
+  const allowed = !!(profile && permissions?.canAuditDoInspection && (profile.isQAInspector || profile.isSuperAdmin) && permissions.auditWRTypes.includes("PM") &&
+    permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id))) && qaStatus(wr) === "ToBeInspected";
   const steps = [...(wr.ChecklistSteps ?? []), ...(wr.ChecklistInstances ?? []).filter((instance) => !(wr.ChecklistSteps ?? []).some((step) => step.StepId === instance.StepId))];
   return <section className="space-y-2 rounded border bg-white p-3">
     <h3 className="font-bold">Execution review · Checklist</h3>

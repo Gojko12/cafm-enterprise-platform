@@ -162,7 +162,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         })) } : {}),
         ...(queue === 2 ? { QA_InspectionStatus: "Pending" as const, AuditInspectionStatus: "To Be Inspected" as const } : {}),
         ...(queue === 3 ? { QA_InspectionStatus: "Passed" as const, AuditInspectionStatus: "Passed Inspected" as const } : {}),
-        ...(queue === 4 ? { QA_InspectionStatus: "ToBeCorrected" as const, AuditInspectionStatus: "PM WRs to be corrected" as const, QA_IssueDescription: "Leak observed at isolation valve.", QA_CorrectionComment: "Replace seal and repeat pressure test." } : {}) });
+        ...(queue === 4 ? { QA_InspectionStatus: "ToBeCorrected" as const, AuditInspectionStatus: "PM WRs to be corrected" as const, QA_IssueDescription: "Leak observed at isolation valve." } : {}) });
     }
     for (let i = 0; i < 20; i++) {
       const pct = [50, 55, 78, 100, 27][i % 5];
@@ -254,14 +254,13 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === type && (wr.Percentage === 78 || wr.Percentage === 100)));
     const qaExamples = [qaCandidates[0][0], qaCandidates[1][0], qaCandidates[0][1], qaCandidates[1][1], qaCandidates[0][2]]
       .filter((wr): wr is BaseWorkRequest => !!wr);
-    const statuses = ["SelectedForAudit", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"] as const;
+    const statuses = ["ToBeInspected", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"] as const;
     qaExamples.forEach((wr, index) => {
       wr.QA_AuditStatus = statuses[index];
       wr.QA_SelectionMode = "ComputerRandom5Percent";
       wr.QA_CompletionDate = (wr.UpdatedAt ?? wr.CreatedDate).slice(0, 10);
       if (index > 0) { wr.QA_InspectedBy = "Thomas"; wr.QA_InspectedDate = "2026-10-14T09:00:00Z"; }
       if (index >= 2) wr.QA_IssueDescription = "Filter on VRF unit was marked cleaned, but inspection found heavy dust buildup and a loose housing cover.";
-      if (index >= 3) { wr.QA_CorrectionComment = "Cleaned the filter and secured the housing cover."; wr.QA_CorrectedDate = "2026-10-15T10:00:00Z"; }
       if (index === 2) { wr.QA_InspectionStatus = "ToBeCorrected"; wr.AuditInspectionStatus = "PM WRs to be corrected"; }
       if (index === 1 || index === 4) { wr.QA_InspectionStatus = "Passed"; wr.AuditInspectionStatus = "Passed Inspected"; }
     });

@@ -17,8 +17,9 @@ export function useQAActions() {
   const inScope = (wr: BaseWorkRequest) => !!profile && (wr.WR_Type === "PM" || wr.WR_Type === "FJ") &&
     permissions!.auditWRTypes.includes(wr.WR_Type) && permissions!.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) &&
     (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id));
-  const requireChoose = () => { if (!permissions?.canAuditChooseWRs) throw new Error("Permission required to choose audit work requests."); };
-  const requireInspection = () => { if (!permissions?.canAuditDoInspection) throw new Error("Permission required to perform QA inspections."); };
+  const isAuthorizedInspector = !!(permissions?.canAuditDoInspection && (profile?.isQAInspector || profile?.isSuperAdmin));
+  const requireInspection = () => { if (!isAuthorizedInspector) throw new Error("An authorized QA Inspector is required."); };
+  const requireChoose = () => { requireInspection(); if (!permissions?.canAuditChooseWRs) throw new Error("Permission required to choose audit work requests."); };
   const requireInspector = (wr: BaseWorkRequest) => {
     if (!inScope(wr)) throw new Error(`${wr.WR_ID}: ${activePerson} is not permitted to inspect this trade and work request type.`);
   };
@@ -73,6 +74,7 @@ export function useQAActions() {
     submitChallenge: (id: string, reason: string) => updateOne(id, (wr) => {
       requireLeader(wr);
       if (!["QA_Failed_ActionRequired", "QA_Corrected"].includes(wr.QA_AuditStatus ?? "") || wr.Percentage !== 50) throw new Error("Only a work request currently reopened for QA rework can be challenged.");
+      if (wr.qaStagedVerdict) throw new Error("A staged verdict must be committed or removed before challenging this reopening.");
       if (!reason.trim()) throw new Error("Enter a reason for the challenge.");
       if (wr.qaTeamLeaderChallenges?.some((challenge) => challenge.resolutionStatus === "Pending")) throw new Error("There is already a pending challenge.");
       return log({ ...wr, qaTeamLeaderChallenges: [...(wr.qaTeamLeaderChallenges ?? []), { id: crypto.randomUUID(), wrId: id, teamLeaderName: activePerson, createdAt: new Date().toISOString(), challengeReason: reason.trim(), isReadByInspector: false, resolutionStatus: "Pending" }] }, `Team Leader ${activePerson} challenged the QA reopening: ${reason.trim()}`);
@@ -127,11 +129,12 @@ export function useQAActions() {
       if (payload.spawnFollowUp && !permissions?.canOpenFollowUpFJ) throw new Error("Permission required to create a follow-up FJ.");
       if (verdict === "Pass" || verdict === "Fail") {
         if (!parent.QA_AuditStatus || !["ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(parent.QA_AuditStatus)) throw new Error("Confirm the inspection before editing its verdict.");
+        if (["ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail"].includes(parent.QA_AuditStatus) && !parent.qaStagedVerdict?.previousStatus && parent.qaTeamLeaderChallenges?.length) throw new Error("This uncommitted inspection contains challenge history; resolve the inconsistent record before staging.");
         if (parent.qaTeamLeaderChallenges?.some((item) => item.resolutionStatus === "Pending")) throw new Error("Resolve the pending Team Leader challenge before editing the verdict.");
         if (verdict === "Fail" && !payload.issue?.trim()) throw new Error("An issue description is required.");
         const now = new Date().toISOString();
-        const keepReworkStatus = parent.Percentage === 50 && ["QA_Failed_ActionRequired", "QA_Corrected"].includes(parent.QA_AuditStatus);
-        const staged: BaseWorkRequest = { ...parent, QA_AuditStatus: keepReworkStatus ? parent.QA_AuditStatus : verdict === "Pass" ? "QA_Staged_Pass" : "QA_Staged_Fail",
+        const keepCommittedStatus = ["QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(parent.QA_AuditStatus);
+        const staged: BaseWorkRequest = { ...parent, QA_AuditStatus: keepCommittedStatus ? parent.QA_AuditStatus : verdict === "Pass" ? "QA_Staged_Pass" : "QA_Staged_Fail",
           qaStagedVerdict: { verdict, inspector: activePerson, stagedAt: now, failureReason: payload.failureReason, additionalNotes: payload.additionalNotes,
             issueDescription: payload.issue, reopenTo50: verdict === "Fail" && !!payload.reopen, spawnFollowUpFJ: verdict === "Fail" && !!payload.spawnFollowUp,
             previousStatus: parent.qaStagedVerdict ? parent.qaStagedVerdict.previousStatus : parent.QA_AuditStatus === "ToBeInspected" ? undefined : parent.QA_AuditStatus },

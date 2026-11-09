@@ -11,7 +11,7 @@ export function permissionsForPreset(preset: AccessPreset): UserGranularPermissi
   const craft = preset === "Craftperson" || preset === "TeamLeader" || preset === "FullAdmin";
   const manager = preset === "TeamLeader" || preset === "FullAdmin";
   const engineer = manager || preset === "PMEngineer";
-  const inspector = manager || preset === "QAInspector";
+  const inspector = preset === "FullAdmin" || preset === "QAInspector";
   return {
     canGeneratePM_WR: engineer, canOpenFollowUpFJ: craft || inspector, canCreateFJ: craft, canCreateLJ: manager,
     canClaimUnassignedWR: craft, canCompleteWR78: craft, canCloseWR100: manager,
@@ -27,7 +27,7 @@ const placeholder = /^(?:(?:esa )?(?:trade manager|cost centre manager|long job 
 export const isPersonProfile = (profile: UserAccessProfile) => !placeholder.test(profile.personName.trim()) && !placeholder.test(profile.fullName.trim());
 
 export function defaultRoleDefinitions(): RoleDefinition[] {
-  return [
+  const roles: RoleDefinition[] = [
     { id: "super-admin", name: "Super Admin", description: "Global governance.", badgeColor: "amber", baseRoleType: "SuperAdmin", permissions: permissionsForPreset("FullAdmin") },
     { id: "site-admin", name: "Site Administrator", description: "Site administration.", badgeColor: "purple", baseRoleType: "SiteAdministrator", permissions: permissionsForPreset("FullAdmin") },
     { id: "team-leader", name: "Team Leader", description: "Supervision and dispatch.", badgeColor: "blue", baseRoleType: "TeamLeader", permissions: permissionsForPreset("TeamLeader") },
@@ -36,6 +36,7 @@ export function defaultRoleDefinitions(): RoleDefinition[] {
     { id: "senior-craft", name: "Senior Craftperson", description: "Experienced field execution.", badgeColor: "rose", baseRoleType: "Craftperson", permissions: permissionsForPreset("Craftperson") },
     { id: "craftperson", name: "Craftperson", description: "Field execution.", badgeColor: "slate", baseRoleType: "Craftperson", permissions: permissionsForPreset("Craftperson") },
   ];
+  return roles.map(normalizeChecklistRole);
 }
 const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades" | "auditWRTypes">> = [
   "canGeneratePM_WR", "canOpenFollowUpFJ", "canCreateFJ", "canCreateLJ", "canClaimUnassignedWR", "canCompleteWR78", "canCloseWR100",
@@ -44,22 +45,43 @@ const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades
   "canOverwriteLaborTime", "canManageShiftsAndLeaves", "canManageLocationFreezes",
 ];
 export const checklistDefinitionFlags = ["canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ"] as const;
+export const auditPermissionFlags = ["canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons"] as const;
+export function canRoleInspect(role: RoleDefinition): boolean {
+  return role.baseRoleType === "QAInspector" || role.baseRoleType === "SuperAdmin";
+}
 export function canRoleDefineChecklists(role: RoleDefinition): boolean {
   return ["TeamLeader", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
 }
 export function normalizeChecklistRole(role: RoleDefinition): RoleDefinition {
-  if (canRoleDefineChecklists(role)) return role;
-  return { ...role, permissions: { ...role.permissions, canDefineChecklistPM: false, canDefineChecklistFJ: false, canDefineChecklistLJ: false } };
+  const permissions = { ...role.permissions };
+  if (!canRoleDefineChecklists(role)) {
+    permissions.canDefineChecklistPM = false; permissions.canDefineChecklistFJ = false; permissions.canDefineChecklistLJ = false;
+  }
+  if (!canRoleInspect(role)) {
+    permissions.canAuditChooseWRs = false; permissions.canAuditDoInspection = false; permissions.canAuditReopenWR = false;
+    permissions.canManageFailureReasons = false; permissions.auditTrades = []; permissions.auditWRTypes = [];
+  }
+  return { ...role, permissions };
 }
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {
   const result = permissionsForPreset("Craftperson");
   for (const key of permissionFlags) result[key] = false;
   result.auditTrades = []; result.auditWRTypes = [];
-  for (const original of definitions.filter((item) => profile.assignedRoleIds?.includes(item.id))) {
+  const selected = definitions.filter((item) => profile.assignedRoleIds?.includes(item.id));
+  const authorizedQA = selected.some(canRoleInspect);
+  for (const original of selected) {
     const role = normalizeChecklistRole(original);
-    for (const key of permissionFlags) result[key] ||= role.permissions[key];
-    result.auditTrades = [...new Set([...result.auditTrades, ...role.permissions.auditTrades])];
-    result.auditWRTypes = [...new Set([...result.auditWRTypes, ...role.permissions.auditWRTypes])];
+    for (const key of permissionFlags) {
+      if (!auditPermissionFlags.some((flag) => flag === key) || canRoleInspect(role)) result[key] ||= role.permissions[key];
+    }
+    if (canRoleInspect(role)) {
+      result.auditTrades = [...new Set([...result.auditTrades, ...role.permissions.auditTrades])];
+      result.auditWRTypes = [...new Set([...result.auditWRTypes, ...role.permissions.auditWRTypes])];
+    }
+  }
+  if (!authorizedQA) {
+    result.canAuditChooseWRs = false; result.canAuditDoInspection = false; result.canAuditReopenWR = false;
+    result.canManageFailureReasons = false; result.auditTrades = []; result.auditWRTypes = [];
   }
   return result;
 }
@@ -69,12 +91,12 @@ export function migrateRoles(profiles: UserAccessProfile[], existing?: RoleDefin
   const next = profiles.filter(isPersonProfile).map((original) => {
     const cleanName = (value: string) => value.replace(/\s*\((?:ESTEC|ESRIN) Admin\)$/i, "");
     const profile = { ...original, personName: cleanName(original.personName), fullName: cleanName(original.fullName) };
-    if (profile.assignedRoleIds) return { ...profile, permissions: resolveEffectivePermissions(profile, roles) };
+    if (profile.assignedRoleIds) return { ...profile, isQAInspector: roles.some((role) => profile.assignedRoleIds?.includes(role.id) && role.baseRoleType === "QAInspector"), permissions: resolveEffectivePermissions(profile, roles) };
     const same = roles.find((role) => role.baseRoleType === profile.primaryRole && JSON.stringify(role.permissions) === JSON.stringify(profile.permissions));
     const id = same?.id ?? `legacy-${profile.id}`;
     if (!same) roles.push(normalizeChecklistRole({ id, name: `${profile.fullName} — Existing permissions`, description: "Preserved from the previous access profile.", badgeColor: "slate", baseRoleType: profile.primaryRole, isCustomVariant: true, permissions: profile.permissions }));
     const updated = { ...profile, assignedRoleIds: [id] };
-    return { ...updated, permissions: resolveEffectivePermissions(updated, roles) };
+    return { ...updated, isQAInspector: roles.some((role) => updated.assignedRoleIds.includes(role.id) && role.baseRoleType === "QAInspector"), permissions: resolveEffectivePermissions(updated, roles) };
   });
   return { roles, profiles: next };
 }
@@ -112,9 +134,12 @@ export function seedAccessProfiles(sites: SiteId[], people: Array<{ id: string; 
         isSuperAdmin: superAdmin, managedSiteIds: superAdmin ? [...ALL_SITES] : siteAdmin ? [siteId] : [],
         ...(siteAdmin ? { siteAdminGovernance: { ...DEFAULT_SITE_ADMIN_GOVERNANCE } } : {}),
         isTeamLeader: preset === "TeamLeader" || preset === "FullAdmin", isCraftperson: preset === "Craftperson",
-        isQAInspector: preset === "QAInspector" || preset === "FullAdmin", isSiteAdmin: preset === "FullAdmin",
+        isQAInspector: preset === "QAInspector", isSiteAdmin: preset === "FullAdmin",
         vpaTrades: [...CLASSICAL_TRADES], vpaBuildingIds: [], permissions: permissionsForPreset(preset) };
     });
-    return [...profiles, ...craftProfiles].map((item) => ({ ...item, assignedRoleIds: [item.isSuperAdmin ? "super-admin" : item.isSiteAdmin ? "site-admin" : item.isTeamLeader ? "team-leader" : item.isQAInspector ? "qa-inspector" : "craftperson"] }));
+    return [...profiles, ...craftProfiles].map((item) => {
+      const assigned = { ...item, isQAInspector: item.primaryRole === "QAInspector", assignedRoleIds: [item.isSuperAdmin ? "super-admin" : item.isSiteAdmin ? "site-admin" : item.isTeamLeader ? "team-leader" : item.isQAInspector ? "qa-inspector" : "craftperson"] };
+      return { ...assigned, permissions: resolveEffectivePermissions(assigned, defaultRoleDefinitions()) };
+    });
   });
 }

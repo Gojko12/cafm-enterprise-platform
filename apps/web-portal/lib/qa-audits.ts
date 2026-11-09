@@ -9,7 +9,7 @@ type Actor = { name: string; role: UserRole };
 export const isQAEligibleType = (wr: BaseWorkRequest) => wr.WR_Type === "PM" || wr.WR_Type === "FJ";
 export const isQACompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (wr.Percentage === 78 || wr.Percentage === 100);
 export const isQAQuotaCompleted = (wr: BaseWorkRequest) => isQAEligibleType(wr) && (isQACompleted(wr) || (!!wr.QA_CompletionDate && (["QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(wr.QA_AuditStatus ?? "") || ["QA_Failed_ActionRequired", "QA_Corrected"].includes(wr.qaStagedVerdict?.previousStatus ?? ""))));
-export const qaStatus = (wr: BaseWorkRequest) => wr.QA_AuditStatus ?? "None";
+export const qaStatus = (wr: BaseWorkRequest) => wr.QA_AuditStatus === "SelectedForAudit" ? "ToBeInspected" : wr.QA_AuditStatus ?? "None";
 export function qaDate(wr: BaseWorkRequest) { return (wr.QA_CompletionDate || wr.UpdatedAt || wr.CreatedDate).slice(0, 10); }
 export function qaMatches(wr: BaseWorkRequest, options: QAOptions) {
   const date = qaDate(wr);
@@ -23,7 +23,8 @@ function log(wr: BaseWorkRequest, text: string, actor: Actor): BaseWorkRequest {
 }
 export function selectAudit(wr: BaseWorkRequest, mode: QAMode, actor: Actor): BaseWorkRequest {
   if (!isQACompleted(wr) || qaStatus(wr) !== "None") throw new Error(`${wr.WR_ID}: only completed, unselected PM or FJ work requests can be selected.`);
-  return log({ ...wr, QA_CompletionDate: qaDate(wr), QA_AuditStatus: "SelectedForAudit", QA_SelectionMode: mode }, `Selected for QA audit (${mode}).`, actor);
+  if (wr.qaTeamLeaderChallenges?.length) throw new Error(`${wr.WR_ID}: an existing QA challenge requires review before selection.`);
+  return log({ ...wr, QA_CompletionDate: qaDate(wr), QA_AuditStatus: "ToBeInspected", QA_SelectionMode: mode }, `Selected for QA inspection (${mode}).`, actor);
 }
 export function selectRandomAudits(requests: BaseWorkRequest[], options: QAOptions, actor: Actor, assignments: QAInspectorAssignment[]): BaseWorkRequest[] {
   if (options.dateFrom && options.dateTo && options.dateFrom > options.dateTo) throw new Error("Invalid audit date range.");
@@ -50,16 +51,16 @@ export function transitionAudit(wr: BaseWorkRequest, action: "confirm" | "unsele
   if (!isQAEligibleType(wr)) throw new Error("QA audits apply only to PM and FJ work requests.");
   const status = qaStatus(wr);
   if (action === "direct") {
-    const selected = selectAudit(wr, "ManualInspectorPick", actor);
-    return log({ ...selected, QA_AuditStatus: "ToBeInspected" }, `Confirmed for QA inspection by ${actor.name}.`, actor);
+    return selectAudit(wr, "ManualInspectorPick", actor);
   }
-  if (status !== "SelectedForAudit") throw new Error(`${wr.WR_ID}: only staged selections can be ${action === "confirm" ? "confirmed" : "unselected"}.`);
-  return action === "confirm" ? log({ ...wr, QA_AuditStatus: "ToBeInspected" }, `Confirmed for QA inspection by ${actor.name}.`, actor) :
-    log({ ...wr, QA_AuditStatus: "None", QA_SelectionMode: undefined }, `Unselected from QA audit by ${actor.name}.`, actor);
+  if (action === "confirm" && status === "ToBeInspected") return { ...wr, QA_AuditStatus: "ToBeInspected" };
+  if (action !== "unselect" || !["ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail"].includes(status) || wr.qaStagedVerdict?.previousStatus)
+    throw new Error(`${wr.WR_ID}: only uncommitted selections can be removed from the queue.`);
+  return log({ ...wr, QA_AuditStatus: "None", QA_SelectionMode: undefined, qaStagedVerdict: undefined }, `Removed from QA inspection queue by ${actor.name}.`, actor);
 }
 export function swapAudit(requests: BaseWorkRequest[], id: string, actor: Actor): BaseWorkRequest[] {
   const wr = requests.find((item) => item.WR_ID === id);
-  if (!wr || !isQAEligibleType(wr) || qaStatus(wr) !== "SelectedForAudit" || wr.QA_SelectionMode !== "ComputerRandom5Percent") throw new Error("Only a pending PM or FJ random audit can be swapped.");
+  if (!wr || !isQAEligibleType(wr) || qaStatus(wr) !== "ToBeInspected" || wr.QA_SelectionMode !== "ComputerRandom5Percent") throw new Error("Only a pending PM or FJ random audit can be swapped.");
   const candidates = requests.filter((item) => item.WR_ID !== id && item.WR_Type === wr.WR_Type && isQACompleted(item) && qaStatus(item) === "None").map((item) => ({ item, score: Number(item.RoomCode !== wr.RoomCode) + Number(!item.AssignedCraftpersonIds.some((person) => wr.AssignedCraftpersonIds.includes(person))), random: Math.random() })).sort((a, b) => b.score - a.score || a.random - b.random);
   if (!candidates.length) throw new Error("No replacement completed work request is available.");
   const replacement = selectAudit(candidates[0].item, "ComputerRandom5Percent", actor);

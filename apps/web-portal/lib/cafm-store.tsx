@@ -21,8 +21,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v15";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v16";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 function safeStorageSet(key: string, value: string): boolean {
@@ -75,7 +75,13 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     equipment: data.equipment.filter((item) => item.SiteId === site).map((item) => ({ ...item, Status: EquipmentStatusSchema.default("In Service").parse(normalizeEquipmentStatus(item.Status)) })),
     blueprints: data.blueprints.filter((item) => !item.SiteId || item.SiteId === site),
     schedules: data.schedules.filter((item) => item.SiteId === site),
-    workRequests: data.workRequests.filter((item) => item.SiteId === site),
+    workRequests: data.workRequests.filter((item) => item.SiteId === site).map((item) => {
+      if (item.QA_AuditStatus === "SelectedForAudit") return { ...item, QA_AuditStatus: "ToBeInspected" as const };
+      if (["QA_Staged_Pass", "QA_Staged_Fail"].includes(item.QA_AuditStatus ?? "") &&
+          item.qaStagedVerdict?.previousStatus && ["QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"].includes(item.qaStagedVerdict.previousStatus))
+        return { ...item, QA_AuditStatus: item.qaStagedVerdict.previousStatus };
+      return item;
+    }),
     deletedWorkRequests: (data.deletedWorkRequests ?? []).filter((item) => item.SiteId === site),
     users: data.users.filter((item) => item.AssignedSiteIds.includes(site))
       .map((item) => ({ ...item, AssignedSiteIds: [site] })),
