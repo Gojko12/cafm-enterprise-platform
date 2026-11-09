@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
-import { formatHumanDateTimeRange } from "../lib/human-time";
+import { formatHumanDateTimeRange, formatPlannedRange } from "../lib/human-time";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 type Session = NonNullable<BaseWorkRequest["timeSessions"]>[number];
@@ -37,7 +37,7 @@ export function startTechnicianTimer(current: BaseWorkRequest, technician: strin
   const now = new Date();
   const slot = scheduledSlot(current, technician);
   const ahead = slot ? localDateTime(now) < slot.assignedStartDateTime : !!current.StartDate_DateToPerform && localDateTime(now).slice(0, 10) < current.StartDate_DateToPerform;
-  const planned = slot ? `${slot.assignedStartDateTime} – ${slot.assignedEndDateTime}` : current.StartDate_DateToPerform;
+  const planned = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime) : current.StartDate_DateToPerform;
   return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt: now.toISOString(), durationMinutes: 0 }], ...(ahead ? { Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now.toISOString(), text: `Started ahead of scheduled slot: ${planned}.` }] } : {}) };
 }
 

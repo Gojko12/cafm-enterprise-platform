@@ -4,6 +4,7 @@ import { BaseWorkRequest } from "@cafm/shared-schema";
 import { WRPreviewCard } from "./WRPreviewCard";
 import { isOverdue, localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
 import { wallMinutes } from "../../../web-portal/lib/dispatch";
+import { formatPlannedRange } from "../lib/human-time";
 
 interface TechnicianHomeProps {
   myWRs: BaseWorkRequest[];
@@ -117,7 +118,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
             {orderedGroups.map(([label, requests]) => <section key={label}>{label && <h3 className="mb-2 mt-3 font-bold">{label}</h3>}{requests.map((wr) => (
               <div key={wr.WR_ID} className={`relative ${activeTab === "my-wrs" && overdue(wr) ? "mb-3 rounded-lg border-2 border-rose-500 bg-rose-50" : ""}`}>
                 {activeTab === "my-wrs" && overdue(wr) && <div className="rounded-t border-2 border-rose-500 bg-rose-50 p-2 text-sm text-rose-900"><strong>⏰ SHOULD BE DONE BY {scheduledSlot(wr, technician)?.assignedEndDateTime ?? wr.StartDate_DateToPerform} — Still Open ({wr.Percentage}%)</strong><button className="ml-2 underline" onClick={() => onReport(wr.WR_ID)}>🚩 Explain Delay / Push to Team Leader</button></div>}
-                {activeTab === "my-wrs" && !overdue(wr) && dateOf(wr) && <div className="rounded-t bg-blue-50 p-2 text-sm text-blue-900">{dateOf(wr) === currentDate ? "🕐 Planned Today:" : "🔓 Can start early anytime:"} {scheduledSlot(wr, technician) ? `${scheduledSlot(wr, technician)!.assignedStartDateTime.replace("T", " ")} – ${scheduledSlot(wr, technician)!.assignedEndDateTime.replace("T", " ")} (${((wallMinutes(scheduledSlot(wr, technician)!.assignedEndDateTime) - wallMinutes(scheduledSlot(wr, technician)!.assignedStartDateTime)) / 60).toFixed(1)}h)` : dateOf(wr)}</div>}
+                {activeTab === "my-wrs" && !overdue(wr) && dateOf(wr) && (() => { const slot = scheduledSlot(wr, technician); const today = dateOf(wr) === currentDate; const inTodaySection = today && agenda !== "all"; const range = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime, new Date(now)) : dateOf(wr); const prefix = today ? (inTodaySection ? "?? " : "?? Planned Today: ") : "?? Can start early anytime: "; return <div className="rounded-t bg-blue-50 p-2 text-sm text-blue-900">{prefix}{range}</div>; })()}
                 <WRPreviewCard
                   wr={wr}
                   onClick={() => onOpenWR?.(wr.WR_ID || "")}

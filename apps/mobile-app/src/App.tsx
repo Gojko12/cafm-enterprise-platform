@@ -89,6 +89,7 @@ export default function App() {
   const [apiReachable, setApiReachable] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncNotice, setSyncNotice] = useState("");
+  useEffect(() => { if (!syncNotice) return; const id = window.setTimeout(() => setSyncNotice(""), 2500); return () => window.clearTimeout(id); }, [syncNotice]);
   const [toast, setToast] = useState("");
   const [installError, setInstallError] = useState(false);
   const [phoneFrame, setPhoneFrame] = useState(false);
@@ -598,13 +599,9 @@ export default function App() {
       {toast && <div role="status" className="absolute left-3 right-3 top-16 z-[100] rounded-xl bg-slate-800 p-3 text-sm text-white shadow-lg">{toast}<button className="float-right" onClick={() => setToast("")} aria-label="Dismiss">✕</button></div>}
       {(isSimulatedOffline || !browserOnline || !apiReachable) && <p role="status" className="bg-amber-100 px-3 py-2 text-sm text-amber-950">📴 OFFLINE MODE — Timer sessions, checklist answers, photos &amp; Sophia inspections are saved on device ({pendingCount} changes queued).</p>}
       {installError && <p role="alert" className="bg-amber-100 p-2 text-sm">Offline app installation failed. Keep this page open and reconnect before refreshing.</p>}
-      {syncNotice && <p role="status" className="bg-emerald-100 p-2 text-sm text-emerald-900">{syncNotice}<button className="ml-2 underline" onClick={() => setSyncNotice("")}>Dismiss</button></p>}
+      {syncNotice && <p role="status" className="bg-emerald-100 px-3 py-1.5 text-xs text-emerald-900">{syncNotice}</p>}
 
-      {timers.length > 0 && <section aria-label="Active running timers" className="relative z-40 shrink-0 bg-emerald-800 px-3 py-1 text-white">
-        <div className="flex items-center justify-between gap-2"><strong className="text-xs">{timers.length ? `⏱ Active Running Timers (${timers.length})` : "⏱ No active timers running"}</strong>{timers.length > 0 && <button className="text-xs text-emerald-300 underline" onClick={() => navigateSafely(() => setCurrentView("timers"))}>View all</button>}</div>
-        {timers.length > 0 && <div className="mt-1 flex max-h-36 gap-2 overflow-auto">{timers.map((timer) => <TimerCard key={timer.session.id} timer={timer} equipment={siteEquipment} now={now} open={openTimerWR} compact />)}</div>}
-        {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
-      </section>}
+      {timerStorageError && <p role="alert" className="bg-rose-100 px-3 py-1 text-xs text-rose-800">{timerStorageError}</p>}
       {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
       {/* Main Content */}
       <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{renderContent()}</main>

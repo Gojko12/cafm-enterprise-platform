@@ -6,7 +6,7 @@ import { getCurrentLocationFreezes } from "../../../web-portal/lib/location-free
 import { fromWallMinutes } from "../../../web-portal/lib/dispatch";
 import { completeChecklistInstances } from "../../../web-portal/lib/checklist-completion";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
-import { formatHumanDateTimeRange } from "../lib/human-time";
+import { formatHumanDateTimeRange, formatPlannedRange } from "../lib/human-time";
 
 type Save = (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => Promise<void>;
 const timeFingerprint = (wr: BaseWorkRequest, technician: string) => JSON.stringify([
@@ -66,7 +66,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
   const steps = wr.WR_Type === "PM" ? wr.ChecklistSteps ?? wr.ChecklistInstances ?? [] : wr.todoSteps ?? [];
   const done = wr.WR_Type === "PM" ? (wr.ChecklistResults ?? []).filter((item) => steps.some((step) => "StepId" in step && step.StepId === item.stepId) && !(typeof item.value === "string" && !item.value.trim()) && !(Array.isArray(item.value) && !item.value.length)).length : (wr.todoSteps ?? []).filter((item) => item.completed).length;
   const slot = scheduledSlot(wr, technician);
-  const planned = slot ? formatHumanDateTimeRange(slot.assignedStartDateTime, slot.assignedEndDateTime) : wr.StartDate_DateToPerform ? `${new Date(`${wr.StartDate_DateToPerform}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} (time not specified)` : "Unscheduled";
+  const planned = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime) : wr.StartDate_DateToPerform ? `${new Date(`${wr.StartDate_DateToPerform}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} (time not specified)` : "Unscheduled";
   const ahead = slot ? localDateTime(new Date(now)) < slot.assignedStartDateTime : !!wr.StartDate_DateToPerform && localDateTime(new Date(now)).slice(0, 10) < wr.StartDate_DateToPerform;
   const complete = () => void execute(async () => {
     if (!canComplete) throw new Error("You do not have permission to complete this work request.");
@@ -122,7 +122,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
   ];
   const sessionCount = (wr.timeSessions ?? []).filter((item) => item.craftpersonId === technician && item.endedAt).length + (wr.MobileWorkSessions ?? []).filter((item) => item.TechnicianId === technician && !(wr.timeSessions ?? []).some((session) => session.id === item.SessionId)).length;
   return <div className="space-y-3 p-4 pb-24">
-    <div className="sticky top-0 z-30 flex flex-wrap items-center gap-2 rounded border bg-white p-2"><button disabled={busy} onClick={back} className="text-blue-700">← Back to WRs</button><strong>{wr.WR_ID}</strong><span className="rounded bg-blue-100 px-2">{wr.WR_Type}</span><span className="rounded bg-slate-100 px-2">{wr.Percentage}%</span><button disabled={busy} className="ml-auto rounded bg-blue-600 px-2 py-1 text-white" onClick={() => void execute(sync, "Synchronization complete.")}>Sync Now</button></div>
+    <div className="sticky top-0 z-30 flex flex-wrap items-center gap-2 rounded border bg-white p-2"><button disabled={busy} onClick={back} className="text-blue-700">← Back to WRs</button><strong>{wr.WR_ID}</strong><span className="rounded bg-blue-100 px-2">{wr.WR_Type}</span><span className="rounded bg-slate-100 px-2">{wr.Percentage}%</span></div>
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}{notice && <p role="status" className="rounded bg-emerald-50 p-2 text-emerald-700">{notice}</p>}
     {wr.QA_AuditStatus === "QA_Failed_ActionRequired" && <div className="space-y-2 rounded bg-rose-50 p-3"><strong>⚠ QA REWORK REQUIRED</strong><p>{wr.QA_IssueDescription}</p><textarea className="w-full rounded border p-2" placeholder="Correction performed" value={correction} onChange={(e) => setCorrection(e.target.value)} /><button className="rounded bg-rose-700 px-3 py-1 text-white" disabled={busy || !correction.trim()} onClick={() => void execute(async () => { await save((current) => { if (current.QA_AuditStatus !== "QA_Failed_ActionRequired") throw new Error("This audit no longer requires correction."); return { ...current, QA_AuditStatus: "QA_Corrected", QA_CorrectionComment: correction.trim(), QA_CorrectedDate: new Date().toISOString() }; }, `QA correction submitted: ${correction.trim()}`); setCorrection(""); }, "Correction submitted for verification.")}>Submit correction</button></div>}
     {(wr.IsFrozen || activeFreezes.length > 0) && <div className="rounded bg-cyan-50 p-3"><strong>❄ Location Freeze Warning</strong><p>{wr.FreezeReason || wr.ActiveFreezeName || activeFreezes.map((item) => item.title).join(", ")}</p></div>}
