@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
+import { formatHumanDateTimeRange } from "../lib/human-time";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 type Session = NonNullable<BaseWorkRequest["timeSessions"]>[number];
@@ -70,15 +71,17 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
   }, "Stopped work timer.");
   const elapsed = active ? Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000)) : 0;
   const completedSessions = (wr.timeSessions ?? []).filter((item) => item.craftpersonId === technician && item.endedAt);
-  const total = completedSessions.reduce((sum, item) => sum + item.durationMinutes, 0);
+  const legacySessions = (wr.MobileWorkSessions ?? []).filter((item) => item.TechnicianId === technician && !(wr.timeSessions ?? []).some((session) => session.id === item.SessionId));
+  const total = laborFor(wr, wr.timeSessions ?? [], technician, new Date(now).toISOString(), person).recordedTimerMinutes;
   const clock = [Math.floor(elapsed / 3600), Math.floor(elapsed / 60) % 60, elapsed % 60].map((n) => String(n).padStart(2, "0")).join(":");
   return <section id="work-timer" tabIndex={-1} className="space-y-3 rounded border bg-white p-4 focus:ring-4 focus:ring-emerald-400">
     {mode === "timer" && <>
     <h2 className="font-bold">Work timer</h2>
     <p className="font-mono text-3xl font-semibold">{clock}</p>
     <div className="flex gap-2"><button disabled={busy || !!active} className="rounded bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={start}>▶ Start Timing</button><button disabled={busy || !active} className="rounded bg-rose-700 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={stop}>⏹ Stop Timing</button></div>
-    <p className="rounded bg-blue-50 p-2 text-sm">Total Recorded: {Math.floor(total / 60)}h {total % 60}m across {completedSessions.length} sessions</p>
-    {completedSessions.map((session) => <p key={session.id} className="text-xs text-slate-600">{new Date(session.startedAt).toLocaleString()} – {new Date(session.endedAt!).toLocaleString()} · {session.durationMinutes} min</p>)}
+    <p className="rounded bg-blue-50 p-2 text-sm">Total Recorded: {Math.floor(total / 60)}h {total % 60}m across {completedSessions.length + legacySessions.length} sessions</p>
+    {completedSessions.map((session) => <p key={session.id} className="text-xs text-slate-600">{formatHumanDateTimeRange(session.startedAt, session.endedAt!)} · {session.durationMinutes} recorded min</p>)}
+    {legacySessions.map((session) => <p key={session.SessionId} className="text-xs text-slate-600">{formatHumanDateTimeRange(session.StartedAt, session.StoppedAt)} · {session.TotalTimeMinutes} recorded min{session.PausedDurationMs ? " (excluding pauses)" : ""}</p>)}
     {wr.Percentage === 78 && <div><label className="block">Technician opinion time (minutes)<input className="ml-2 w-24 rounded border p-1" type="number" min="0" step="1" value={opinion} onChange={(e) => setOpinion(e.target.value)} /></label><button disabled={busy} className="mt-2 rounded border px-3 py-1" onClick={() => {
       const value = Number(opinion);
       if (!opinion.trim() || !Number.isInteger(value) || value < 0) { setError("Enter non-negative whole minutes."); return; }

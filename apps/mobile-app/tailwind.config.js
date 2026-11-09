@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./src/**/*.{ts,tsx,js,jsx}", "./index.html"],
+  content: ["./src/**/*.{ts,tsx,js,jsx}", "../web-portal/components/modules/TechnicianPromptBuilder.tsx", "./index.html"],
   theme: {
     extend: {
       colors: {
