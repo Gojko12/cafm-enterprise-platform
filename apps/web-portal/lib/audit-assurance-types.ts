@@ -20,7 +20,7 @@ export const AuditFindingSchema = z.object({
   id: nonempty, campaignId: nonempty, campaignName: nonempty, siteId: site, buildingId: nonempty, roomId: nonempty,
   systemName: nonempty, equipmentId: nonempty, equipmentName: nonempty, componentName: nonempty, checkpointName: nonempty,
   findingType: z.enum(findingTypes), urgency: z.enum(urgencyLevels), conditionScore: z.enum(["A - Good", "B - Fair", "C - Poor", "D - Critical"]),
-  operationalStatus: z.enum(["Operational", "Degraded", "Non-Operational", "Inaccessible"]),
+  operationalStatus: z.enum(["Operational", "Degraded", "Non-Operational", "Inaccessible", "Not tested"]),
   discoveredAt: z.iso.date(), calculatedDeadline: z.union([z.iso.date(), z.literal("No action")]), isOverdue: z.boolean().optional(),
   title: nonempty, observation: nonempty, recommendedRemedy: nonempty, measurements: z.string().optional(),
   responsibleParty: z.enum(["Contractor", "Owner / ESA", "Third-Party Specialist"]), contractorName: nonempty, trade: nonempty,

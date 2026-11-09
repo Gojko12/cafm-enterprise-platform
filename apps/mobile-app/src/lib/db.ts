@@ -59,7 +59,7 @@ export interface OfflinePhotoQueueEntry {
 
 export interface SyncQueueEntry {
   QueueId: string;
-  MutationType: "WR_UPDATE" | "WR_ASSIGNMENT" | "STEP_COMPLETE" | "PHOTO_UPLOAD" | "SESSION_LOG" | "AUDIT_FINDING";
+  MutationType: "WR_UPDATE" | "WR_ASSIGNMENT" | "STEP_COMPLETE" | "PHOTO_UPLOAD" | "SESSION_LOG" | "AUDIT_FINDING" | "EQUIPMENT_INSPECTION";
   Payload: Record<string, unknown>;
   BaseWorkRequest?: BaseWorkRequest | null;
   SyncStatus: "PENDING" | "SYNCED" | "FAILED";

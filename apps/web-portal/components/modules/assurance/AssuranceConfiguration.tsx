@@ -2,8 +2,25 @@
 import React, { useEffect, useState } from "react";
 import type { DemoData } from "@/lib/cafm-store";
 import { AuditSettingsSchema, AuditTemplateSchema, defaultAuditSettings, type AuditSettings } from "@/lib/audit-assurance-types";
+import { ahuTemplate, defaultKmisConfig, KmisConfigSchema, scoredClassifications, type KmisConfig } from "@/lib/equipment-inspection";
 
 type Props = { data: DemoData; actor: string; authorized: boolean; busy: boolean; save: (next: DemoData, message: string) => Promise<boolean> };
+export function KmisSettings({ data, authorized, busy, save }: Props) {
+  const [config, setConfig] = useState<KmisConfig>(data.auditAssurance?.kmisConfig ?? defaultKmisConfig);
+  useEffect(() => setConfig(data.auditAssurance?.kmisConfig ?? defaultKmisConfig), [data.auditAssurance?.kmisConfig]);
+  const submit = async () => {
+    const parsed = KmisConfigSchema.safeParse(config);
+    if (!parsed.success) { alert("Enter finite scores, non-negative multipliers and a positive calibration factor."); return; }
+    await save({ ...data, auditAssurance: { checkpointTemplates: data.auditAssurance?.checkpointTemplates ?? [ahuTemplate], equipmentInspections: data.auditAssurance?.equipmentInspections ?? [], kmisConfig: parsed.data } }, "KMIS configuration saved. Completed sheets retain their original scoring configuration.");
+  };
+  return <section className="space-y-3 rounded border bg-white p-4"><h2 className="text-xl font-bold">KMIS weighting and condition score</h2><p>Illustrative calibration, not a contractual formula. Changes apply to new inspections only. NV, ST and NA are excluded.</p>
+    <div className="grid gap-3 md:grid-cols-5">{scoredClassifications.map((key) => <div key={key}><strong>{key}</strong><label> Weight multiplier<input className="w-full border p-1" type="number" min="0" step="any" value={config.multipliers[key]} onChange={(e) => setConfig({ ...config, multipliers: { ...config.multipliers, [key]: Number(e.target.value) } })} /></label><label> Points<input className="w-full border p-1" type="number" step="any" value={config.points[key]} onChange={(e) => setConfig({ ...config, points: { ...config.points, [key]: Number(e.target.value) } })} /></label></div>)}</div>
+    <label>Calibration factor<input className="w-full border p-1" type="number" min="0.000001" step="any" value={config.calibrationFactor} onChange={(e) => setConfig({ ...config, calibrationFactor: Number(e.target.value) })} /></label>
+    <label><input type="checkbox" checked={config.generateN1WithComment} onChange={(e) => setConfig({ ...config, generateN1WithComment: e.target.checked })} /> Generate N1 findings when an inspector comment is present</label>
+    <div>{(["N2", "N3", "N4"] as const).map((level) => <label key={level} className="mr-3"><input type="checkbox" checked={config[`generate${level}`]} onChange={(e) => setConfig({ ...config, [`generate${level}`]: e.target.checked })} /> Generate {level} findings</label>)}</div>
+    <div><button disabled={!authorized || busy} className="rounded bg-blue-700 p-2 text-white disabled:opacity-50" onClick={() => void submit()}>Save KMIS settings</button></div>
+  </section>;
+}
 export function AssuranceSettings({ data, authorized, busy, save }: Props) {
   const [settings, setSettings] = useState<AuditSettings>(data.auditSettings ?? defaultAuditSettings);
   useEffect(() => setSettings(data.auditSettings ?? defaultAuditSettings), [data.auditSettings]);

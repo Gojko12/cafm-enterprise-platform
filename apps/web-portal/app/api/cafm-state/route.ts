@@ -7,6 +7,7 @@ import { z } from "zod";
 import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
+import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -136,6 +137,7 @@ const stateSchema = z.object({
   auditFindings: z.array(AuditFindingSchema).optional(),
   auditInspections: z.array(AuditInspectionSchema).optional(),
   auditSettings: AuditSettingsSchema.optional(),
+  auditAssurance: AuditAssuranceSchema.optional(),
   auditTemplates: z.array(AuditTemplateSchema).optional(),
   auditImports: z.array(AuditImportSchema).optional(),
   workRequests: z.array(workRequestRecord),
@@ -179,6 +181,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;
   if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.auditInspections?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
+  if (state.auditAssurance?.equipmentInspections.some((sheet) => sheet.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === sheet.campaignId && campaign.selectedEquipmentIds.includes(sheet.equipmentId)) || !state.equipment.some((asset) => asset.SiteId === site && asset.EquipmentCode === sheet.equipmentId && asset.bl_id === sheet.buildingId && asset.RoomCode === sheet.roomId))) return false;
   if (state.auditTemplates?.some((item) => item.siteId !== site)) return false;
   if (state.auditImports?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;

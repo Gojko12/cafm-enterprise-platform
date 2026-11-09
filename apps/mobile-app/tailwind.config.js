@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./src/**/*.{ts,tsx,js,jsx}", "./index.html"],
+  content: ["./src/**/*.{ts,tsx,js,jsx}", "./index.html", "../web-portal/components/modules/assurance/EquipmentInspectionEditor.tsx"],
   theme: {
     extend: {
       colors: {

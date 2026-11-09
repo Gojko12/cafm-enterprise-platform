@@ -10,6 +10,7 @@ import type {
 import type { IDBPDatabase } from "idb";
 import type { MobileAppDB, OfflinePhotoQueueEntry, SyncQueueEntry } from "./db";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema } from "../../../web-portal/lib/audit-assurance-types";
+import { AuditAssuranceSchema, EquipmentInspectionSheetSchema, completeEquipmentInspection, defaultKmisConfig } from "../../../web-portal/lib/equipment-inspection";
 
 const workRequestSchema = z.custom<BaseWorkRequest>((value) => BaseWorkRequestSchema.safeParse(value).success);
 const stateSchema = z.object({
@@ -30,6 +31,7 @@ const stateSchema = z.object({
   auditInspections: z.array(AuditInspectionSchema).optional(),
   auditSettings: AuditSettingsSchema.optional(),
   auditTemplates: z.array(AuditTemplateSchema).optional(),
+  auditAssurance: AuditAssuranceSchema.optional(),
 }).passthrough();
 const responseSchema = z.object({ revision: z.number().int().nonnegative(), state: stateSchema.nullable() });
 const stepSchema = z.object({
@@ -116,7 +118,7 @@ export async function synchronizePortal(
   const selected: SyncQueueEntry[] = [];
   const selectedPhotos: OfflinePhotoQueueEntry[] = [];
   for (const item of queued) {
-    if (item.MutationType === "AUDIT_FINDING") {
+    if (item.MutationType === "AUDIT_FINDING" || item.MutationType === "EQUIPMENT_INSPECTION") {
       if (item.Payload.siteId === site) selected.push(item);
       continue;
     }
@@ -171,7 +173,20 @@ export async function synchronizePortal(
     state.auditFindings = [...(state.auditFindings ?? []), finding];
     applied.add(item.QueueId);
   }
-  for (const item of selected.filter((entry) => entry.MutationType !== "WR_UPDATE" && entry.MutationType !== "AUDIT_FINDING")) {
+  for (const item of selected.filter((entry) => entry.MutationType === "EQUIPMENT_INSPECTION")) {
+    if (applied.has(item.QueueId)) continue;
+    const sheet = EquipmentInspectionSheetSchema.parse(item.Payload.sheet);
+    if (sheet.siteId !== site) throw new Error("Inspection belongs to another site.");
+    const profile = state.userAccessProfiles?.find((p) => p.siteId === site && p.personName === sheet.inspectorName);
+    const asset = state.equipment.find((e) => e.EquipmentCode === sheet.equipmentId && e.SiteId === site);
+    if (!profile || !profile.permissions.canAuditDoInspection || !(profile.isQAInspector || profile.isSuperAdmin) || !asset || (profile.vpaBuildingIds.length > 0 && !profile.vpaBuildingIds.includes(asset.bl_id)) || !profile.permissions.auditTrades.some((trade) => trade === asset.PrimaryTradeId)) throw new Error("Inspection is outside the inspector's current authorization; it remains on the device.");
+    const route = state.auditInspections?.find((r) => r.id === sheet.routeId);
+    if (!route || route.inspector !== sheet.inspectorName || stable(route) !== stable(item.Payload.baseRoute)) throw new Error("The inspection route changed on the portal; the local inspection was retained.");
+    if (stable(sheet.scoringConfig) !== stable(state.auditAssurance?.kmisConfig ?? defaultKmisConfig)) throw new Error("KMIS settings changed on the portal; the local inspection was retained for review.");
+    Object.assign(state, completeEquipmentInspection(state, sheet));
+    applied.add(item.QueueId);
+  }
+  for (const item of selected.filter((entry) => entry.MutationType !== "WR_UPDATE" && entry.MutationType !== "AUDIT_FINDING" && entry.MutationType !== "EQUIPMENT_INSPECTION")) {
     if (applied.has(item.QueueId)) continue;
     const wrId = item.Payload.WR_ID;
     const wr = state.workRequests.find((entry) => entry.WR_ID === wrId);
@@ -289,7 +304,7 @@ export async function synchronizePortal(
   for (const item of selectedPhotos) await tx.objectStore("photoQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: "lastSyncTime", value: syncedAt, updatedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], userAccessProfiles: state.userAccessProfiles ?? [], locationFreezes: state.locationFreezes ?? [] }), updatedAt: syncedAt });
-  await tx.objectStore("syncMetadata").put({ key: `auditContext:${site}`, value: JSON.stringify({ auditCampaigns: state.auditCampaigns ?? [], auditFindings: state.auditFindings ?? [], auditInspections: state.auditInspections ?? [], auditSettings: state.auditSettings, auditTemplates: state.auditTemplates ?? [] }), updatedAt: syncedAt });
+  await tx.objectStore("syncMetadata").put({ key: `auditContext:${site}`, value: JSON.stringify({ auditCampaigns: state.auditCampaigns ?? [], auditFindings: state.auditFindings ?? [], auditInspections: state.auditInspections ?? [], auditSettings: state.auditSettings, auditTemplates: state.auditTemplates ?? [], auditAssurance: state.auditAssurance }), updatedAt: syncedAt });
   await tx.done;
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cafm-audit-sync", { detail: site }));
   const pending = pendingNow.filter((item) => item.SyncStatus === "PENDING" && !confirmed.has(item.QueueId)).length +

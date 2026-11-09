@@ -10,6 +10,7 @@ import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles, resolveEffectivePermissions } from "./access-profiles";
 import { seedAssurance, seedAuditTemplates } from "./audit-assurance-seed";
+import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
@@ -23,8 +24,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v16";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v17";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 function safeStorageSet(key: string, value: string): boolean {
@@ -104,6 +105,7 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     auditInspections: (data.auditInspections ?? []).filter((item) => item.siteId === site),
     auditTemplates: (data.auditTemplates ?? []).filter((item) => item.siteId === site),
     auditImports: (data.auditImports ?? []).filter((item) => item.siteId === site),
+    auditAssurance: data.auditAssurance && { ...data.auditAssurance, equipmentInspections: data.auditAssurance.equipmentInspections.filter((item) => item.siteId === site) },
   };
 }
 
@@ -172,7 +174,7 @@ function seedData(): DemoData {
     SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
   })));
   const seeded = section20Seed(sites);
-  return {
+  const result: DemoData = {
     sites,
     mobileMutationIds: [],
     deletedWorkRequests: [],
@@ -196,6 +198,7 @@ function seedData(): DemoData {
     auditFindings: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditFindings),
     auditInspections: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditInspections),
     auditTemplates: seedAuditTemplates(sites),
+    auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [], kmisConfig: defaultKmisConfig },
     users,
     userAccessProfiles: seedAccessProfiles(sites, seeded.craftspeople, users),
     roleDefinitions: defaultRoleDefinitions(),
@@ -210,6 +213,21 @@ function seedData(): DemoData {
     qaInspectorAssignments: sites.flatMap((siteId) => ["Mark", "Thomas", "Yvonne"].map((personName) => ({ id: `${siteId}-qa-${personName}`, siteId, personName, trades: [...CLASSICAL_TRADES], wrTypes: ["PM", "FJ"] }))),
     qaFailureReasons: [...DEFAULT_QA_FAILURE_REASONS],
   };
+  const room = result.rooms.find((item) => item.SiteId === "SITE-01");
+  const campaign = result.auditCampaigns?.find((item) => item.id === "SITE-01-audit-2026");
+  if (!room || !campaign) throw new Error("Cannot seed the Rosetta inspection without a site room and campaign.");
+  const asset = { EquipmentCode: "AHU-ROSETTA", EquipmentName: "ZULUFTGERÄT ANLAGE ROSETTA", SiteId: "SITE-01" as const, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, Category: "A" as const, HierarchyLevel: "Installation" as const, IsInstallation: true, Status: "In Service" as const, PrimaryTradeId: "Mechanical", TechnicalSpecifications: {} };
+  const routeId = "SITE-01-rosetta-2026";
+  result.equipment.push(asset);
+  result.auditCampaigns = result.auditCampaigns?.map((c) => c.id === campaign.id ? { ...c, buildingIds: [...new Set([...c.buildingIds, asset.bl_id])], selectedEquipmentIds: [...c.selectedEquipmentIds, asset.EquipmentCode], plannedInspectionsCount: c.plannedInspectionsCount + 1 } : c);
+  result.auditInspections = [...(result.auditInspections ?? []), { id: routeId, siteId: "SITE-01", campaignId: campaign.id, equipmentId: asset.EquipmentCode, buildingId: asset.bl_id, systemName: "HVAC & Cooling", checkpointName: "Sophia AHU inspection", inspector: "Thomas", plannedDate: "2026-03-15", routeOrder: campaign.plannedInspectionsCount + 1, accessibility: "Accessible", status: "Planned" }];
+  const results: CheckpointResult[] = ahuTemplate.checkpoints.map((c) => {
+    const na = ["Antifreeze", "Pump"].includes(c.name);
+    const minor = ["Airduct network", "Casing", "Condensate evacuation", "Wiring"].includes(c.name);
+    return { checkpointId: c.id, checkpointName: c.name, weight: 1, classification: na ? "NA" : minor ? "N1" : c.name === "Steam humidifier" ? "N2" : "N0", comment: minor ? "Minor deterioration" : c.name === "Steam humidifier" ? "Corrective action required" : "", photoUrls: [] };
+  });
+  const sheet: EquipmentInspectionSheet = { id: "rosetta-2026-sheet", campaignId: campaign.id, siteId: asset.SiteId, buildingId: asset.bl_id, roomId: asset.RoomCode, systemName: "HVAC & Cooling", equipmentId: asset.EquipmentCode, equipmentName: asset.EquipmentName, equipmentCategory: ahuTemplate.equipmentCategory, inspectorName: "Thomas", inspectedAt: "2026-03-15T12:00:00Z", status: "Completed", operationalStatus: "Operational", routeId, checkpointResults: results, scoringConfig: defaultKmisConfig, ...calculateEquipmentInspectionSummary(results, defaultKmisConfig) };
+  return completeEquipmentInspection(result, sheet);
 }
 
 export function seedSiteData(site: SiteId): DemoData {
@@ -294,7 +312,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        initial = scopeData(withAccessProfileDefaults({ ...defaults, auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
+        initial = scopeData(withAccessProfileDefaults({ ...defaults, auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople,
           userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site), site);
@@ -318,7 +336,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
             throw new Error("Invalid server state.");
           }
-          const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+          const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
             roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
             userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
           initial = scopeData(withAccessProfileDefaults(remoteData, site), site);
@@ -388,7 +406,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
               throw new Error("Invalid server state.");
             }
-            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
               roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
@@ -414,7 +432,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           const result = await stateRequest(site, personRef.current, "GET");
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
-            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], craftpersonAbsences: [], locationFreezes: [], ...result.state,
+            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...result.state,
               roleDefinitions: "roleDefinitions" in result.state ? result.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in result.state ? result.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
