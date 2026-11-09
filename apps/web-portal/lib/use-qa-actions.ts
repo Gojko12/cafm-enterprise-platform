@@ -12,7 +12,7 @@ export function useQAActions() {
   const { data, commitSnapshot } = useCafmStore();
   const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
-  const { profile, permissions } = useActiveUserPermissions();
+  const { profile, permissions, governance } = useActiveUserPermissions();
   const actor = { name: activePerson, role: permissions?.canCloseWR100 ? currentRole : "StandardEmployee" as const };
   const inScope = (wr: BaseWorkRequest) => !!profile && (wr.WR_Type === "PM" || wr.WR_Type === "FJ") &&
     permissions!.auditWRTypes.includes(wr.WR_Type) && permissions!.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) &&
@@ -30,6 +30,7 @@ export function useQAActions() {
   return {
     autoSelect5PercentQAAudits: (options: QAOptions) => commit((wrs) => {
       requireChoose();
+      if (options.targetCount !== undefined && !governance("canManageAuditQuotas")) throw new Error("Site governance does not permit changing audit quotas.");
       const allowed = wrs.filter(inScope);
       const assignments = [{ id: "active-profile", siteId: activeSiteId, personName: activePerson, trades: permissions!.auditTrades, wrTypes: permissions!.auditWRTypes }];
       const changed = new Map(selectRandomAudits(allowed, options, actor, assignments).map((wr) => [wr.WR_ID, wr]));

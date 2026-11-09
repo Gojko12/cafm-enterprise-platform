@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { useCafmStore, type DemoData } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore, type DemoData } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { downloadSite, downloadTemplate, dryRun, entities, type Entity, type Preview } from "@/lib/bulk-import";
 
 export default function ImportExportPage() {
   const { data, commitSnapshot } = useCafmStore();
+  const { governance } = useActiveUserPermissions();
   const { activeSiteId } = useSiteContext();
   const [entity, setEntity] = useState<Entity>("buildings");
   const [file, setFile] = useState<File | null>(null);
@@ -26,6 +27,7 @@ export default function ImportExportPage() {
   }, [activeSiteId, entity]);
 
   const runPreview = async (selected: File) => {
+    if (!governance("canResetOrExportSiteData")) { setMessage("Site governance does not permit import or export."); return; }
     const request = ++generation.current;
     setFile(selected);
     setPreview(null);
@@ -47,6 +49,7 @@ export default function ImportExportPage() {
   };
 
   const commit = async () => {
+    if (!governance("canResetOrExportSiteData")) { setMessage("Site governance does not permit import or export."); return; }
     if (!preview || !baseline || preview.errors.length || !preview.diffs.length) return;
     setBusy(true);
     setMessage("");
@@ -72,6 +75,7 @@ export default function ImportExportPage() {
     return text.length > 200 ? `${text.slice(0, 200)}…` : text;
   };
   const exportData = (format: "xlsx" | "json" | "csv") => {
+    if (!governance("canResetOrExportSiteData")) { setMessage("Site governance does not permit import or export."); return; }
     try {
       downloadSite(data, activeSiteId, format, entity);
       setMessage("");

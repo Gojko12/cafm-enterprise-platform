@@ -19,8 +19,9 @@ import {
   WR_Statuses,
   LocationFreezeSchema,
   UserAccessProfileSchema,
+  CLASSICAL_TRADES,
 } from "@cafm/shared-schema";
-import type { LocationFreeze } from "@cafm/shared-schema";
+import type { LocationFreeze, UserAccessProfile } from "@cafm/shared-schema";
 import { z } from "zod";
 import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
@@ -34,6 +35,21 @@ const siteContextSchema = z.object({
   locationFreezes: z.array(LocationFreezeSchema),
   userAccessProfiles: z.array(UserAccessProfileSchema).default([]),
 });
+type Technician = z.infer<typeof siteContextSchema>["craftspeople"][number];
+const normalizePerson = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLowerCase();
+function findProfile(profiles: UserAccessProfile[], person: Technician | undefined, site: SiteId) {
+  if (!person) return undefined;
+  const candidates = profiles.filter((profile) => profile.siteId === site);
+  const linked = candidates.find((profile) => profile.linkedCraftpersonId === person.id);
+  if (linked) return linked;
+  const fullName = normalizePerson(`${person.Name} ${person.LastName}`);
+  const full = candidates.filter((profile) => !profile.linkedCraftpersonId && [profile.personName, profile.fullName].some((name) => normalizePerson(name) === fullName));
+  if (full.length === 1) return full[0];
+  if (full.length) return undefined;
+  const firstName = normalizePerson(person.Name);
+  const first = candidates.filter((profile) => !profile.linkedCraftpersonId && [profile.personName, profile.fullName].some((name) => normalizePerson(name) === firstName));
+  return first.length === 1 ? first[0] : undefined;
+}
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
@@ -89,13 +105,14 @@ export default function App() {
     if (!technician && people.length) { setCurrentTechnicianId(people[0].id); return; }
     setSiteWRs(siteRequests);
     setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId) || wr.AssignedCraftpersonIds.includes(currentTechnicianId)));
-    const access = siteContext.userAccessProfiles.find((item) => item.siteId === activeSiteId && item.linkedCraftpersonId === currentTechnicianId);
-    const buildingAllowed = (building: string) => !!access && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(building));
+    const access = findProfile(siteContext.userAccessProfiles, technician, activeSiteId);
+    const trades = access?.vpaTrades ?? (technician ? CLASSICAL_TRADES : []);
+    const buildingAllowed = (building: string) => !!technician && (!access?.vpaBuildingIds.length || access.vpaBuildingIds.includes(building));
     setBuildings(storedBuildings.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
     setFloors(storedFloors.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
     setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
-    setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id) && !!item.PrimaryTradeId && !!access?.vpaTrades.some((trade) => trade === item.PrimaryTradeId)));
-    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedCraftpersonIds.length && !wr.CraftpersonAssignments?.length && !!access && access.vpaTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id))));
+    setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id) && !!item.PrimaryTradeId && trades.some((trade) => trade === item.PrimaryTradeId)));
+    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedCraftpersonIds.length && !wr.CraftpersonAssignments?.length && !!technician && trades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && buildingAllowed(wr.bl_id)));
     setSelectedWR((current) => current ? siteRequests.find((wr) => wr.WR_ID === current.WR_ID) ?? current : null);
   }, [activeSiteId, currentTechnicianId]);
 
@@ -271,7 +288,8 @@ export default function App() {
     setAppliedFilters(useFilterStore.getState().filters);
   };
   const person = technicians.find((item) => item.id === currentTechnicianId);
-  const access = profiles.find((item) => item.linkedCraftpersonId === currentTechnicianId && item.siteId === activeSiteId);
+  const access = findProfile(profiles, person, activeSiteId);
+  const vpaTrades = access?.vpaTrades ?? (person ? CLASSICAL_TRADES : []);
   const technicianName = person ? `${person.Name} ${person.LastName}` : currentTechnicianId;
   const saveSelected = async (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => {
     if (!engine || !selectedWR) throw new Error("Offline storage or work request is not ready.");
@@ -381,7 +399,7 @@ export default function App() {
         return (
           <div className="pt-40 pb-20">
             <AdvancedFilterPanel
-              trades={access?.vpaTrades ?? []}
+              trades={vpaTrades}
               buildings={buildings}
               floors={floors}
               rooms={rooms}
@@ -414,7 +432,7 @@ export default function App() {
         activeSiteId={activeSiteId}
         technicianId={currentTechnicianId}
         technicians={technicians}
-        vpaTrades={access?.vpaTrades}
+        vpaTrades={vpaTrades}
         onTechnicianChange={(id) => { if (currentView !== "home") { alert("Return to the work request list before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
         onSiteChange={(site) => {
           if (currentView !== "home") {

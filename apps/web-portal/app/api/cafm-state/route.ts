@@ -3,7 +3,6 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CraftpersonAbsenceSchema, LocationFreezeSchema, UserAccessProfileSchema } from "@cafm/shared-schema";
 // Bypass Next's optimized barrel cache, which can retain an outdated export table.
 import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 
@@ -22,6 +21,52 @@ function cors(request: Request) {
   };
 }
 const siteSchema = z.enum(["SITE-01", "SITE-02", "SITE-03"]);
+const tradeSchema = z.enum(["Mechanical", "Electrical", "Civil", "MultiTechnic", "Cleaning", "HeavyGang", "Catering"]);
+const permissionsSchema = z.object({
+  canGeneratePM_WR: z.boolean(), canOpenFollowUpFJ: z.boolean(), canCreateFJ: z.boolean(), canCreateLJ: z.boolean(),
+  canClaimUnassignedWR: z.boolean(), canCompleteWR78: z.boolean(), canCloseWR100: z.boolean(), canDefineChecklistPM: z.boolean(),
+  canDefineChecklistFJ: z.boolean(), canDefineChecklistLJ: z.boolean(), canDefinePMSchedule: z.boolean(), canAssignPMPToEQ: z.boolean(),
+  canManageEquipment: z.boolean(), auditTrades: z.array(tradeSchema), auditWRTypes: z.array(z.enum(["PM", "FJ"])),
+  canAuditChooseWRs: z.boolean(), canAuditDoInspection: z.boolean(), canAuditReopenWR: z.boolean(), canManageFailureReasons: z.boolean(),
+  canScheduleCraftperson: z.boolean(), canOverwriteLaborTime: z.boolean(), canManageShiftsAndLeaves: z.boolean(), canManageLocationFreezes: z.boolean(),
+});
+const UserAccessProfileSchema = z.object({
+  id: z.string().min(1), siteId: siteSchema, personName: z.string().min(1), fullName: z.string().min(1),
+  email: z.string().email().optional(), linkedCraftpersonId: z.string().min(1).optional(),
+  primaryRole: z.enum(["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"]),
+  isTeamLeader: z.boolean(), isCraftperson: z.boolean(), isQAInspector: z.boolean(), isSiteAdmin: z.boolean(),
+  isSuperAdmin: z.boolean().optional(), managedSiteIds: z.array(siteSchema).optional(),
+  siteAdminGovernance: z.object({ canManageUsersAndVPA: z.boolean(), canManageRoleAssignments: z.boolean(), canManageAuditQuotas: z.boolean(), canManageFreezesAndShifts: z.boolean(), canResetOrExportSiteData: z.boolean() }).optional(),
+  vpaTrades: z.array(tradeSchema), vpaBuildingIds: z.array(z.string().min(1)), permissions: permissionsSchema,
+});
+const localTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/)
+  .refine((value) => z.iso.date().safeParse(value.slice(0, 10)).success, "Invalid local date and time");
+const CraftpersonAbsenceSchema = z.object({
+  id: z.string().min(1), siteId: siteSchema, craftpersonId: z.string().min(1),
+  absenceType: z.enum(["Vacation", "SickLeave", "Training", "PublicHoliday", "OtherAbsence"]),
+  startDate: z.iso.date(), endDate: z.iso.date(), isFullDay: z.boolean(),
+  startTime: localTime.optional(), endTime: localTime.optional(), unavailableHoursPerDay: z.number().nonnegative().default(8),
+  status: z.enum(["Approved", "Pending", "Cancelled"]), notes: z.string(),
+}).superRefine((entry, context) => {
+  if (entry.startDate > entry.endDate) context.addIssue({ code: "custom", path: ["endDate"], message: "End date must not precede start date." });
+  if (!entry.isFullDay && ((entry.startTime && !entry.endTime) || (!entry.startTime && entry.endTime) || (entry.startTime && entry.endTime && entry.startTime >= entry.endTime)))
+    context.addIssue({ code: "custom", path: ["endTime"], message: "Provide a start and end time with end after start." });
+});
+const LocationFreezeSchema = z.preprocess((value) => {
+  if (value && typeof value === "object" && "buildingIds" in value && Array.isArray(value.buildingIds) && !("buildingId" in value)) return { ...value, buildingId: value.buildingIds[0] };
+  return value;
+}, z.object({
+  id: z.string().min(1), siteId: siteSchema, buildingId: z.string().min(1), floorId: z.string().min(1).optional(), roomId: z.string().min(1).optional(),
+  buildingIds: z.array(z.string().min(1)).min(1).optional(), floorIds: z.array(z.string().min(1)).optional(), roomIds: z.array(z.string().min(1)).optional(),
+  title: z.string().trim().min(1), description: z.string().trim().min(1), responsiblePerson: z.string().trim().min(1),
+  startDateTime: localDateTime, endDateTime: localDateTime, allowPM: z.boolean(), allowFJ: z.boolean(), allowLJ: z.boolean(),
+}).superRefine((entry, context) => {
+  if (entry.roomId && !entry.floorId) context.addIssue({ code: "custom", path: ["roomId"], message: "A room requires a floor." });
+  if (entry.buildingIds && !entry.buildingIds.includes(entry.buildingId)) context.addIssue({ code: "custom", path: ["buildingId"], message: "The legacy building must be included in the selected buildings." });
+  if (entry.roomIds?.length && !entry.floorIds?.length) context.addIssue({ code: "custom", path: ["floorIds"], message: "Selected rooms require their parent floors." });
+  if (entry.endDateTime <= entry.startDateTime) context.addIssue({ code: "custom", path: ["endDateTime"], message: "End must be after start." });
+}));
 const records = z.array(z.record(z.string(), z.unknown()));
 const stateSchema = z.object({
   sites: z.array(z.string().min(1)),
@@ -58,19 +103,6 @@ const maxBytes = 32 * 1024 * 1024;
 
 function reply(request: Request, body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: cors(request) });
-}
-
-function unavailableSharedSchemas() {
-  return Object.entries({ CraftpersonAbsenceSchema, LocationFreezeSchema, QAInspectorAssignmentSchema, UserAccessProfileSchema })
-    .filter(([, schema]) => !schema || typeof schema.safeParse !== "function")
-    .map(([name]) => name);
-}
-
-function schemaUnavailableReply(request: Request) {
-  const unavailable = unavailableSharedSchemas();
-  if (unavailable.length === 0) return null;
-  console.error("CAFM state schema unavailable:", unavailable.join(", "));
-  return reply(request, { error: "CAFM state validation is unavailable. Rebuild the shared schema and restart the server." }, 503);
 }
 
 function scope(request: Request) {
@@ -158,8 +190,6 @@ export async function GET(request: Request) {
   const site = scope(request);
   if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
-  const schemaError = schemaUnavailableReply(request);
-  if (schemaError) return schemaError;
   try {
     const data = await load();
     return reply(request, data.sites[site] ?? { revision: 0, state: null });
@@ -173,8 +203,6 @@ export async function POST(request: Request) {
   const site = scope(request);
   if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
-  const schemaError = schemaUnavailableReply(request);
-  if (schemaError) return schemaError;
   let lock: Awaited<ReturnType<typeof open>> | undefined;
   let temporary: string | undefined;
   try {

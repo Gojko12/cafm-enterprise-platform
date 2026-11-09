@@ -43,7 +43,7 @@ function safeStorageSet(key: string, value: string): boolean {
     throw error;
   }
 }
-async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
+export async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
   const token = process.env.NEXT_PUBLIC_CAFM_SYNC_TOKEN ||
     (process.env.NODE_ENV === "development" && window.location.hostname === "localhost" ? "cafm-local-development-sync-token-2026" : undefined);
   if (!token || token.length < 32) throw new Error("Local demo sync token is not configured.");
@@ -493,5 +493,14 @@ export function useActiveUserPermissions() {
   const { data } = useCafmStore();
   const { activeSiteId, activePerson } = useSiteContext();
   const profile = data.userAccessProfiles.find((item) => item.siteId === activeSiteId && (item.personName === activePerson || item.fullName === activePerson));
-  return { profile, permissions: profile?.permissions };
+  const siteAdmin = profile?.isSiteAdmin && !profile.isSuperAdmin;
+  const siteAllowed = !siteAdmin || (!!profile.managedSiteIds?.includes(activeSiteId));
+  const governance = (key: keyof NonNullable<NonNullable<typeof profile>["siteAdminGovernance"]>) =>
+    !siteAdmin || (siteAllowed && profile.siteAdminGovernance?.[key] === true);
+  const permissions = profile?.permissions && {
+    ...profile.permissions,
+    canManageShiftsAndLeaves: profile.permissions.canManageShiftsAndLeaves && governance("canManageFreezesAndShifts"),
+    canManageLocationFreezes: profile.permissions.canManageLocationFreezes && governance("canManageFreezesAndShifts"),
+  };
+  return { profile, permissions, governance };
 }

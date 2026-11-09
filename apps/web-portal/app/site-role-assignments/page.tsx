@@ -15,9 +15,10 @@ import {
   SiteRoleAssignmentTradeSchema,
 } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { QAInspectorSettings } from "@/components/modules/QASettings";
 import { UserAccessMatrix } from "@/components/modules/UserAccessMatrix";
+import { SiteAdminGovernance } from "@/components/modules/SiteAdminGovernance";
 
 const ROLE_NAMES: Record<LJRole, string> = {
   ESA_TM: "ESA Trade Manager",
@@ -46,6 +47,7 @@ const blankAssignment = (siteId: SiteId): Omit<SiteRoleAssignment, "AssignmentId
 export default function SiteRoleAssignmentsPage() {
   const { activeSiteId } = useSiteContext();
   const { data, setData } = useCafmStore();
+  const { governance } = useActiveUserPermissions();
   const [siteFilter, setSiteFilter] = useState<SiteId | "All">(activeSiteId);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<LJRole | "All">("All");
@@ -69,12 +71,14 @@ export default function SiteRoleAssignmentsPage() {
   }), [data.siteRoleAssignments, siteFilter, roleFilter, tradeFilter, levelFilter, notificationFilter, search]);
 
   const openNew = () => {
+    if (!governance("canManageRoleAssignments")) { setError("Site governance does not permit managing role assignments."); return; }
     setEditing(null);
     setDraft(blankAssignment(siteFilter === "All" ? activeSiteId : siteFilter));
     setError("");
     setFormOpen(true);
   };
   const openEdit = (assignment: SiteRoleAssignment) => {
+    if (!governance("canManageRoleAssignments")) { setError("Site governance does not permit managing role assignments."); return; }
     setEditing(assignment);
     setDraft({
       SiteId: assignment.SiteId,
@@ -89,6 +93,8 @@ export default function SiteRoleAssignmentsPage() {
   };
   const save = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!governance("canManageRoleAssignments")) { setError("Site governance does not permit managing role assignments."); return; }
+    if (draft.SiteId !== activeSiteId) { setError("Switch to the target site before editing its assignments."); return; }
     const parsed = SiteRoleAssignmentSchema.safeParse({
       ...draft,
       AssignmentId: editing?.AssignmentId ?? crypto.randomUUID(),
@@ -106,25 +112,26 @@ export default function SiteRoleAssignmentsPage() {
     setEditing(null);
     setFormOpen(false);
   };
-  const toggleNotifications = (assignment: SiteRoleAssignment) => setData((current) => ({
+  const toggleNotifications = (assignment: SiteRoleAssignment) => { if (!governance("canManageRoleAssignments")) { setError("Site governance does not permit managing role assignments."); return; } setData((current) => ({
     ...current,
     siteRoleAssignments: current.siteRoleAssignments.map((item) => item.AssignmentId === assignment.AssignmentId
       ? { ...item, ReceiveNotifications: !item.ReceiveNotifications }
       : item),
-  }));
-  const remove = (assignmentId: string) => setData((current) => ({
+  })); };
+  const remove = (assignmentId: string) => { if (!governance("canManageRoleAssignments")) { setError("Site governance does not permit managing role assignments."); return; } setData((current) => ({
     ...current,
     siteRoleAssignments: current.siteRoleAssignments.filter((assignment) => assignment.AssignmentId !== assignmentId),
-  }));
+  })); };
 
   return <div className="space-y-5 p-6">
+    <SiteAdminGovernance />
     <UserAccessMatrix />
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">2. Long Job Trade Managers (01–07)</h1>
         <p className="mt-1 text-sm text-slate-600">Manage Main and Deputy workflow roles and notification recipients by site and trade.</p>
       </div>
-      <button type="button" onClick={openNew} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">Add Assignment</button>
+      <button type="button" disabled={!governance("canManageRoleAssignments")} onClick={openNew} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-40">Add Assignment</button>
     </header>
 
     <section className="rounded-lg border bg-white p-4 shadow-sm" aria-label="Assignment filters">

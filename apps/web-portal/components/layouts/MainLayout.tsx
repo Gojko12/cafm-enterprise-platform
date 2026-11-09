@@ -10,7 +10,7 @@ import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { SiteId } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import type { SiteRoleAssignment } from "@cafm/shared-schema";
 
 const NAV_ITEMS = [
@@ -125,6 +125,7 @@ export function TopBar() {
   const { setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
   const { activeSiteId, setActiveSiteId, activePerson, setActivePerson } = useSiteContext();
   const { data: storeData, reset } = useCafmStore();
+  const { governance } = useActiveUserPermissions();
 
   const getSiteName = (siteId: SiteId): string => {
     const siteNames: Record<SiteId, string> = {
@@ -136,7 +137,7 @@ export function TopBar() {
   };
   const activeAssignments: SiteRoleAssignment[] = storeData.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === activeSiteId && assignment.PersonName === activePerson);
-  const people = [...new Set(["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "TeamLeader", ...storeData.siteRoleAssignments.map((item) => item.PersonName), "SiteAdmin"])];
+  const people = [...new Set(["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "TeamLeader", ...storeData.siteRoleAssignments.map((item) => item.PersonName), ...storeData.userAccessProfiles.map((item) => item.personName), "SiteAdmin"])];
 
   return (
     <div className="h-14 shrink-0 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
@@ -175,7 +176,7 @@ export function TopBar() {
             ))}
           </select>
         </div>
-        <button onClick={reset} className="px-3 py-2 border rounded text-sm">Reset Demo Data</button>
+        <button disabled={!governance("canResetOrExportSiteData")} onClick={() => { if (governance("canResetOrExportSiteData")) reset(); }} className="px-3 py-2 border rounded text-sm disabled:opacity-40">Reset Demo Data</button>
       </div>
       
     </div>
