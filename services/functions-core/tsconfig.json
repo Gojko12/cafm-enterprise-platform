@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "lib": ["ES2022"],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,9 +14,8 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "baseUrl": ".",
     "paths": {
-      "@cafm/shared-schema": ["../shared-schema/dist/index.d.ts"],
+      "@cafm/shared-schema": ["../../packages/shared-schema/dist/index.d.ts"],
       "@/*": ["./src/*"]
     }
   },

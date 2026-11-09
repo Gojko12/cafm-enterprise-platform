@@ -78,7 +78,7 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "X-CAFM-Site-Id": site,
+      "X-CAFM-Site-Id": site || "SITE-01",
       "X-CAFM-Person": person,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
@@ -89,7 +89,7 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
   let response: Response;
   try {
     response = await fetch(endpoint, options);
-    if (!override && response.status === 404 && ["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.protocol === "http:") {
+    if (!override && response.status === 404 && ["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.protocol === "http:" && window.location.port !== "3000") {
       response = await fetch("http://localhost:3000/api/cafm-state", options);
     }
     window.dispatchEvent(new CustomEvent("cafm-sync-connection", { detail: true }));

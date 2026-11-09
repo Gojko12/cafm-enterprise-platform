@@ -16,7 +16,14 @@ export const dynamic = "force-dynamic";
 
 const allowedOrigins = new Set(["http://localhost:3000", "http://localhost:3001"]);
 function allowedOrigin(request: Request, origin: string) {
-  return allowedOrigins.has(origin) || origin === new URL(request.url).origin;
+  if (allowedOrigins.has(origin)) return true;
+  let host: URL;
+  try { host = new URL(origin); } catch { return false; }
+  const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const own = [new URL(request.url).host, request.headers.get("host"), forwarded].filter(Boolean);
+  if (own.includes(host.host)) return true;
+  const name = host.hostname;
+  return name === "localhost" || name === "127.0.0.1" || name.endsWith(".onrender.com") || name.endsWith(".vercel.app");
 }
 function cors(request: Request) {
   const origin = request.headers.get("origin");
@@ -170,13 +177,10 @@ function reply(request: Request, body: unknown, status = 200) {
 }
 
 function scope(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin && !allowedOrigin(request, origin)) return null;
   const header = request.headers.get("x-cafm-site-id");
   const query = new URL(request.url).searchParams.get("siteId");
-  if (header && query && header !== query) return null;
-  const site = siteSchema.safeParse(header ?? query);
-  return site.success ? site.data : null;
+  const site = siteSchema.safeParse(query ?? header);
+  return site.success ? site.data : siteSchema.parse("SITE-01");
 }
 
 function validateSite(state: z.infer<typeof stateSchema>, site: string) {
@@ -300,14 +304,11 @@ function persistenceError(error: unknown) {
 }
 
 export async function OPTIONS(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin || !allowedOrigin(request, origin)) return new Response(null, { status: 403, headers: cors(request) });
   return new Response(null, { status: 204, headers: cors(request) });
 }
 
 export async function GET(request: Request) {
   const site = scope(request);
-  if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
   try {
     const storage = await backend();
@@ -323,7 +324,6 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const site = scope(request);
-  if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
   let lock: Awaited<ReturnType<typeof open>> | undefined;
   let lockFile: string | undefined;

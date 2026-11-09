@@ -26,8 +26,10 @@ server state is absent, the first mobile sync initializes its demo seed with
 revision checking; existing site state is not replaced. No Firebase credentials
 are required for this local sync.
 
-Cross-origin access is limited to localhost ports 3000 and 3001; same-origin
-requests are also accepted. Site and person
+Requests never fail on Origin/Host checks (reverse proxies such as Render rewrite them);
+CORS response headers are only sent for same-app, localhost, *.onrender.com and
+*.vercel.app origins. A missing or unknown site defaults to SITE-01, and writes are still
+rejected unless every record belongs to the selected site. Site and person
 headers are demo selectors, not authenticated identities; the token is exposed
 to both clients and is not per-user authorization. Keep the servers on a
 trusted machine and network. This mode does not provide production RBAC or

@@ -96,13 +96,13 @@ export const LocationEquipmentPickerGroup: React.FC<
   );
 
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-2 gap-1.5">
       <PickerRow
         label="Building"
         value={
           selectedBuilding
             ? `${selectedBuilding.bl_id} - ${selectedBuilding.Name}`
-            : "All Buildings"
+            : "All ▾"
         }
         selected={Boolean(selectedBuilding)}
         onSelect={() => setActivePicker("building")}
@@ -110,7 +110,7 @@ export const LocationEquipmentPickerGroup: React.FC<
       />
       <PickerRow
         label="Floor"
-        value={selectedFloor?.LevelName ?? "All Floors"}
+        value={selectedFloor?.LevelName ?? "All ▾"}
         selected={Boolean(selectedFloor)}
         onSelect={() => setActivePicker("floor")}
         onClear={clearFloor}
@@ -120,7 +120,7 @@ export const LocationEquipmentPickerGroup: React.FC<
         value={
           selectedRoom
             ? `${selectedRoom.RoomCode} - ${selectedRoom.Name}`
-            : "All Rooms"
+            : "All ▾"
         }
         selected={Boolean(selectedRoom)}
         onSelect={() => setActivePicker("room")}
@@ -129,7 +129,7 @@ export const LocationEquipmentPickerGroup: React.FC<
       {showEquipment && (
         <PickerRow
           label="Equipment"
-          value={equipmentCodes.length ? equipmentCodes.join(", ") : "All Equipment"}
+          value={equipmentCodes.length ? equipmentCodes.join(", ") : "All ▾"}
           selected={equipmentCodes.length > 0}
           onSelect={() => setActivePicker("equipment")}
           onClear={() => onEquipmentChange?.(new Set<string>())}
@@ -194,36 +194,33 @@ const PickerRow = ({
   onSelect: () => void;
   onClear: () => void;
 }) => (
-  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto_auto] items-center gap-2">
-    <span className="text-xs font-medium text-gray-700">{label}</span>
-    <input
-      readOnly
-      value={value}
-      aria-label={`Selected ${label}`}
-      className="min-w-0 w-full px-3 py-2 border border-gray-300 rounded bg-gray-50 text-sm"
-    />
+  <div className="relative min-w-0">
     <button
       type="button"
       onClick={onSelect}
-      className="px-3 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+      aria-label={`Select ${label}`}
+      className="flex w-full min-w-0 items-center justify-between gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 pr-7 text-left"
     >
-      Select...
+      <span className="min-w-0">
+        <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-400">{shortLabel(label)}</span>
+        <span className={`block truncate text-xs ${selected ? "font-semibold text-slate-900" : "text-slate-600"}`}>{value}</span>
+      </span>
+      {!selected && <span aria-hidden="true" className="text-slate-400">▾</span>}
     </button>
-    {selected ? (
+    {selected && (
       <button
         type="button"
         onClick={onClear}
         aria-label={`Clear ${label}`}
-        className="px-2 py-2 bg-red-100 text-red-700 rounded font-bold hover:bg-red-200"
+        className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-xs font-bold text-red-600"
       >
         ✕
       </button>
-    ) : (
-      <span className="w-8" />
     )}
   </div>
 );
 
+const shortLabel = (label: string) => ({ Building: "BLDG", Floor: "FLOOR", Room: "ROOM", Equipment: "EQ" }[label] ?? label.toUpperCase());
 function PickerModal<T>({
   title,
   items,

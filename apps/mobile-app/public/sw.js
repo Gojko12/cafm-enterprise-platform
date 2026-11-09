@@ -1,5 +1,5 @@
 const BASE = new URL("./", self.location.href);
-const CACHE = `cafm-mobile-shell-v2:${BASE.pathname}`;
+const CACHE = `cafm-mobile-v2:${BASE.pathname}`;
 const CORE = ["./", "index.html", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"].map((item) => new URL(item, BASE).href);
 const INDEX = new URL("index.html", BASE).href;
 
@@ -16,7 +16,11 @@ self.addEventListener("install", (event) => {
   event.waitUntil(precache());
 });
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter((name) => name !== CACHE && name.startsWith("cafm-mobile")).map((name) => caches.delete(name)));
+    await self.clients.claim();
+  })());
 });
 self.addEventListener("fetch", (event) => {
   const request = event.request;

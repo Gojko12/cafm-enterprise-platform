@@ -8,6 +8,10 @@ export interface FilterCriteria {
   wrId?: string;
   trade?: string;
   showOnlyWithChecklist?: boolean;
+  assignedDateFrom?: string;
+  assignedDateTo?: string;
+  startDateFrom?: string;
+  startDateTo?: string;
   dueDateFrom?: string;
   dueDateTo?: string;
   marginDateFrom?: string;
@@ -145,6 +149,19 @@ export function applyFilters(wrs: BaseWorkRequest[], filters: FilterCriteria): B
     result = result.filter((wr) => wr.TradeName === filters.trade);
   }
 
+  const inRange = (value: string | undefined, from?: string, to?: string) => {
+    if (!from && !to) return true;
+    const day = value?.slice(0, 10);
+    if (!day) return false;
+    return (!from || day >= from) && (!to || day <= to);
+  };
+  const assignedOf = (wr: BaseWorkRequest) => wr.CraftpersonAssignments?.[0]?.assignedStartDateTime || wr.StartDate || wr.CreatedDate;
+  if (filters.assignedDateFrom || filters.assignedDateTo) {
+    result = result.filter((wr) => inRange(assignedOf(wr), filters.assignedDateFrom, filters.assignedDateTo));
+  }
+  if (filters.startDateFrom || filters.startDateTo) {
+    result = result.filter((wr) => inRange(wr.CraftpersonAssignments?.[0]?.assignedStartDateTime || wr.StartDate_DateToPerform || wr.StartDate, filters.startDateFrom, filters.startDateTo));
+  }
   if (filters.dueDateFrom) {
     result = result.filter((wr) => !wr.DueDate || wr.DueDate >= filters.dueDateFrom!);
   }
