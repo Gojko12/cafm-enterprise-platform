@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CLASSICAL_TRADES, UserAccessProfileSchema } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { UserAccessProfile, UserGranularPermissions } from "@cafm/shared-schema";
 import { useCafmStore, useActiveUserPermissions } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -16,6 +16,7 @@ const groups: Array<{ title: string; fields: Array<[Flag, string]> }> = [
   { title: "Scheduling & Workforce", fields: [["canScheduleCraftperson", "Schedule Craftperson"], ["canOverwriteLaborTime", "Overwrite Working Time"], ["canManageShiftsAndLeaves", "Manage Shifts and Leaves"], ["canManageLocationFreezes", "Manage Location Freezes"]] },
 ];
 const presets: Array<[AccessPreset, string]> = [["Craftperson", "Craftperson"], ["TeamLeader", "Team Leader"], ["QAInspector", "QA Inspector"], ["PMEngineer", "PM Engineer"], ["FullAdmin", "Full Admin"]];
+const PRIMARY_ROLES: readonly UserAccessProfile["primaryRole"][] = ["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator"];
 
 export function UserAccessMatrix() {
   const { data, setData } = useCafmStore();
@@ -30,14 +31,16 @@ export function UserAccessMatrix() {
   const create = () => setDraft({ id: crypto.randomUUID(), siteId: activeSiteId, personName: "", fullName: "", primaryRole: "Craftperson", isCraftperson: true, isTeamLeader: false, isQAInspector: false, isSiteAdmin: false, vpaTrades: [], vpaBuildingIds: [], permissions: permissionsForPreset("Craftperson") });
   const save = () => {
     if (!editable || draft?.siteId !== activeSiteId) { setError("Administrator permission is required for the active site."); return; }
-    const parsed = UserAccessProfileSchema.safeParse(draft && { ...draft, personName: draft.personName.trim(), fullName: draft.fullName.trim() });
-    if (!parsed.success) { setError(parsed.error.issues[0]?.message ?? "Invalid profile."); return; }
-    if (data.userAccessProfiles.some((item) => item.siteId === activeSiteId && item.id !== parsed.data.id &&
-      ([item.personName.toLowerCase(), item.fullName.toLowerCase()].some((name) => [parsed.data.personName.toLowerCase(), parsed.data.fullName.toLowerCase()].includes(name)) ||
-        (!!parsed.data.linkedCraftpersonId && item.linkedCraftpersonId === parsed.data.linkedCraftpersonId)))) { setError("Person name or linked craftsperson is already assigned to a profile."); return; }
-    if (!parsed.data.isSiteAdmin && data.userAccessProfiles.some((item) => item.id === parsed.data.id && item.siteId === activeSiteId && item.isSiteAdmin) &&
-      !data.userAccessProfiles.some((item) => item.siteId === activeSiteId && item.id !== parsed.data.id && item.isSiteAdmin)) { setError("The site must retain at least one administrator."); return; }
-    setData((current) => ({ ...current, userAccessProfiles: [...current.userAccessProfiles.filter((item) => item.id !== parsed.data.id), parsed.data] }));
+    const saved = { ...draft, personName: draft.personName.trim(), fullName: draft.fullName.trim(), email: draft.email?.trim() || undefined };
+    if (!saved.personName || !saved.fullName) { setError("Person name and full name are required."); return; }
+    if (saved.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(saved.email)) { setError("Enter a valid email address."); return; }
+    if (!PRIMARY_ROLES.includes(saved.primaryRole)) { setError("Select a valid primary role."); return; }
+    if (data.userAccessProfiles.some((item) => item.siteId === activeSiteId && item.id !== saved.id &&
+      ([item.personName.toLowerCase(), item.fullName.toLowerCase()].some((name) => [saved.personName.toLowerCase(), saved.fullName.toLowerCase()].includes(name)) ||
+        (!!saved.linkedCraftpersonId && item.linkedCraftpersonId === saved.linkedCraftpersonId)))) { setError("Person name or linked craftsperson is already assigned to a profile."); return; }
+    if (!saved.isSiteAdmin && data.userAccessProfiles.some((item) => item.id === saved.id && item.siteId === activeSiteId && item.isSiteAdmin) &&
+      !data.userAccessProfiles.some((item) => item.siteId === activeSiteId && item.id !== saved.id && item.isSiteAdmin)) { setError("The site must retain at least one administrator."); return; }
+    setData((current) => ({ ...current, userAccessProfiles: [...current.userAccessProfiles.filter((item) => item.id !== saved.id), saved] }));
     setError(""); setDraft(null);
   };
   return <section className="space-y-4 rounded-lg border bg-white p-4 shadow-sm">
@@ -46,7 +49,7 @@ export function UserAccessMatrix() {
     <input aria-label="Search users" className="rounded border p-2" placeholder="Search users" value={query} onChange={(e) => setQuery(e.target.value)} />
     <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr>{["Person / Technician", "Roles", "VPA Trades", "Audit Trades", "Active capabilities", ""].map((label, index) => <th key={index} className="p-2">{label}</th>)}</tr></thead><tbody>{profiles.map((item) => <tr key={item.id} className="border-t"><td className="p-2">{item.fullName}</td><td>{[item.isTeamLeader && "TeamLeader", item.isCraftperson && "Craftperson", item.isQAInspector && "QA Inspector", item.isSiteAdmin && "Admin"].filter(Boolean).join(", ") || item.primaryRole}</td><td>{item.vpaTrades.map((trade) => <span key={trade} className="m-0.5 inline-block rounded bg-blue-100 px-1 text-blue-800">{trade}</span>)}</td><td>{item.permissions.auditTrades.join(", ") || "—"}</td><td>{groups.flatMap((group) => group.fields).filter(([key]) => item.permissions[key]).map(([, label]) => label).join(", ") || "None"}</td><td><button disabled={!editable} className="text-blue-700 disabled:opacity-50" onClick={() => { setError(""); setDraft(item); }}>Edit</button></td></tr>)}</tbody></table></div>
     {draft && <div className="space-y-4 rounded border bg-slate-50 p-4"><h3 className="font-bold">Edit access profile</h3>{error && <p role="alert" className="text-rose-700">{error}</p>}
-      <div className="grid gap-2 md:grid-cols-3"><label>Person name<input className="block w-full rounded border p-2" value={draft.personName} onChange={(e) => setDraft({ ...draft, personName: e.target.value })} /></label><label>Full name<input className="block w-full rounded border p-2" value={draft.fullName} onChange={(e) => setDraft({ ...draft, fullName: e.target.value })} /></label><label>Email<input type="email" className="block w-full rounded border p-2" value={draft.email ?? ""} onChange={(e) => setDraft({ ...draft, email: e.target.value || undefined })} /></label><label>Linked craftsperson<select className="block w-full rounded border p-2" value={draft.linkedCraftpersonId ?? ""} onChange={(e) => setDraft({ ...draft, linkedCraftpersonId: e.target.value || undefined })}><option value="">None</option>{data.craftspeople.filter((item) => item.SiteId === activeSiteId).map((item) => <option key={item.id} value={item.id}>{item.Name} {item.LastName}</option>)}</select></label><label>Primary role<select className="block w-full rounded border p-2" value={draft.primaryRole} onChange={(e) => { const role = UserAccessProfileSchema.shape.primaryRole.safeParse(e.target.value); if (role.success) setDraft({ ...draft, primaryRole: role.data }); }}>{UserAccessProfileSchema.shape.primaryRole.options.map((role) => <option key={role}>{role}</option>)}</select></label></div>
+      <div className="grid gap-2 md:grid-cols-3"><label>Person name<input className="block w-full rounded border p-2" value={draft.personName} onChange={(e) => setDraft({ ...draft, personName: e.target.value })} /></label><label>Full name<input className="block w-full rounded border p-2" value={draft.fullName} onChange={(e) => setDraft({ ...draft, fullName: e.target.value })} /></label><label>Email<input type="email" className="block w-full rounded border p-2" value={draft.email ?? ""} onChange={(e) => setDraft({ ...draft, email: e.target.value || undefined })} /></label><label>Linked craftsperson<select className="block w-full rounded border p-2" value={draft.linkedCraftpersonId ?? ""} onChange={(e) => setDraft({ ...draft, linkedCraftpersonId: e.target.value || undefined })}><option value="">None</option>{data.craftspeople.filter((item) => item.SiteId === activeSiteId).map((item) => <option key={item.id} value={item.id}>{item.Name} {item.LastName}</option>)}</select></label><label>Primary role<select className="block w-full rounded border p-2" value={draft.primaryRole} onChange={(e) => { const role = PRIMARY_ROLES.find((value) => value === e.target.value); if (role) setDraft({ ...draft, primaryRole: role }); }}>{PRIMARY_ROLES.map((role) => <option key={role}>{role}</option>)}</select></label></div>
       <div className="flex flex-wrap gap-3">{(["isTeamLeader", "isCraftperson", "isQAInspector", "isSiteAdmin"] as const).map((key) => <label key={key}><input type="checkbox" checked={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.checked })} /> {key.slice(2)}</label>)}</div>
       <div className="flex flex-wrap gap-2">{presets.map(([preset, label]) => <button key={preset} className="rounded border bg-white px-2 py-1" onClick={() => setDraft({ ...draft,
         primaryRole: preset === "FullAdmin" ? "SiteAdministrator" : preset === "PMEngineer" ? "TechnicalOfficer" : preset,

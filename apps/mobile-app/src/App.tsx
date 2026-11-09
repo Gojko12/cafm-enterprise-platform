@@ -95,7 +95,7 @@ export default function App() {
     setFloors(storedFloors.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
     setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
     setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id) && !!item.PrimaryTradeId && !!access?.vpaTrades.some((trade) => trade === item.PrimaryTradeId)));
-    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length && !wr.AssignedCraftpersonIds.length && !!access && access.vpaTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id))));
+    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedCraftpersonIds.length && !wr.CraftpersonAssignments?.length && !!access && access.vpaTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id))));
     setSelectedWR((current) => current ? siteRequests.find((wr) => wr.WR_ID === current.WR_ID) ?? current : null);
   }, [activeSiteId, currentTechnicianId]);
 
@@ -136,7 +136,7 @@ export default function App() {
     const claimed = unassignedWRs.find((wr) => wr.WR_ID === wrId);
     if (!claimed || !engine || !access?.permissions.canClaimUnassignedWR) throw new Error("You are not permitted to claim this work request.");
     try {
-      await engine.saveWorkRequest({ ...claimed, AssignedCraftpersonIds: [...(claimed.AssignedCraftpersonIds ?? []), currentTechnicianId], AssignedUserIds: [...(claimed.AssignedUserIds ?? []), currentTechnicianId] }, claimed);
+      await engine.saveWorkRequest({ ...claimed, AssignedCraftpersonIds: [...claimed.AssignedCraftpersonIds, currentTechnicianId], AssignedUserIds: [...new Set([...(claimed.AssignedUserIds ?? []), currentTechnicianId])] }, claimed);
       await refreshData();
     } catch (error) {
       console.error("Could not claim work request:", error);
@@ -414,6 +414,7 @@ export default function App() {
         activeSiteId={activeSiteId}
         technicianId={currentTechnicianId}
         technicians={technicians}
+        vpaTrades={access?.vpaTrades}
         onTechnicianChange={(id) => { if (currentView !== "home") { alert("Return to the work request list before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
         onSiteChange={(site) => {
           if (currentView !== "home") {

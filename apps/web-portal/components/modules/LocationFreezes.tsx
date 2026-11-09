@@ -4,17 +4,19 @@ import React, { useState } from "react";
 import { LocationFreezeSchema } from "@cafm/shared-schema";
 import type { LocationFreeze } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { freezeLocations } from "@/lib/location-freezes";
 
 export function LocationFreezes() {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activeSiteId } = useSiteContext();
   const [editing, setEditing] = useState<LocationFreeze | "new" | null>(null);
   const [error, setError] = useState("");
   const rows = data.locationFreezes.filter((item) => item.siteId === activeSiteId);
   const remove = (item: LocationFreeze) => {
+    if (!permissions?.canManageLocationFreezes) { setError("Permission required: Manage Location Freezes."); return; }
     if (!window.confirm(`Delete "${item.title}"?`)) return;
     setData((state) => {
       const current = state.locationFreezes.find((entry) => entry.siteId === activeSiteId && entry.id === item.id);
@@ -32,9 +34,10 @@ export function LocationFreezes() {
     { id: "start", label: "Start", value: (item: LocationFreeze) => item.startDateTime },
     { id: "end", label: "End", value: (item: LocationFreeze) => item.endDateTime },
     ...(["PM", "FJ", "LJ"] as const).map((type) => ({ id: type, label: `Allow ${type}`, value: (item: LocationFreeze) => item[`allow${type}`] ? "Yes" : "No" })),
-    { id: "action", label: "Actions", value: () => "Edit Delete", render: (item: LocationFreeze) => <span className="space-x-2"><button onClick={() => setEditing(item)} className="text-blue-700 underline">Edit</button><button onClick={() => remove(item)} className="text-red-700 underline">Delete</button></span> },
+    { id: "action", label: "Actions", value: () => "Edit Delete", render: (item: LocationFreeze) => <span className="space-x-2"><button disabled={!permissions?.canManageLocationFreezes} onClick={() => setEditing(item)} className="text-blue-700 underline disabled:opacity-40">Edit</button><button disabled={!permissions?.canManageLocationFreezes} onClick={() => remove(item)} className="text-red-700 underline disabled:opacity-40">Delete</button></span> },
   ];
-  return <div className="space-y-4 p-6"><div className="flex items-center justify-between"><h1 className="text-xl font-semibold">Location Freezes</h1><button className="rounded bg-blue-700 px-3 py-2 text-white" onClick={() => setEditing("new")}>+ Create Freeze</button></div>
+  return <div className="space-y-4 p-6"><div className="flex items-center justify-between"><h1 className="text-xl font-semibold">Location Freezes</h1><button disabled={!permissions?.canManageLocationFreezes} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-40" onClick={() => setEditing("new")}>+ Create Freeze</button></div>
+    {!permissions?.canManageLocationFreezes && <p role="status">Read-only: Manage Location Freezes permission is required.</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
     <OverviewTable preferenceKey="location-freezes" columns={columns} rows={rows} rowKey={(item) => item.id} />
     {editing && <FreezeEditor key={editing === "new" ? "new" : editing.id} item={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} />}
@@ -43,6 +46,7 @@ export function LocationFreezes() {
 
 function FreezeEditor({ item, onClose }: { item?: LocationFreeze; onClose: () => void }) {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activeSiteId } = useSiteContext();
   const [title, setTitle] = useState(item?.title ?? "");
   const [description, setDescription] = useState(item?.description ?? "");
@@ -61,6 +65,7 @@ function FreezeEditor({ item, onClose }: { item?: LocationFreeze; onClose: () =>
   const [error, setError] = useState("");
   const save = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!permissions?.canManageLocationFreezes) { setError("Permission required: Manage Location Freezes."); return; }
     const locationFields = item && !locationChanged ? { buildingId: item.buildingId, floorId: item.floorId, roomId: item.roomId, buildingIds: item.buildingIds, floorIds: item.floorIds, roomIds: item.roomIds } :
       { buildingId: buildings[0], buildingIds: buildings, floorIds: floors, roomIds: rooms };
     const result = LocationFreezeSchema.safeParse({ id: item?.id ?? crypto.randomUUID(), siteId: activeSiteId, ...locationFields, title, description, responsiblePerson: responsible,
@@ -85,7 +90,7 @@ function FreezeEditor({ item, onClose }: { item?: LocationFreeze; onClose: () =>
     <label className="block">Responsible person<input required className="block w-full border p-1" value={responsible} onChange={(e) => setResponsible(e.target.value)} /></label>
     <div className="flex gap-3"><label>Start<input required type="datetime-local" className="block border p-1" value={start} onChange={(e) => setStart(e.target.value)} /></label><label>End<input required type="datetime-local" className="block border p-1" value={end} onChange={(e) => setEnd(e.target.value)} /></label></div>
     {(["PM", "FJ", "LJ"] as const).map((type) => <label key={type} className="block"><input type="checkbox" checked={allow[type]} onChange={(e) => setAllow({ ...allow, [type]: e.target.checked })} /> Allow {type} without issues</label>)}
-    <button className="rounded bg-blue-700 px-3 py-1 text-white">Save</button> <button type="button" className="rounded border px-3 py-1" onClick={onClose}>Cancel</button>
+    <button disabled={!permissions?.canManageLocationFreezes} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save</button> <button type="button" className="rounded border px-3 py-1" onClick={onClose}>Cancel</button>
   </form>{picker && (() => {
     const options = picker === "buildings" ? siteBuildings.map((entry) => ({ id: entry.bl_id, label: `${entry.bl_id} · ${entry.Name}`, building: entry.bl_id, floor: "" })) :
       picker === "floors" ? siteFloors.filter((entry) => !buildings.length || buildings.includes(entry.bl_id)).map((entry) => ({ id: entry.LevelName, label: `${entry.bl_id} / ${entry.LevelName}`, building: entry.bl_id, floor: entry.LevelName })) :

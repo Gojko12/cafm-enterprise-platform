@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { SiteId } from "@cafm/shared-schema";
 import type { SyncStatus } from "../lib/offline-engine";
 
@@ -11,6 +12,7 @@ interface MobileHeaderProps {
   onToggleOfflineMode?: (isOffline: boolean) => void;
   technicianId: string;
   technicians: Array<{ id: string; Name: string; LastName: string; Trade: string }>;
+  vpaTrades?: readonly string[];
   onTechnicianChange: (id: string) => void;
 }
 
@@ -22,6 +24,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   onToggleOfflineMode,
   technicianId,
   technicians,
+  vpaTrades,
   onTechnicianChange,
 }) => {
   const [pendingCount, setPendingCount] = useState(0);
@@ -75,6 +78,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
               </select>
             </div>
             <label className="mb-1 block text-xs">Technician <select aria-label="Active technician" value={technicianId} onChange={(e) => onTechnicianChange(e.target.value)} className="ml-1 max-w-[75%] rounded border p-1">{!technicians.some((person) => person.id === technicianId) && <option value={technicianId}>{technicianId || "Select technician"}</option>}{technicians.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}</select></label>
+            <span className="rounded-full bg-indigo-100 px-2 py-1 text-xs text-indigo-800" title={vpaTrades?.join(", ") || "No VPA trades"}>VPA: {vpaTrades && CLASSICAL_TRADES.every((trade) => vpaTrades.includes(trade)) ? "All 7 Trades" : vpaTrades?.join(", ") || "No Trades"}</span>
 
             {/* Online/Offline Toggle */}
             <button

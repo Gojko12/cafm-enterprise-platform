@@ -670,15 +670,15 @@ export function PMWorkRequestPopup({
                   }}
                   className="mt-1 block w-full rounded border px-3 py-2">
                   <option value="">Select a status</option>
-                  {STATUS_CHOICES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+                  {STATUS_CHOICES.map((item) => <option key={item.key} value={item.key} disabled={(item.percentage === 78 && !permissions?.canCompleteWR78) || (item.percentage === 100 && !permissions?.canCloseWR100)}>{item.label}</option>)}
                 </select>
               </label>
               <div className="flex flex-wrap items-end gap-2">
                 <button type="button" onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 27)!)}
                   className="rounded bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700">Cancel WR (27%)</button>
-                <button type="button" onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!)}
+                <button type="button" disabled={!permissions?.canCompleteWR78} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!)}
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Technically Completed (78%)</button>
-                <button type="button" onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
+                <button type="button" disabled={!permissions?.canCloseWR100} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Complete (100%)</button>
               </div>
             </div>

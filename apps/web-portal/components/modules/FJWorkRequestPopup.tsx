@@ -166,8 +166,9 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           </section>
           <div className="flex flex-wrap gap-2">{[
             ["Cancel WR (27%)", 27], ["On Hold (55%)", 55], ["Technically Completed (78%)", 78], ["Complete (100%)", 100],
-          ].map(([label, percent]) => <button key={label} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white">{label}</button>)}
-            <button onClick={() => {
+          ].map(([label, percent]) => <button key={label} disabled={(percent === 78 && !permissions?.canCompleteWR78) || (percent === 100 && !permissions?.canCloseWR100)} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{label}</button>)}
+            <button disabled={!permissions?.canCreateLJ} onClick={() => {
+              if (!permissions?.canCreateLJ) { window.alert("Permission required to create a Long Job."); return; }
               let estimatedCost = workRequest.EstimatedCostEur ?? 0;
               if (estimatedCost < 750) {
                 estimatedCost = Number(window.prompt("Enter revised estimated cost in EUR (minimum 750):", "750"));

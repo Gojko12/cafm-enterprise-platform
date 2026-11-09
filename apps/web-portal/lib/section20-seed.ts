@@ -253,6 +253,18 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       if (index === 2) { wr.QA_InspectionStatus = "ToBeCorrected"; wr.AuditInspectionStatus = "PM WRs to be corrected"; }
       if (index === 1 || index === 4) { wr.QA_InspectionStatus = "Passed"; wr.AuditInspectionStatus = "Passed Inspected"; }
     });
+    for (const type of ["PM", "FJ", "LJ"] as const) {
+      for (let i = 0; i < 2; i++) {
+        const id = `DEMO-${site}-${type}-UNASSIGNED-${i + 1}`;
+        const request = make(type, i, 50, "Issued");
+        const schedule = siteSchedules[i];
+        const blueprint = blueprints.find((item) => item.SiteId === site && item.ChecklistCode === schedule.ChecklistCode);
+        if (!blueprint) throw new Error(`Missing demo checklist for ${schedule.ScheduleId}.`);
+        workRequests.push({ ...request, WR_ID: id, AssignedCraftpersonIds: [], AssignedUserIds: [],
+          Activity: activity(id, type, 50),
+          ...(type === "PM" ? { ScheduleId: schedule.ScheduleId, ChecklistStandardCode: blueprint.ChecklistCode, ChecklistSteps: blueprint.Steps } : {}) });
+      }
+    }
     workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type !== "PM").forEach((wr) => {
       wr.roughScopeNotes = `Inspect and repair ${wr.Description}; test operation and document the completed work.`;
       wr.todoSteps = [

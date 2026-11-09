@@ -5,7 +5,7 @@ import { EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES, EquipmentSchema, EquipmentSta
 import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { resolveEquipmentLocation } from "@/lib/equipment-locator";
 import { equipmentChangeDescriptions } from "@/lib/equipment-activity";
@@ -73,6 +73,7 @@ export function EquipmentRegistry() {
 
 function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => void }) {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activePerson } = useSiteContext();
   const [tab, setTab] = useState<"General" | "Details" | "WRs" | "Attached Documents" | "KPIs" | "Comments">("General");
   const [comment, setComment] = useState("");
@@ -127,6 +128,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
     { id: "action", label: "Action", value: () => "Open / Edit", render: (wr: BaseWorkRequest) => <button className="text-blue-700 underline" onClick={() => setOpenWR(wr)}>Open / Edit</button> },
   ];
   const save = () => {
+    if (!permissions?.canManageEquipment) { setError("Permission required: Manage Equipment."); return; }
     if (!draft.EquipmentName.trim()) { setError("Equipment name is required."); return; }
     if (!location.building || !location.floor || !location.room) { setError("Select a building, floor and room."); return; }
     if (!draft.Category || !draft.HierarchyLevel) { setError("Select a category and hierarchy level."); return; }
@@ -181,6 +183,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
     <nav className="flex flex-wrap gap-1">{(["General", "Details", "WRs", "Attached Documents", "KPIs", "Comments"] as const).map((name) =>
       <button key={name} onClick={() => setTab(name)} aria-pressed={tab === name} className={`rounded border px-2 py-1 text-xs ${tab === name ? "bg-blue-100" : ""}`}>{name}</button>)}</nav>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+    {!permissions?.canManageEquipment && <p role="status" className="text-sm text-amber-800">Read-only: Manage Equipment permission is required to save changes.</p>}
     {tab === "General" && <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-2">
         {text("EQ Name (English)", draft.EquipmentName, (value) => setDraft({ ...draft, EquipmentName: value }))}
@@ -202,7 +205,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
       <LocationEquipmentPickerGroup buildings={buildings} floors={floors} rooms={rooms} showEquipment={false}
         selectedBuilding={location.building} selectedFloor={location.floor} selectedRoom={location.room}
         onLocationChange={(next) => { setError(""); setLocation(next); }} />
-      <button onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white">Save</button>
+      <button disabled={!permissions?.canManageEquipment} onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save</button>
     </div>}
     {tab === "Details" && <div className="space-y-3"><div className="grid grid-cols-2 gap-2">
       {number("Length (cm)", "LengthCm")}{number("Width (cm)", "WidthCm")}{number("Height (cm)", "HeightCm")}{number("Weight (kg)", "WeightKg")}
@@ -215,7 +218,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
     </div>
       {draft.DocumentationUrl && /^https?:\/\//i.test(draft.DocumentationUrl) && <a className="text-blue-700 underline" href={draft.DocumentationUrl} target="_blank" rel="noreferrer">Open documentation</a>}
       <label className="block text-xs">Power / Technical Specs (JSON)<textarea value={specifications} onChange={(event) => setSpecifications(event.target.value)} rows={5} className="block w-full rounded border p-2 font-mono" /></label>
-      <button onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white">Save</button></div>}
+      <button disabled={!permissions?.canManageEquipment} onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save</button></div>}
     {tab === "WRs" && <div className="space-y-2"><div className="flex gap-2">{(["All", "PM", "FJ", "LJ"] as const).map((value) => <button key={value} aria-pressed={type === value} onClick={() => setType(value)} className="rounded border px-2">{value}</button>)}</div>
       <OverviewTable preferenceKey="equipment-work-requests" columns={requestColumns} rows={requests.filter((wr) => type === "All" || wr.WR_Type === type)} rowKey={(wr) => wr.WR_ID} /></div>}
     {tab === "Attached Documents" && <div className="space-y-2">
@@ -228,7 +231,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
         reader.readAsDataURL(file);
       }} /></label>
       {(draft.Documents ?? []).map((document) => <div key={document.id} className="flex gap-3 text-xs"><a className="text-blue-700 underline" href={document.dataUrl} download={document.name}>{document.name}</a><button onClick={() => setDraft({ ...draft, Documents: draft.Documents?.filter((entry) => entry.id !== document.id) })}>Delete</button></div>)}
-      <button onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white">Save documents</button>
+      <button disabled={!permissions?.canManageEquipment} onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save documents</button>
     </div>}
     {tab === "KPIs" && <dl className="space-y-1 text-sm">
       <div>Total Maintenance Cost: {requests.some((wr) => wr.ActualCostEur !== undefined) ? `${requests.reduce((sum, wr) => sum + (wr.ActualCostEur ?? 0), 0).toFixed(2)} EUR (recorded costs)` : "Not recorded"}</div>
