@@ -38,6 +38,13 @@ const UserAccessProfileSchema = z.object({
   isSuperAdmin: z.boolean().optional(), managedSiteIds: z.array(siteSchema).optional(),
   siteAdminGovernance: z.object({ canManageUsersAndVPA: z.boolean(), canManageRoleAssignments: z.boolean(), canManageAuditQuotas: z.boolean(), canManageFreezesAndShifts: z.boolean(), canResetOrExportSiteData: z.boolean() }).optional(),
   vpaTrades: z.array(tradeSchema), vpaBuildingIds: z.array(z.string().min(1)), permissions: permissionsSchema,
+  assignedRoleIds: z.array(z.string().min(1)).optional(),
+});
+const roleDefinitionSchema = z.object({
+  id: z.string().min(1), name: z.string().trim().min(1), description: z.string(),
+  badgeColor: z.enum(["amber", "purple", "blue", "emerald", "cyan", "slate", "rose"]),
+  baseRoleType: z.enum(["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"]),
+  parentRoleId: z.string().min(1).optional(), isCustomVariant: z.boolean().optional(), permissions: permissionsSchema,
 });
 const localTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/)
@@ -79,6 +86,7 @@ const stateSchema = z.object({
   schedules: records,
   craftspeople: records,
   userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
+  roleDefinitions: z.array(roleDefinitionSchema).optional(),
   craftpersonAbsences: z.array(CraftpersonAbsenceSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
   siteRoleAssignments: records,

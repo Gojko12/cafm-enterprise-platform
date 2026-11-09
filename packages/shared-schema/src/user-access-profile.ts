@@ -29,6 +29,18 @@ export const UserGranularPermissionsSchema = z.object({
 });
 export type UserGranularPermissions = z.infer<typeof UserGranularPermissionsSchema>;
 
+export const RoleDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1),
+  description: z.string(),
+  badgeColor: z.enum(["amber", "purple", "blue", "emerald", "cyan", "slate", "rose"]),
+  baseRoleType: z.enum(["SuperAdmin", "SiteAdministrator", "TeamLeader", "QAInspector", "TechnicalOfficer", "Craftperson"]),
+  parentRoleId: z.string().min(1).optional(),
+  isCustomVariant: z.boolean().optional(),
+  permissions: UserGranularPermissionsSchema,
+});
+export type RoleDefinition = z.infer<typeof RoleDefinitionSchema>;
+
 export const UserAccessProfileSchema = z.object({
   id: z.string().min(1),
   siteId: SiteIdSchema,
@@ -52,6 +64,7 @@ export const UserAccessProfileSchema = z.object({
   isSiteAdmin: z.boolean(),
   vpaTrades: z.array(ClassicalTradeSchema),
   vpaBuildingIds: z.array(z.string().min(1)),
+  assignedRoleIds: z.array(z.string().min(1)).optional(),
   permissions: UserGranularPermissionsSchema,
 });
 export type UserAccessProfile = z.infer<typeof UserAccessProfileSchema>;

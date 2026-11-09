@@ -4,7 +4,7 @@ import type { DemoData } from "../../../web-portal/lib/cafm-data";
 
 const empty = (): DemoData => ({
   sites: ["SITE-01"], buildings: [], floors: [], rooms: [], desks: [], equipment: [],
-  blueprints: [], schedules: [], workRequests: [], users: [], userAccessProfiles: [], craftspeople: [], craftpersonAbsences: [], locationFreezes: [],
+  blueprints: [], schedules: [], workRequests: [], users: [], userAccessProfiles: [], roleDefinitions: [], craftspeople: [], craftpersonAbsences: [], locationFreezes: [],
   tradeRoleMappings: [], siteRoleMappings: [], siteRoleAssignments: [], mobileMutationIds: [],
 });
 const csv = (text: string) => new TextEncoder().encode(text).buffer as ArrayBuffer;

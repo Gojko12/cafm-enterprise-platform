@@ -8,7 +8,7 @@ import type { DemoData } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
 import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
-import { seedAccessProfiles } from "./access-profiles";
+import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles, resolveEffectivePermissions } from "./access-profiles";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -21,8 +21,8 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-const STORAGE_KEY = "cafm-demo-data-v13";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v14";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 function safeStorageSet(key: string, value: string): boolean {
@@ -94,9 +94,11 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
 }
 
 function withAccessProfileDefaults(data: DemoData, site: SiteId): DemoData {
+  const { roles, profiles } = migrateRoles(data.userAccessProfiles ?? seedAccessProfiles([site], data.craftspeople, data.users), data.roleDefinitions);
   return {
     ...data,
-    userAccessProfiles: data.userAccessProfiles ?? seedAccessProfiles([site], data.craftspeople, data.users),
+    roleDefinitions: roles,
+    userAccessProfiles: profiles,
   };
 }
 
@@ -178,6 +180,7 @@ function seedData(): DemoData {
     ...seeded,
     users,
     userAccessProfiles: seedAccessProfiles(sites, seeded.craftspeople, users),
+    roleDefinitions: defaultRoleDefinitions(),
     tradeRoleMappings: sites.flatMap((site) => CLASSICAL_TRADES.map((trade) => ({
       SiteId: site, Trade: trade,
       assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
@@ -189,6 +192,10 @@ function seedData(): DemoData {
     qaInspectorAssignments: sites.flatMap((siteId) => ["Mark", "Thomas", "Yvonne"].map((personName) => ({ id: `${siteId}-qa-${personName}`, siteId, personName, trades: [...CLASSICAL_TRADES], wrTypes: ["PM", "FJ"] }))),
     qaFailureReasons: [...DEFAULT_QA_FAILURE_REASONS],
   };
+}
+
+export function seedSiteData(site: SiteId): DemoData {
+  return scopeData(withAccessProfileDefaults(seedData(), site), site);
 }
 
 interface Store {
@@ -269,10 +276,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        initial = scopeData({ ...defaults, ...savedData, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
+        initial = scopeData(withAccessProfileDefaults({ ...defaults, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople,
-          userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) }, site);
+          userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site), site);
       }
       try {
         const remote = await stateRequest(site, personRef.current, "GET");
@@ -294,9 +301,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             throw new Error("Invalid server state.");
           }
           const remoteData = { ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+            roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
             userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
           initial = scopeData(withAccessProfileDefaults(remoteData, site), site);
-          acknowledged.current = "userAccessProfiles" in remote.state ? JSON.stringify(initial) : JSON.stringify(remote.state);
+          acknowledged.current = JSON.stringify(remote.state);
         }
         connected.current = true;
         if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
@@ -363,9 +371,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
               throw new Error("Invalid server state.");
             }
             const remoteData = { ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+              roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
-            acknowledged.current = "userAccessProfiles" in remote.state ? JSON.stringify(next) : JSON.stringify(remote.state);
+            acknowledged.current = JSON.stringify(remote.state);
             current.current = next;
             if (active) setData(next);
           }
@@ -387,10 +396,11 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
             const remoteData = { ...seedData(), craftpersonAbsences: [], locationFreezes: [], ...result.state,
+              roleDefinitions: "roleDefinitions" in result.state ? result.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in result.state ? result.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
             revision.current = result.revision;
-            acknowledged.current = "userAccessProfiles" in result.state ? JSON.stringify(next) : JSON.stringify(result.state);
+            acknowledged.current = JSON.stringify(result.state);
             safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
             current.current = next;
             if (active) setData(next);
@@ -492,15 +502,18 @@ export function useCafmStore() {
 export function useActiveUserPermissions() {
   const { data } = useCafmStore();
   const { activeSiteId, activePerson } = useSiteContext();
-  const profile = data.userAccessProfiles.find((item) => item.siteId === activeSiteId && (item.personName === activePerson || item.fullName === activePerson));
+  const siteProfiles = data.userAccessProfiles.filter((item) => item.siteId === activeSiteId);
+  const profile = siteProfiles.find((item) => item.personName === activePerson || item.fullName === activePerson) ??
+    (activePerson === "Gregor" ? siteProfiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined);
   const siteAdmin = profile?.isSiteAdmin && !profile.isSuperAdmin;
   const siteAllowed = !siteAdmin || (!!profile.managedSiteIds?.includes(activeSiteId));
   const governance = (key: keyof NonNullable<NonNullable<typeof profile>["siteAdminGovernance"]>) =>
     !siteAdmin || (siteAllowed && profile.siteAdminGovernance?.[key] === true);
-  const permissions = profile?.permissions && {
-    ...profile.permissions,
-    canManageShiftsAndLeaves: profile.permissions.canManageShiftsAndLeaves && governance("canManageFreezesAndShifts"),
-    canManageLocationFreezes: profile.permissions.canManageLocationFreezes && governance("canManageFreezesAndShifts"),
+  const resolved = profile && resolveEffectivePermissions(profile, data.roleDefinitions);
+  const permissions = resolved && {
+    ...resolved,
+    canManageShiftsAndLeaves: resolved.canManageShiftsAndLeaves && governance("canManageFreezesAndShifts"),
+    canManageLocationFreezes: resolved.canManageLocationFreezes && governance("canManageFreezesAndShifts"),
   };
   return { profile, permissions, governance };
 }

@@ -19,6 +19,7 @@ import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { QAInspectorSettings } from "@/components/modules/QASettings";
 import { UserAccessMatrix } from "@/components/modules/UserAccessMatrix";
 import { SiteAdminGovernance } from "@/components/modules/SiteAdminGovernance";
+import { isPersonProfile } from "@/lib/access-profiles";
 
 const ROLE_NAMES: Record<LJRole, string> = {
   ESA_TM: "ESA Trade Manager",
@@ -32,7 +33,6 @@ const ROLE_NAMES: Record<LJRole, string> = {
   ESA_LONG_JOB: "ESA Long Job",
   TRADE_LONG_JOB: "Trade Long Job",
 };
-const PEOPLE = ["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Lidija", "Stefan", "Gregor", "Draftsman", "Inventory Admin", "SiteAdmin"];
 const TRADES: SiteRoleAssignmentTrade[] = [...CLASSICAL_TRADES, "All"];
 const SITES: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
 const blankAssignment = (siteId: SiteId): Omit<SiteRoleAssignment, "AssignmentId"> => ({
@@ -58,6 +58,7 @@ export default function SiteRoleAssignmentsPage() {
   const [draft, setDraft] = useState<Omit<SiteRoleAssignment, "AssignmentId">>(blankAssignment(activeSiteId));
   const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"users" | "roles" | "assignments">("users");
 
   const assignments = useMemo(() => data.siteRoleAssignments.filter((assignment) => {
     if (siteFilter !== "All" && assignment.SiteId !== siteFilter) return false;
@@ -124,8 +125,10 @@ export default function SiteRoleAssignmentsPage() {
   })); };
 
   return <div className="space-y-5 p-6">
-    <SiteAdminGovernance />
-    <UserAccessMatrix />
+    <details open><summary className="cursor-pointer font-bold">👑 Global Super Admin Governance</summary><SiteAdminGovernance /></details>
+    <nav className="flex flex-wrap gap-2">{([["users", "👥 Users, Roles & VPA Matrix"], ["roles", "🛡️ Role Definitions & Capability Builder"], ["assignments", "📋 Long Job Trade Managers (01–07)"]] as const).map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded px-4 py-2 ${tab === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>)}</nav>
+    {tab !== "assignments" && <UserAccessMatrix key={`${activeSiteId}-${tab}`} mode={tab} />}
+    {tab === "assignments" && <>
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">2. Long Job Trade Managers (01–07)</h1>
@@ -204,7 +207,7 @@ export default function SiteRoleAssignmentsPage() {
           <button type="button" onClick={() => { setEditing(null); setFormOpen(false); setError(""); }} aria-label="Close assignment form" className="rounded px-2 py-1 text-xl hover:bg-slate-100">×</button></div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm">Site<select required value={draft.SiteId} onChange={(event) => setDraft({ ...draft, SiteId: SiteIdSchema.parse(event.target.value) })} className="mt-1 w-full rounded border px-3 py-2">{SITES.map((site) => <option key={site} value={site}>{site}</option>)}</select></label>
-          <label className="text-sm">Person<select required value={draft.PersonName} onChange={(event) => setDraft({ ...draft, PersonName: event.target.value })} className="mt-1 w-full rounded border px-3 py-2"><option value="">Select person</option>{PEOPLE.map((person) => <option key={person} value={person}>{person}</option>)}</select></label>
+          <label className="text-sm">Person<select required value={draft.PersonName} onChange={(event) => setDraft({ ...draft, PersonName: event.target.value })} className="mt-1 w-full rounded border px-3 py-2"><option value="">Select person</option>{data.userAccessProfiles.filter((person) => person.siteId === activeSiteId && isPersonProfile(person)).map((person) => <option key={person.id} value={person.personName}>{person.fullName}</option>)}</select></label>
           <label className="text-sm">Role<select value={draft.RoleCode} onChange={(event) => setDraft({ ...draft, RoleCode: LJRoleEnum.parse(event.target.value) })} className="mt-1 w-full rounded border px-3 py-2">{LJRoleEnum.options.map((role) => <option key={role} value={role}>{ROLE_NAMES[role]} ({role})</option>)}</select></label>
           <label className="text-sm">Trade<select value={draft.Trade} onChange={(event) => setDraft({ ...draft, Trade: SiteRoleAssignmentTradeSchema.parse(event.target.value) })} className="mt-1 w-full rounded border px-3 py-2">{TRADES.map((trade) => <option key={trade} value={trade}>{trade}</option>)}</select></label>
           <label className="text-sm">Assignment Level<select value={draft.AssignmentLevel} onChange={(event) => setDraft({ ...draft, AssignmentLevel: AssignmentLevelSchema.parse(event.target.value) })} className="mt-1 w-full rounded border px-3 py-2">{AssignmentLevelSchema.options.map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
@@ -223,5 +226,6 @@ export default function SiteRoleAssignmentsPage() {
       </form>
     </div>}
     <QAInspectorSettings />
+    </>}
   </div>;
 }
