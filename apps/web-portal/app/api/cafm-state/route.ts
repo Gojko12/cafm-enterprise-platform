@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 // Bypass Next's optimized barrel cache, which can retain an outdated export table.
 import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
-import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema } from "@/lib/audit-assurance-types";
+import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 
 export const runtime = "nodejs";
@@ -135,6 +135,9 @@ const stateSchema = z.object({
   auditCampaigns: z.array(AuditCampaignSchema).optional(),
   auditFindings: z.array(AuditFindingSchema).optional(),
   auditInspections: z.array(AuditInspectionSchema).optional(),
+  auditSettings: AuditSettingsSchema.optional(),
+  auditTemplates: z.array(AuditTemplateSchema).optional(),
+  auditImports: z.array(AuditImportSchema).optional(),
   workRequests: z.array(workRequestRecord),
   deletedWorkRequests: records.optional(),
   users: records,
@@ -176,6 +179,8 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;
   if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.auditInspections?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
+  if (state.auditTemplates?.some((item) => item.siteId !== site)) return false;
+  if (state.auditImports?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;

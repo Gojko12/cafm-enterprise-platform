@@ -31,8 +31,9 @@ import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
 import { FieldUpdateModal } from "./components/FieldUpdateModal";
 import { fieldReasonLabels, urgencyLabels } from "../../web-portal/lib/field-updates";
 import { stable } from "./lib/portal-sync";
+import { AuditInspection } from "./components/AuditInspection";
 
-type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers";
+type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers" | "audit-assurance";
 const siteContextSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
   locationFreezes: z.array(LocationFreezeSchema),
@@ -411,6 +412,8 @@ export default function App() {
   // Render based on current view
   const renderContent = () => {
     switch (currentView) {
+      case "audit-assurance":
+        return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} />;
       case "hub":
         return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
@@ -561,6 +564,7 @@ export default function App() {
             <div className="text-xl">📱</div>
             <div className="text-xs font-medium text-gray-700">Scan QR</div>
           </button>
+          <button onClick={() => navigateSafely(() => setCurrentView("audit-assurance"))} className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors" aria-current={currentView === "audit-assurance" ? "page" : undefined}>🔎<span className="block text-xs">Audit</span></button>
           <button onClick={() => navigateSafely(() => setCurrentView("timers"))} className="flex-1 py-3 text-center hover:bg-gray-50 transition-colors" aria-current={currentView === "timers" ? "page" : undefined}>
             <div className="text-xl">⏱</div>
             <div className="text-xs font-medium text-gray-700">Timers ({timers.length})</div>

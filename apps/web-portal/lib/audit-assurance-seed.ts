@@ -1,5 +1,11 @@
 import type { Equipment, BaseWorkRequest, SiteId } from "@cafm/shared-schema";
 import { calculateDeadline, type AuditCampaign, type AuditFinding, type AuditInspection, urgencyLevels, findingTypes, assuranceStates } from "./audit-assurance-types";
+import type { SiteId as AssuranceSiteId } from "@cafm/shared-schema";
+
+export function seedAuditTemplates(sites: AssuranceSiteId[]) {
+  const categories = ["Chillers & Heat Pumps", "LV/HV Switchgear", "Air Handling Units", "Fire Safety & Dampers", "Lifts & Hoists"];
+  return sites.flatMap((siteId) => categories.map((category, index) => ({ id: `${siteId}-audit-template-${index + 1}`, siteId, category, checkpoints: [{ code: `CP-${String(index + 1).padStart(2, "0")}`, name: "Condition and operation inspection", conditionCriteria: "A good; B fair; C poor; D critical", operationCriteria: "Record operational, degraded, non-operational or inaccessible.", unit: ["°C", "V", "Pa", "s", "s"][index] }] })));
+}
 
 export function auditSystem(category?: string): string {
   if (["A", "B", "C", "H"].includes(category ?? "")) return "HVAC & Cooling";

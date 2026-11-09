@@ -42,15 +42,28 @@ export const AuditInspectionSchema = z.object({
   checkpointName: nonempty, inspector: nonempty, plannedDate: z.iso.date(), routeOrder: z.number().int().positive(),
   accessibility: z.enum(["Accessible", "Inaccessible"]), status: z.enum(["Planned", "Completed"]), completedAt: z.string().optional(),
 });
+export const AuditSettingsSchema = z.object({
+  deadlineDays: z.object({ N4: z.number().int().positive(), N3: z.number().int().positive(), N2: z.number().int().positive(), N1: z.number().int().positive() }),
+  slaDays: z.object({ N4: z.number().int().positive(), N3: z.number().int().positive(), N2: z.number().int().positive(), N1: z.number().int().positive() }),
+  bonusPerCompliantEUR: z.number().nonnegative(), malusPerNoncompliantEUR: z.number().nonnegative(),
+  lowRiskEnabled: z.boolean(),
+});
+export const defaultAuditSettings = { deadlineDays: { N4: 1, N3: 90, N2: 365, N1: 730 }, slaDays: { N4: 1, N3: 90, N2: 365, N1: 730 }, bonusPerCompliantEUR: 0, malusPerNoncompliantEUR: 0, lowRiskEnabled: true };
+export const AuditTemplateSchema = z.object({ id: nonempty, siteId: site, category: nonempty, checkpoints: z.array(z.object({ code: nonempty, name: nonempty, conditionCriteria: nonempty, operationCriteria: nonempty, unit: nonempty })) });
+export const AuditImportRowSchema = z.object({ id: nonempty, approved: z.boolean(), findingId: nonempty, equipmentId: z.string(), buildingId: z.string(), component: z.string(), urgency: z.union([z.enum(urgencyLevels), z.literal("")]), findingType: z.enum(findingTypes).optional(), conditionScore: z.enum(["A - Good", "B - Fair", "C - Poor", "D - Critical", ""]).optional(), operationalStatus: z.enum(["Operational", "Degraded", "Non-Operational", "Inaccessible", ""]).optional(), discoveredAt: z.string(), observation: z.string(), remedy: z.string(), image: z.string() });
+export const AuditImportSchema = z.object({ id: nonempty, siteId: site, campaignId: nonempty, fileName: nonempty, createdAt: nonempty, rows: z.array(AuditImportRowSchema) });
+export type AuditSettings = z.infer<typeof AuditSettingsSchema>;
+export type AuditTemplate = z.infer<typeof AuditTemplateSchema>;
+export type AuditImport = z.infer<typeof AuditImportSchema>;
 export type AuditCampaign = z.infer<typeof AuditCampaignSchema>;
 export type AuditFinding = z.infer<typeof AuditFindingSchema>;
 export type AuditInspection = z.infer<typeof AuditInspectionSchema>;
 export type AuditUrgency = typeof urgencyLevels[number];
 export const urgencyLabels: Record<AuditUrgency, string> = { N4: "Immediate (+24h)", N3: "Within 3 months", N2: "Within 1 year", N1: "Monitor / plan", N0: "No action" };
-export function calculateDeadline(date: string, urgency: AuditUrgency): string {
+export function calculateDeadline(date: string, urgency: AuditUrgency, settings: AuditSettings = defaultAuditSettings): string {
   if (!z.iso.date().safeParse(date).success) throw new Error("Enter a valid discovery date.");
   if (urgency === "N0") return "No action";
-  const days = { N4: 1, N3: 90, N2: 365, N1: 730 }[urgency];
+  const days = settings.deadlineDays[urgency];
   const value = new Date(`${date}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
