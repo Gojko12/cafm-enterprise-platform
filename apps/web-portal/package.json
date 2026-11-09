@@ -9,7 +9,7 @@
     "prebuild": "npm --prefix ../../packages/shared-schema run build",
     "build": "next build",
     "build:cloud": "node ../../scripts/build-cloud.cjs",
-    "start": "next start --hostname localhost",
+    "start": "next start -H 0.0.0.0",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "typecheck": "tsc --noEmit"
   },
