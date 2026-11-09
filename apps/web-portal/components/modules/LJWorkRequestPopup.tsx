@@ -1,4 +1,5 @@
 "use client";
+import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useState } from "react";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
@@ -339,6 +340,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
           <button aria-label="Close LJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button>
         </div>
       </header>
+      <FieldUpdateBadges wr={workRequest} />
       <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Long Job detail tabs">
         {TABS.map((item) => <button key={item} role="tab" aria-label={item} title={item} aria-selected={tab === item} onClick={() => setTab(item)}
           className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
+import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 type Session = NonNullable<BaseWorkRequest["timeSessions"]>[number];
@@ -32,7 +33,11 @@ export function stopTechnicianTimer(current: BaseWorkRequest, technician: string
 
 export function startTechnicianTimer(current: BaseWorkRequest, technician: string, technicianName: string): BaseWorkRequest {
   if ((current.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt)) throw new Error("A timer is already running on this work request.");
-  return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt: new Date().toISOString(), durationMinutes: 0 }] };
+  const now = new Date();
+  const slot = scheduledSlot(current, technician);
+  const ahead = slot ? localDateTime(now) < slot.assignedStartDateTime : !!current.StartDate_DateToPerform && localDateTime(now).slice(0, 10) < current.StartDate_DateToPerform;
+  const planned = slot ? `${slot.assignedStartDateTime} – ${slot.assignedEndDateTime}` : current.StartDate_DateToPerform;
+  return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt: now.toISOString(), durationMinutes: 0 }], ...(ahead ? { Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now.toISOString(), text: `Started ahead of scheduled slot: ${planned}.` }] } : {}) };
 }
 
 export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save, now }: {

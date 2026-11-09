@@ -1,4 +1,5 @@
 "use client";
+import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useMemo, useState } from "react";
 import {
@@ -575,6 +576,7 @@ export function PMWorkRequestPopup({
             className="rounded px-3 py-2 text-xl leading-none text-slate-600 hover:bg-slate-100">×</button>
         </header>
 
+        <FieldUpdateBadges wr={workRequest} />
         <nav aria-label="WR detail tabs" className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2">
           {TABS.map((tab) => (
             <button type="button" key={tab} role="tab" aria-label={tab} title={tab} aria-selected={activeTab === tab}

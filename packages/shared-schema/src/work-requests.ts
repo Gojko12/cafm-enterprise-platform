@@ -84,6 +84,22 @@ export const WRTimeSessionSchema = z.object({
   durationMinutes: z.number().nonnegative(),
 });
 
+export const TechnicianFieldUpdateSchema = z.object({
+  id: z.string().min(1),
+  wrId: z.string().min(1),
+  craftpersonId: z.string().min(1),
+  craftpersonName: z.string().min(1),
+  createdAt: z.string().min(1),
+  reasonCategory: z.enum(["NeedAccess", "NeedTools", "WaitingForParts", "PreviousJobRanLate", "TechnicalIssue", "FinishedEarlyOrLate", "Other"]),
+  urgency: z.enum(["InfoOnly", "ActionToday", "UrgentBlocked"]),
+  message: z.string().trim().min(1),
+  status: z.enum(["Open", "Acknowledged", "Resolved"]),
+  teamLeaderReply: z.string().optional(),
+  resolvedBy: z.string().optional(),
+  resolvedAt: z.string().optional(),
+});
+export type TechnicianFieldUpdate = z.infer<typeof TechnicianFieldUpdateSchema>;
+
 export const WRTodoStepSchema = z.object({
   id: z.string().min(1),
   order: z.number().int().positive(),
@@ -182,6 +198,7 @@ export const BaseWorkRequestSchema = z.object({
   LevelName: z.string().min(1).optional(),
   SiteId: SiteIdSchema,
   AssignedCraftpersonIds: z.array(z.string().min(1)).default([]),
+  technicianFieldUpdates: z.array(TechnicianFieldUpdateSchema).optional(),
   CraftpersonAssignments: z.array(z.object({
     craftpersonId: z.string().min(1),
     assignedStartDateTime: LocalDateTimeSchema,
@@ -311,7 +328,7 @@ export const BaseWorkRequestSchema = z.object({
   RequiresInventoryUpdate: z.boolean().default(false),
   AcceptanceGates: z.array(LJAcceptanceGateSchema).default([]),
   UpdatedAt: z.string().min(1).optional(),
-});
+}).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." });
 
 export type BaseWorkRequest = z.infer<typeof BaseWorkRequestSchema>;
 export type ChecklistHistoryEntry = z.infer<typeof ChecklistHistoryEntrySchema>;

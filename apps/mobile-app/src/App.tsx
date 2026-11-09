@@ -21,13 +21,15 @@ import {
   UserAccessProfileSchema,
   CLASSICAL_TRADES,
 } from "@cafm/shared-schema";
-import type { LocationFreeze, UserAccessProfile } from "@cafm/shared-schema";
+import type { LocationFreeze, UserAccessProfile, TechnicianFieldUpdate } from "@cafm/shared-schema";
 import { z } from "zod";
 import { applyFilters, useFilterStore } from "./lib/store";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
 import { ExecutionHub } from "./components/ExecutionHub";
 import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
+import { FieldUpdateModal } from "./components/FieldUpdateModal";
+import { fieldReasonLabels, urgencyLabels } from "../../web-portal/lib/field-updates";
 import { stable } from "./lib/portal-sync";
 
 type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers";
@@ -68,6 +70,8 @@ export default function App() {
   const [loadedSite, setLoadedSite] = useState<SiteId | null>(null);
   const [timerStorageError, setTimerStorageError] = useState("");
   const [focusTimer, setFocusTimer] = useState(false);
+  const [fieldWR, setFieldWR] = useState<string | null>(null);
+  const [fieldNotice, setFieldNotice] = useState("");
   const checklistNavigation = useRef<((destination: () => void) => void) | null>(null);
   const hubNavigation = useRef<(() => boolean) | null>(null);
   const savingWR = useRef(false);
@@ -169,7 +173,7 @@ export default function App() {
       void engine.syncNow().then(refreshData).catch((error) => console.error("Background sync failed:", error));
     };
     sync();
-    const interval = window.setInterval(sync, 30000);
+    const interval = window.setInterval(sync, 5000);
     return () => window.clearInterval(interval);
   }, [engine, activeSiteId, currentTechnicianId, isSimulatedOffline, refreshData]);
 
@@ -361,11 +365,31 @@ export default function App() {
     setFollowUpOpen(true);
   };
   const finishChecklist = () => { if (!access?.permissions.canCompleteWR78) return; setOpenCompletion(true); setCurrentView("hub"); };
+  const submitFieldUpdate = async (draft: Pick<TechnicianFieldUpdate, "reasonCategory" | "urgency" | "message">) => {
+    if (!engine || !fieldWR || !currentTechnicianId || !person) throw new Error("Work request or technician is unavailable.");
+    if (savingWR.current) throw new Error("Another save is in progress. Try again.");
+    savingWR.current = true;
+    try {
+      const current = await engine.getWorkRequest(fieldWR);
+      if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
+      const createdAt = new Date().toISOString();
+      const update: TechnicianFieldUpdate = { ...draft, id: crypto.randomUUID(), wrId: current.WR_ID, craftpersonId: currentTechnicianId, craftpersonName: technicianName, createdAt, status: "Open" };
+      const text = `🚩 [${urgencyLabels[draft.urgency]} - ${fieldReasonLabels[draft.reasonCategory]}] ${technicianName} to Team Leader: ${draft.message}`;
+      const updated: BaseWorkRequest = { ...current, UpdatedAt: createdAt, technicianFieldUpdates: [...(current.technicianFieldUpdates ?? []), update], Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "comment", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt, text }] };
+      await engine.saveWorkRequest(updated, current);
+      setSiteWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+      setMyWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+      setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+      setSelectedWR((item) => item?.WR_ID === updated.WR_ID ? updated : item);
+    } finally { savingWR.current = false; }
+    try { await handleSyncNow(); setFieldNotice("Update saved and synchronized to the Team Leader."); }
+    catch (problem) { setFieldNotice(`Update saved offline, but not yet synchronized: ${problem instanceof Error ? problem.message : "Retry Sync Now."} Please contact your Team Leader directly.`); }
+  };
   const timers = siteWRs.flatMap((wr) => (wr.timeSessions ?? []).filter((session) => session.craftpersonId === currentTechnicianId && !session.endedAt).map((session) => ({ wr, session })));
   const selectedTimer = selectedWR?.timeSessions?.find((session) => session.craftpersonId === currentTechnicianId && !session.endedAt);
   const navigateSafely = (destination: () => void) => {
     if (creatingFollowUp) { alert("Wait for the current save to finish before navigating."); return; }
-    if (followUpOpen) { alert("Close the follow-up editor before navigating."); return; }
+    if (followUpOpen || fieldWR) { alert("Close the open editor before navigating."); return; }
     if (currentView === "checklist") {
       if (!checklistNavigation.current) { alert("Checklist is not ready to leave yet."); return; }
       checklistNavigation.current(destination);
@@ -388,7 +412,7 @@ export default function App() {
   const renderContent = () => {
     switch (currentView) {
       case "hub":
-        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
         if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
@@ -482,6 +506,9 @@ export default function App() {
               unassignedWRs={applyFilters(unassignedWRs, appliedFilters)}
               onClaimWR={access?.permissions.canClaimUnassignedWR ? handleClaimWR : undefined}
               onOpenWR={handleOpenWR}
+              onReport={setFieldWR}
+              technician={currentTechnicianId}
+              now={now}
             />
           </div>
         );
@@ -496,10 +523,10 @@ export default function App() {
         technicianId={currentTechnicianId}
         technicians={technicians}
         vpaTrades={vpaTrades}
-        onTechnicianChange={(id) => { if (currentView !== "home") { alert("Return to the work request list before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
+        onTechnicianChange={(id) => { if (currentView !== "home" || fieldWR) { alert("Close the editor and return to the work request list before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
         onSiteChange={(site) => {
-          if (currentView !== "home") {
-            alert("Return to the work request list before switching sites.");
+          if (currentView !== "home" || fieldWR) {
+            alert("Close the editor and return to the work request list before switching sites.");
             return;
           }
           setLoadedSite(null); setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setSiteEquipment([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
@@ -515,7 +542,8 @@ export default function App() {
         {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
       </section>
       {/* Main Content */}
-      <main className="h-screen overflow-y-auto flex flex-col">{renderContent()}</main>
+      <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{renderContent()}</main>
+      {fieldWR && <FieldUpdateModal key={fieldWR} wrId={fieldWR} submit={submitFieldUpdate} close={() => setFieldWR(null)} />}
       {followUpOpen && selectedWR && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" aria-label="Create Follow-Up FJ" className="w-full max-w-lg space-y-3 rounded bg-white p-4"><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea aria-label="Follow-up description" className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} />{followUpError && <p role="alert" className="text-rose-700">{followUpError}</p>}<div className="flex gap-2"><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); setFollowUpError(""); void createFollowUp().catch((error: unknown) => setFollowUpError(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button><button disabled={creatingFollowUp} className="rounded border p-2" onClick={() => setFollowUpOpen(false)}>Cancel</button></div></div></div>}
 
       {/* Bottom Navigation Tabs */}

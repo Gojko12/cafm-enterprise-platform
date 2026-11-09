@@ -1,4 +1,5 @@
 "use client";
+import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useState } from "react";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
@@ -112,6 +113,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
         <div><h2 className="text-xl font-bold">FJ Details Popup</h2><p className="text-sm text-slate-600">{workRequest.WR_ID} · {workRequest.Description}</p></div>
         <div className="flex items-center gap-3"><span className="rounded bg-green-100 px-3 py-1 text-sm font-semibold">Fast Job · {workRequest.Percentage}%</span><button aria-label="Close FJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button></div>
       </header>
+      <FieldUpdateBadges wr={workRequest} />
       <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Fast Job detail tabs">
         {tabs.map((item) => <button key={item} role="tab" aria-label={item} title={item} aria-selected={tab === item} onClick={() => setTab(item)}
           className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}

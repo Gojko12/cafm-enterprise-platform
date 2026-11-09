@@ -237,6 +237,18 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         wr.CraftpersonAssignments = [{ craftpersonId: person.id, assignedStartDateTime: `${disputeDay}T08:00`, assignedEndDateTime: `${disputeDay}T10:00` }];
       });
     }
+    const fieldExamples = workRequests.filter((wr) => wr.SiteId === site && wr.Percentage < 78 && wr.Percentage !== 27 && wr.CraftpersonAssignments?.length).slice(0, 2);
+    fieldExamples.forEach((wr, index) => {
+      const person = siteCraft.find((item) => item.id === wr.CraftpersonAssignments?.[0].craftpersonId);
+      if (!person) return;
+      wr.technicianFieldUpdates = [{
+        id: `field-example-${site}-${index}`, wrId: wr.WR_ID, craftpersonId: person.id,
+        craftpersonName: `${person.Name} ${person.LastName}`, createdAt: new Date().toISOString(),
+        reasonCategory: index === 0 ? "NeedAccess" : "PreviousJobRanLate",
+        urgency: index === 0 ? "UrgentBlocked" : "InfoOnly", status: "Open",
+        message: index === 0 ? "Plant room is locked. Please arrange the key at security; I am blocked until access is available." : "My previous work request took longer than expected. I expect to arrive about one hour late.",
+      }];
+    });
     workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === "LJ").forEach((wr) => { wr.QA_AuditStatus = "None"; });
     const qaCandidates = (["PM", "FJ"] as const).map((type) =>
       workRequests.filter((wr) => wr.SiteId === site && wr.WR_Type === type && (wr.Percentage === 78 || wr.Percentage === 100)));

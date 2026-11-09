@@ -75,6 +75,18 @@ const LocationFreezeSchema = z.preprocess((value) => {
   if (entry.endDateTime <= entry.startDateTime) context.addIssue({ code: "custom", path: ["endDateTime"], message: "End must be after start." });
 }));
 const records = z.array(z.record(z.string(), z.unknown()));
+const technicianFieldUpdateSchema = z.object({
+  id: z.string().min(1), wrId: z.string().min(1), craftpersonId: z.string().min(1), craftpersonName: z.string().min(1),
+  createdAt: z.string().min(1),
+  reasonCategory: z.enum(["NeedAccess", "NeedTools", "WaitingForParts", "PreviousJobRanLate", "TechnicalIssue", "FinishedEarlyOrLate", "Other"]),
+  urgency: z.enum(["InfoOnly", "ActionToday", "UrgentBlocked"]), message: z.string().trim().min(1),
+  status: z.enum(["Open", "Acknowledged", "Resolved"]), teamLeaderReply: z.string().optional(),
+  resolvedBy: z.string().optional(), resolvedAt: z.string().optional(),
+});
+const workRequestRecord = z.object({
+  WR_ID: z.string().min(1),
+  technicianFieldUpdates: z.array(technicianFieldUpdateSchema).optional(),
+}).catchall(z.unknown()).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." });
 const stateSchema = z.object({
   sites: z.array(z.string().min(1)),
   buildings: records,
@@ -92,7 +104,7 @@ const stateSchema = z.object({
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),
-  workRequests: records,
+  workRequests: z.array(workRequestRecord),
   deletedWorkRequests: records.optional(),
   users: records,
   tradeRoleMappings: records,

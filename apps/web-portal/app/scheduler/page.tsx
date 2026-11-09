@@ -9,6 +9,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
 import { HourlyTimeline } from "@/components/modules/HourlyTimeline";
+import { FieldAlerts } from "@/components/modules/FieldAlerts";
 import type { TimelineSpotlight } from "@/components/modules/HourlyTimeline";
 import { MultiSelectFilter } from "@/components/common/MultiSelectFilter";
 import { tradeColor } from "@/lib/trade-colors";
@@ -36,7 +37,7 @@ export default function SchedulerPage() {
 
 function SchedulerContent() {
   const searchParams = useSearchParams();
-  const { data, setData } = useCafmStore();
+  const { data, setData, commitSnapshot } = useCafmStore();
   const { permissions } = useActiveUserPermissions();
   const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
@@ -238,6 +239,20 @@ function SchedulerContent() {
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
+    <FieldAlerts requests={siteRequests} canReply={!!permissions?.canScheduleCraftperson} onOpen={setOpen} onShow={(wr, update) => {
+      setIsolateWrId(null); setDisputeMode("all");
+      if (intervalFor(wr, update.craftpersonId)) locate(wr, update.craftpersonId);
+      else showRequest(wr.WR_ID);
+    }} onReply={async (wr, update, reply, status) => {
+      if (!permissions?.canScheduleCraftperson) throw new Error("Permission required to respond to field updates.");
+      const current = data.workRequests.find((item) => item.SiteId === activeSiteId && item.WR_ID === wr.WR_ID);
+      const latest = current?.technicianFieldUpdates?.find((item) => item.id === update.id);
+      if (!current || !latest || JSON.stringify(latest) !== JSON.stringify(update) || latest.status === "Resolved") throw new Error("The field update changed. Reopen it and try again.");
+      const timestamp = new Date().toISOString();
+      const changed = audit({ ...current, technicianFieldUpdates: current.technicianFieldUpdates?.map((item) => item.id === update.id ? { ...item, teamLeaderReply: reply, status, ...(status === "Resolved" ? { resolvedBy: activePerson, resolvedAt: timestamp } : {}) } : item) }, `Team Leader ${activePerson} ${status.toLowerCase()} field update from ${update.craftpersonName}: ${reply}`);
+      await commitSnapshot(data, { ...data, workRequests: data.workRequests.map((item) => item === current ? changed : item) }, { optimistic: true });
+      setNotice(`Field update ${status.toLowerCase()} and synchronized.`);
+    }} />
     {isolateWrId && <div role="status" className="rounded bg-blue-100 p-2">Showing only assignments for WR {isolateWrId} <button className={button} onClick={() => { setIsolateWrId(null); const url = new URL(window.location.href); ["focusWrId", "focusCraftpersonId", "focusStart", "isolateWr"].forEach((key) => url.searchParams.delete(key)); window.history.replaceState(null, "", url); }}>Show All Calendar WRs ✕</button></div>}
     <div className="flex flex-wrap items-center gap-2 rounded border bg-white p-2">
       <button className={button} onClick={() => moveDate(-1)}>◀ Prev</button><button className={button} onClick={() => setDate(calendarDate(new Date()))}>Today</button><button className={button} onClick={() => moveDate(1)}>Next ▶</button>
