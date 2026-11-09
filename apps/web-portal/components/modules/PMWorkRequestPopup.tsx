@@ -289,6 +289,7 @@ export function PMWorkRequestPopup({
   };
 
   const chooseChecklist = (code: string) => {
+    if (!permissions?.canDefineChecklistPM) { window.alert("Only authorized team leaders, engineers or administrators can define a checklist."); return; }
     const selected = data.blueprints.find((item) =>
       item.ChecklistCode === code && (!item.SiteId || item.SiteId === workRequest.SiteId),
     );
@@ -838,7 +839,7 @@ export function PMWorkRequestPopup({
 
           {activeTab === "Checklist - Smart PM" && <section className="space-y-4 rounded border bg-white p-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
-              <label className="block text-sm font-medium">Checklist Standard
+              {permissions?.canDefineChecklistPM ? <label className="block text-sm font-medium">Checklist Standard
                 <select aria-label="Checklist Standard" value={checklistStandard}
                   onChange={(event) => chooseChecklist(event.target.value)}
                   className="mt-1 block min-w-64 rounded border px-3 py-2">
@@ -846,10 +847,10 @@ export function PMWorkRequestPopup({
                   {data.blueprints.filter((item) => !item.SiteId || item.SiteId === workRequest.SiteId)
                     .map((item) => <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.Title}</option>)}
                 </select>
-              </label>
+              </label> : <p className="text-sm">Checklist Standard: {blueprint?.Title ?? checklistStandard ?? "Not selected"}</p>}
               <button type="button" disabled={!checklistSteps.length}
                 onClick={() => setExecutorOpen(true)}
-                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Modify Checklist..</button>
+                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Execute Checklist</button>
             </div>
             <div className="flex flex-wrap gap-2">
               <input aria-label="Filter checklist steps" value={stepFilter}

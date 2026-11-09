@@ -1,21 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
+import type { BaseWorkRequest } from "@cafm/shared-schema";
 import type { PM_StepDefinition } from "./ChecklistExecutor";
-import { TechnicianPromptBuilder } from "../../../web-portal/components/modules/TechnicianPromptBuilder";
-import type { SuggestedStep } from "../../../web-portal/lib/technician-steps";
 
 type Result = NonNullable<BaseWorkRequest["ChecklistResults"]>[number];
 
-export function MobileChecklist({ wr, steps, save, exit, followUp, complete, addSteps, replaceSteps, equipment = [], todoMode = false, timerLabel, timerRunning, navigationRef }: {
+export function MobileChecklist({ wr, steps, save, exit, followUp, complete, todoMode = false, timerLabel, timerRunning, navigationRef }: {
   wr: BaseWorkRequest;
   steps: PM_StepDefinition[];
   save: (results: Result[], baseline: Result[]) => Promise<void>;
   exit: () => void;
   followUp?: () => void;
   complete?: () => void;
-  addSteps?: (title: string) => Promise<void>;
-  replaceSteps?: (steps: SuggestedStep[], scope: string, baseline: BaseWorkRequest) => Promise<void>;
-  equipment?: Equipment[];
   todoMode?: boolean;
   timerLabel: string;
   timerRunning: boolean;
@@ -28,9 +23,6 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [scope, setScope] = useState(wr.roughScopeNotes ?? "");
-  const [title, setTitle] = useState("");
-  const [showBuilder, setShowBuilder] = useState(false);
   const readingRef = useRef(false);
   const latest = useRef(values);
   const saved = useRef(JSON.stringify(values));
@@ -63,7 +55,6 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
     latest.current = updated; setValues(updated);
   };
   const leaveSafely = (destination: () => void, stays = false) => {
-    if (showBuilder) { setError("Close the prompt builder before leaving."); return; }
     if (readingRef.current) { setError("Wait for the photo to finish loading before leaving."); return; }
     setLeaving(true);
     void flush().then(() => { destination(); if (stays) setLeaving(false); }).catch(() => setLeaving(false));
@@ -72,18 +63,6 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
     navigationRef.current = (destination) => { if (!leaving) leaveSafely(destination); };
     return () => { navigationRef.current = null; };
   });
-  const appendStep = async () => {
-    if (!addSteps || readingRef.current) { setError("Wait for the photo to finish loading."); return; }
-    setLeaving(true);
-    try {
-      if (!title.trim()) throw new Error("Enter a step title.");
-      await flush();
-      await addSteps(title.trim());
-      setTitle("");
-      setError("");
-    } catch (problem) { setError(problem instanceof Error ? problem.message : "Could not add steps."); }
-    finally { setLeaving(false); }
-  };
   const renderStep = (step: PM_StepDefinition) => {
     const result = values.find((item) => item.stepId === step.StepId);
     const val = result?.value;
@@ -104,13 +83,11 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, add
   return <div className="space-y-3 p-4 pb-24"><div className="sticky top-0 z-30 space-y-2 rounded border bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><button disabled={leaving} className="text-blue-700" onClick={() => leaveSafely(exit)}>← Exit to WR Overview (Progress Auto-Saved)</button><button disabled={leaving} className="rounded-full bg-emerald-100 px-2 py-1 text-sm text-emerald-800" onClick={() => leaveSafely(exit)}>⏱ {timerLabel}</button></div><div className="flex gap-2"><button aria-pressed={!all} onClick={() => setAll(false)}>Step-by-Step Mode</button><button aria-pressed={all} onClick={() => setAll(true)}>All Steps List Mode</button></div><div className="flex flex-wrap gap-1">{steps.map((step, i) => <button key={step.StepId} className={`rounded-full border px-2 py-1 text-xs ${!all && i === index ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => { setIndex(i); setAll(false); }}>Step {i + 1}{values.some((item) => item.stepId === step.StepId && item.value !== "") ? " ✓" : ""}</button>)}</div><p className="text-xs">{reading ? "Loading photo…" : saving ? "Saving…" : error ? "Progress not saved" : JSON.stringify(values) !== saved.current ? "Changes pending…" : "Progress saved locally"}</p></div>
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}
     {!timerRunning && <p role="alert" className="rounded bg-amber-50 p-2 text-amber-900">Your timer is no longer running. Return to the work request and start timing to continue.</p>}
-    <fieldset disabled={leaving} className="space-y-3">
-    {addSteps && <section className="space-y-2 rounded border bg-white p-3"><h2 className="font-semibold">Technician To-Do Builder</h2><p className="text-xs text-slate-600">Suggestions use a local rule-based parser; review safety and site requirements before work.</p><textarea disabled={showBuilder || !timerRunning} aria-label="Rough scope" className="w-full rounded border p-2" value={scope} onChange={(e) => setScope(e.target.value)} placeholder="Describe the work scope" />{!showBuilder && replaceSteps && <button disabled={!timerRunning} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-50" onClick={() => leaveSafely(() => setShowBuilder(true), true)}>{steps.length ? "🔄 Regenerate Checklist with AI (Replaces Current Steps)" : "✨ AI Generate Technician Steps"}</button>}{showBuilder && replaceSteps && <TechnicianPromptBuilder canGenerate={timerRunning} wr={wr} equipment={equipment} scope={scope} close={() => setShowBuilder(false)} onGenerate={async (suggestions, notes, baseline) => { if (readingRef.current) throw new Error("Wait for the photo to finish loading."); await flush(); await replaceSteps(suggestions, notes, baseline); }} />}<div className="flex gap-2"><input disabled={showBuilder || !timerRunning} aria-label="New step title" className="min-w-0 flex-1 rounded border p-2" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="New step title" /><button disabled={showBuilder || !timerRunning} className="rounded bg-slate-800 px-3 py-2 text-white disabled:opacity-50" onClick={() => void appendStep()}>+ Add Step</button></div></section>}
-    <fieldset disabled={showBuilder || !timerRunning} className="space-y-3">
-      {all ? steps.map(renderStep) : steps[index] ? renderStep(steps[index]) : <p>No checklist steps available.</p>}
-      {!all && <div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex(index - 1)}>← Previous</button><button disabled={index >= steps.length - 1} onClick={() => setIndex(index + 1)}>Next →</button></div>}
-      {complete && (all || index === steps.length - 1) && <button className="rounded bg-blue-800 px-3 py-2 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}
-    </fieldset>
+    {!steps.length && todoMode && <div className="rounded border bg-white p-4"><p>No checklist steps have been defined by the Team Leader for this Work Request.</p><button disabled={leaving} className="mt-2 text-blue-700 underline" onClick={() => leaveSafely(exit)}>← Exit to WR Overview</button></div>}
+    <fieldset disabled={leaving || !timerRunning} className="space-y-3">
+      {all ? steps.map(renderStep) : steps[index] ? renderStep(steps[index]) : !todoMode && <p>No checklist steps available.</p>}
+      {!all && steps.length > 0 && <div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex(index - 1)}>← Previous</button><button disabled={index >= steps.length - 1} onClick={() => setIndex(index + 1)}>Next →</button></div>}
+      {complete && steps.length > 0 && (all || index === steps.length - 1) && <button className="rounded bg-blue-800 px-3 py-2 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}
     </fieldset>
   </div>;
 }

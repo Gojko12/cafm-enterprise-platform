@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { TechnicianPromptBuilder } from "./TechnicianPromptBuilder";
+import { TechnicianStepExecution } from "./TechnicianStepExecution";
 import { technicianBuilderSnapshot } from "@/lib/technician-steps";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -38,22 +39,24 @@ export function TechnicianTodoList({ wr, update }: {
     return { ...current, todoSteps: ordered.map((step, i) => ({ ...step, order: i + 1 })) };
   }, "Reordered technician to-do steps.");
   const saveEdit = () => {
+    if (!allowed) { setError("You no longer have permission to define this checklist."); return; }
     if (!editTitle.trim() || !editId) { setError("A step title is required."); return; }
     update((current) => ({ ...current, todoSteps: (current.todoSteps ?? []).map((step) => step.id === editId ? { ...step, title: editTitle.trim(), instruction: editInstruction.trim() || undefined } : step) }), "Updated technician to-do step.");
     setEditId(null); setError("");
   };
   const renderStep = (step: Step, index: number) => <li key={step.id} className="space-y-2 rounded border border-slate-200 p-3">
-    {editId === step.id ? <div className="space-y-2"><input aria-label="Step title" className="w-full rounded border p-2" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /><textarea aria-label="Step instruction" className="w-full rounded border p-2" value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} /><button className="rounded bg-blue-700 px-3 py-1 text-white" onClick={saveEdit}>Save</button>{" "}<button onClick={() => setEditId(null)}>Cancel</button></div> : <><div className="flex flex-wrap justify-between gap-2"><strong>{index + 1}. {step.title}</strong><span className={step.completed ? "text-emerald-700" : "text-slate-500"}>{step.completed ? "✓ Completed" : "Pending"}</span></div>{step.instruction && <p className="whitespace-pre-wrap">{step.instruction}</p>}</>}
+    {allowed && editId === step.id ? <div className="space-y-2"><input aria-label="Step title" className="w-full rounded border p-2" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /><textarea aria-label="Step instruction" className="w-full rounded border p-2" value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} /><button className="rounded bg-blue-700 px-3 py-1 text-white" onClick={saveEdit}>Save</button>{" "}<button onClick={() => setEditId(null)}>Cancel</button></div> : <><div className="flex flex-wrap justify-between gap-2"><strong>{index + 1}. {step.title}</strong><span className={step.completed ? "text-emerald-700" : "text-slate-500"}>{step.completed ? "✓ Completed" : "Pending"}</span></div>{step.instruction && <p className="whitespace-pre-wrap">{step.instruction}</p>}</>}
     {step.completedBy && <p className="text-xs text-slate-500">Completed by {step.completedBy}{step.completedAt ? ` · ${new Date(step.completedAt).toLocaleString()}` : ""}{step.isFavourable !== undefined ? ` · ${step.isFavourable ? "Favourable" : "Unfavourable"}` : ""}</p>}
     {step.technicianComment && <p>Technician: {step.technicianComment}</p>}
     {!!step.photoUrls?.length && <div className="flex flex-wrap gap-2">{step.photoUrls.map((url, i) => <a key={`${i}-${url}`} href={url} target="_blank" rel="noreferrer" className="text-blue-700 underline">Photo {i + 1}</a>)}</div>}
+    <TechnicianStepExecution step={step} actor={activePerson} actorRole={currentRole} update={update} />
     {allowed && editId !== step.id && <div className="flex gap-3 text-xs text-blue-700"><button onClick={() => { setEditId(step.id); setEditTitle(step.title); setEditInstruction(step.instruction ?? ""); }}>Edit</button><button disabled={index === 0} onClick={() => reorder(step.id, -1)}>↑ Move up</button><button disabled={index === steps.length - 1} onClick={() => reorder(step.id, 1)}>↓ Move down</button><button className="text-rose-700" onClick={() => { if (window.confirm("Delete this step and its recorded completion details?")) update((current) => ({ ...current, todoSteps: (current.todoSteps ?? []).filter((item) => item.id !== step.id) }), `Deleted technician step: ${step.title}`); }}>Delete</button></div>}
   </li>;
   return <section className="space-y-4 rounded border bg-white p-4 text-sm">
     <h3 className="text-lg font-semibold">Technician To-Do &amp; AI Task List</h3>
-    <p className="text-slate-600">Generated suggestions use a local text parser, not an AI service. Review all steps and site safety requirements before work.</p>
+    {allowed && <p className="text-slate-600">Generated suggestions use a local text parser, not an AI service. Review all steps and site safety requirements before work.</p>}
     {error && <p role="alert" className="text-rose-700">{error}</p>}
-    <label className="block font-medium">Rough scope<textarea disabled={!allowed} className="mt-1 block w-full rounded border p-2 disabled:bg-slate-50" value={scope} onChange={(e) => setScope(e.target.value)} onBlur={() => { if (allowed && scope !== (wr.roughScopeNotes ?? "")) update((current) => ({ ...current, roughScopeNotes: scope }), "Updated technician work scope."); }} /></label>
+    {allowed ? <label className="block font-medium">Rough scope<textarea className="mt-1 block w-full rounded border p-2" value={scope} onChange={(e) => setScope(e.target.value)} onBlur={() => { if (allowed && scope !== (wr.roughScopeNotes ?? "")) update((current) => ({ ...current, roughScopeNotes: scope }), "Updated technician work scope."); }} /></label> : wr.roughScopeNotes && <p>Scope: {wr.roughScopeNotes}</p>}
     {allowed && !generatorBaseline && <button className="rounded bg-blue-700 px-3 py-2 font-semibold text-white" onClick={() => setGeneratorBaseline({ ...wr, roughScopeNotes: scope !== (wr.roughScopeNotes ?? "") ? scope : wr.roughScopeNotes })}>{steps.length ? "🔄 Regenerate Checklist with AI (Replaces Current Steps)" : "✨ AI Generate Technician Steps"}</button>}
     {allowed && generatorBaseline && <TechnicianPromptBuilder wr={generatorBaseline} equipment={data.equipment} scope={scope} close={() => setGeneratorBaseline(null)} onGenerate={async (suggestions, notes) => {
       const current = data.workRequests.find((item) => item.SiteId === wr.SiteId && item.WR_ID === wr.WR_ID);

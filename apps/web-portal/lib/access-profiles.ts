@@ -33,7 +33,7 @@ export function defaultRoleDefinitions(): RoleDefinition[] {
     { id: "team-leader", name: "Team Leader", description: "Supervision and dispatch.", badgeColor: "blue", baseRoleType: "TeamLeader", permissions: permissionsForPreset("TeamLeader") },
     { id: "qa-inspector", name: "QA Inspector", description: "Technical inspection.", badgeColor: "emerald", baseRoleType: "QAInspector", permissions: permissionsForPreset("QAInspector") },
     { id: "pm-engineer", name: "PM & Asset Engineer", description: "Preventive maintenance engineering.", badgeColor: "cyan", baseRoleType: "TechnicalOfficer", permissions: permissionsForPreset("PMEngineer") },
-    { id: "senior-craft", name: "Senior Craftperson", description: "Field work and task planning.", badgeColor: "rose", baseRoleType: "Craftperson", permissions: { ...permissionsForPreset("Craftperson"), canDefineChecklistFJ: true, canDefineChecklistLJ: true } },
+    { id: "senior-craft", name: "Senior Craftperson", description: "Experienced field execution.", badgeColor: "rose", baseRoleType: "Craftperson", permissions: permissionsForPreset("Craftperson") },
     { id: "craftperson", name: "Craftperson", description: "Field execution.", badgeColor: "slate", baseRoleType: "Craftperson", permissions: permissionsForPreset("Craftperson") },
   ];
 }
@@ -43,11 +43,20 @@ const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades
   "canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons", "canScheduleCraftperson",
   "canOverwriteLaborTime", "canManageShiftsAndLeaves", "canManageLocationFreezes",
 ];
+export const checklistDefinitionFlags = ["canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ"] as const;
+export function canRoleDefineChecklists(role: RoleDefinition): boolean {
+  return ["TeamLeader", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
+}
+export function normalizeChecklistRole(role: RoleDefinition): RoleDefinition {
+  if (canRoleDefineChecklists(role)) return role;
+  return { ...role, permissions: { ...role.permissions, canDefineChecklistPM: false, canDefineChecklistFJ: false, canDefineChecklistLJ: false } };
+}
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {
   const result = permissionsForPreset("Craftperson");
   for (const key of permissionFlags) result[key] = false;
   result.auditTrades = []; result.auditWRTypes = [];
-  for (const role of definitions.filter((item) => profile.assignedRoleIds?.includes(item.id))) {
+  for (const original of definitions.filter((item) => profile.assignedRoleIds?.includes(item.id))) {
+    const role = normalizeChecklistRole(original);
     for (const key of permissionFlags) result[key] ||= role.permissions[key];
     result.auditTrades = [...new Set([...result.auditTrades, ...role.permissions.auditTrades])];
     result.auditWRTypes = [...new Set([...result.auditWRTypes, ...role.permissions.auditWRTypes])];
@@ -56,14 +65,14 @@ export function resolveEffectivePermissions(profile: UserAccessProfile, definiti
 }
 
 export function migrateRoles(profiles: UserAccessProfile[], existing?: RoleDefinition[]) {
-  const roles = existing ? [...existing] : defaultRoleDefinitions();
+  const roles = (existing ?? defaultRoleDefinitions()).map(normalizeChecklistRole);
   const next = profiles.filter(isPersonProfile).map((original) => {
     const cleanName = (value: string) => value.replace(/\s*\((?:ESTEC|ESRIN) Admin\)$/i, "");
     const profile = { ...original, personName: cleanName(original.personName), fullName: cleanName(original.fullName) };
     if (profile.assignedRoleIds) return { ...profile, permissions: resolveEffectivePermissions(profile, roles) };
     const same = roles.find((role) => role.baseRoleType === profile.primaryRole && JSON.stringify(role.permissions) === JSON.stringify(profile.permissions));
     const id = same?.id ?? `legacy-${profile.id}`;
-    if (!same) roles.push({ id, name: `${profile.fullName} — Existing permissions`, description: "Preserved from the previous access profile.", badgeColor: "slate", baseRoleType: profile.primaryRole, isCustomVariant: true, permissions: profile.permissions });
+    if (!same) roles.push(normalizeChecklistRole({ id, name: `${profile.fullName} — Existing permissions`, description: "Preserved from the previous access profile.", badgeColor: "slate", baseRoleType: profile.primaryRole, isCustomVariant: true, permissions: profile.permissions }));
     const updated = { ...profile, assignedRoleIds: [id] };
     return { ...updated, permissions: resolveEffectivePermissions(updated, roles) };
   });

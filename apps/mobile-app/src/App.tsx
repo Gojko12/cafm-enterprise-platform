@@ -30,7 +30,6 @@ import { ExecutionHub } from "./components/ExecutionHub";
 import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
 import { FieldUpdateModal } from "./components/FieldUpdateModal";
 import { fieldReasonLabels, urgencyLabels } from "../../web-portal/lib/field-updates";
-import { technicianBuilderSnapshot } from "../../web-portal/lib/technician-steps";
 import { stable } from "./lib/portal-sync";
 
 type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers";
@@ -428,17 +427,7 @@ export default function App() {
           const todo = selectedWR.todoSteps ?? [];
           const todoSteps: PM_StepDefinition[] = [...todo].sort((a, b) => a.order - b.order).map((step) => ({ StepId: step.id, StepNumber: step.order, StepTitle: step.title, Instruction: step.instruction, InputType: "Boolean", favourableBoolean: true, RequiresPhotoOnFailure: false, RequiresCommentOnFailure: false }));
           const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? "true" : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
-          const canDefineSteps = selectedWR.WR_Type === "FJ" ? access?.permissions.canDefineChecklistFJ : access?.permissions.canDefineChecklistLJ;
-          return <MobileChecklist {...checklistTimerProps} key={`${selectedWR.WR_ID}:${todo.map((step) => step.id).join(",")}`} wr={todoWR} steps={todoSteps} equipment={siteEquipment} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode addSteps={canDefineSteps ? async (title) => saveSelected((current) => {
-            if (!(current.timeSessions ?? []).some((session) => session.craftpersonId === currentTechnicianId && !session.endedAt)) throw new Error("Start timing before adding steps.");
-            const existing = current.todoSteps ?? [];
-            const start = Math.max(0, ...existing.map((step) => step.order));
-            return { ...current, todoSteps: [...existing, { id: crypto.randomUUID(), order: start + 1, title, completed: false }] };
-          }, "Added a technician to-do step.") : undefined} replaceSteps={canDefineSteps ? async (suggestions, scope, baseline) => saveSelected((current) => {
-            if (!(current.timeSessions ?? []).some((session) => session.craftpersonId === currentTechnicianId && !session.endedAt)) throw new Error("Start timing before replacing the checklist.");
-            if (technicianBuilderSnapshot(current) !== technicianBuilderSnapshot(baseline)) throw new Error("The request or checklist changed while the builder was open. Reopen it before replacing steps.");
-            return { ...current, roughScopeNotes: scope, todoSteps: suggestions.map((step, index) => ({ ...step, id: crypto.randomUUID(), order: index + 1, completed: false })) };
-          }, `Regenerated technician checklist with ${suggestions.length} local rule-based steps, replacing ${(baseline.todoSteps ?? []).length} steps.`) : undefined} save={async (results, baseline) => saveSelected((current) => {
+          return <MobileChecklist {...checklistTimerProps} key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode save={async (results, baseline) => saveSelected((current) => {
             const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
             if (changed.some((result) => !(current.todoSteps ?? []).some((step) => step.id === result.stepId))) throw new Error("A technician step was removed elsewhere. Your edits have not been saved.");
             return { ...current, todoSteps: (current.todoSteps ?? []).map((step) => {
