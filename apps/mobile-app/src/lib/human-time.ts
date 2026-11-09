@@ -25,6 +25,15 @@ export function formatPlannedRange(startIso: string, endIso: string, now: Date =
     return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(value.getFullYear() === now.getFullYear() ? {} : { year: "numeric" as const }) }).format(value);
   };
   const first = day(start);
-  if (dayKey(start) === dayKey(end)) return `${first ? `${first} ? ` : ""}${time(start)} ? ${time(end)} (${hours}h)`;
-  return `${first || "Today"}, ${time(start)} ? ${day(end) || "Today"}, ${time(end)} (${hours}h)`;
+  if (dayKey(start) === dayKey(end)) return `${first ? `${first} \u00b7 ` : ""}${time(start)} \u2013 ${time(end)} (${hours}h)`;
+  return `${first || "Today"}, ${time(start)} \u2013 ${day(end) || "Today"}, ${time(end)} (${hours}h)`;
+}
+
+export function formatShortDateTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const value = new Date(iso);
+  if (!Number.isFinite(value.getTime())) return iso;
+  const date = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(value);
+  const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(value);
+  return `${date}, ${time}`;
 }

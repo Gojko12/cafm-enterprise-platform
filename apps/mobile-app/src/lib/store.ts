@@ -7,6 +7,7 @@ export interface FilterCriteria {
   roomCode?: string;
   wrId?: string;
   trade?: string;
+  selectedSubstatuses?: number[];
   showOnlyWithChecklist?: boolean;
   assignedDateFrom?: string;
   assignedDateTo?: string;
@@ -128,6 +129,11 @@ export const useMobileStore = create<MobileStore>((set) => ({
  */
 export function applyFilters(wrs: BaseWorkRequest[], filters: FilterCriteria): BaseWorkRequest[] {
   let result = wrs;
+
+  if (filters.selectedSubstatuses?.length) {
+    const allowed = new Set(filters.selectedSubstatuses);
+    result = result.filter((wr) => allowed.has(Number(wr.Percentage)));
+  }
 
   if (filters.bl_id) {
     result = result.filter((wr) => wr.bl_id === filters.bl_id);

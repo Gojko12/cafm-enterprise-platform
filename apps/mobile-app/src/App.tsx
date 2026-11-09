@@ -26,6 +26,7 @@ import {
 import type { LocationFreeze, UserAccessProfile, TechnicianFieldUpdate } from "@cafm/shared-schema";
 import { z } from "zod";
 import { applyFilters, useFilterStore } from "./lib/store";
+import { classifyEquipmentWRs } from "./lib/equipment-wrs";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
 import { ExecutionHub } from "./components/ExecutionHub";
@@ -70,6 +71,7 @@ export default function App() {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
   const [openCompletion, setOpenCompletion] = useState(false);
+  const [checklistStart, setChecklistStart] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [loadedSite, setLoadedSite] = useState<SiteId | null>(null);
   const [timerStorageError, setTimerStorageError] = useState("");
@@ -116,6 +118,45 @@ export default function App() {
   const filters = useFilterStore((state) => state.filters);
   const setFilter = useFilterStore((state) => state.setFilter);
   const [appliedFilters, setAppliedFilters] = useState(filters);
+  const [resetSignal, setResetSignal] = useState(0);
+  const [pctOpen, setPctOpen] = useState(false);
+  const substatusInitSite = useRef<string | null>(null);
+  const percentCounts = new Map<number, number>();
+  for (const wr of siteWRs) { const value = Number(wr.Percentage); if (Number.isFinite(value)) percentCounts.set(value, (percentCounts.get(value) ?? 0) + 1); }
+  const substatusOptions = [...percentCounts.entries()].sort(([a], [b]) => a - b).map(([value, count]) => ({ value, count }));
+  const existingPercents = substatusOptions.map((option) => option.value);
+  const preferredPercents = existingPercents.filter((value) => value === 50 || value === 55);
+  const defaultSubstatuses = preferredPercents.length ? preferredPercents : existingPercents.filter((value) => value < 78);
+  const defaultKey = defaultSubstatuses.join(",");
+  useEffect(() => {
+    if (loadedSite !== activeSiteId || !siteWRs.length || substatusInitSite.current === activeSiteId) return;
+    substatusInitSite.current = activeSiteId;
+    const defaults = defaultKey ? defaultKey.split(",").map(Number) : [];
+    useFilterStore.getState().setFilter("selectedSubstatuses", defaults);
+    setAppliedFilters((current) => ({ ...current, selectedSubstatuses: defaults }));
+  }, [loadedSite, activeSiteId, siteWRs.length, defaultKey]);
+  const handleResetFilters = () => {
+    const defaults = defaultKey ? defaultKey.split(",").map(Number) : [];
+    const base: FilterCriteria = { showOnlyWithChecklist: false, selectedEquipmentCodes: new Set(), selectedSubstatuses: defaults };
+    useFilterStore.setState({ filters: base });
+    setAppliedFilters(base);
+    setPctOpen(false);
+    setResetSignal((value) => value + 1);
+  };
+  const setPercents = (values: number[]) => {
+    useFilterStore.getState().setFilter("selectedSubstatuses", values);
+    setAppliedFilters((current) => ({ ...current, selectedSubstatuses: values }));
+  };
+  const appliedPercents = appliedFilters.selectedSubstatuses ?? [];
+  const percentChip = existingPercents.length ? (
+    <>
+      <button type="button" aria-expanded={pctOpen} onClick={() => setPctOpen((open) => !open)} className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">{appliedPercents.length ? appliedPercents.map((value) => `${value}%`).join(", ") : "All %"} {"\u25be"}</button>
+      {pctOpen && <>
+        <button type="button" onClick={() => setPercents([])} className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs ${appliedPercents.length === 0 ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>All %</button>
+        {substatusOptions.map((option) => <button type="button" key={option.value} onClick={() => setPercents(appliedPercents.includes(option.value) ? appliedPercents.filter((value) => value !== option.value) : [...appliedPercents, option.value].sort((a, b) => a - b))} className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs ${appliedPercents.includes(option.value) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>{option.value}% ({option.count})</button>)}
+      </>}
+    </>
+  ) : null;
 
   const refreshData = useCallback(async () => {
     const db = await getDB();
@@ -274,7 +315,8 @@ export default function App() {
   };
 
   const handleScanEquipment = (equipmentCode: string) => {
-    const eq = equipment.find((e) => e.EquipmentCode === equipmentCode);
+    const wanted = equipmentCode.trim().toLowerCase();
+    const eq = [...equipment, ...siteEquipment].find((e) => e.EquipmentCode.trim().toLowerCase() === wanted);
     if (eq) {
       setSelectedEquipment(eq);
       setCurrentView("inspection");
@@ -472,10 +514,10 @@ export default function App() {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
       case "hub":
-        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
-        if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
+        if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} startStep={checklistStart} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
           const now = new Date().toISOString();
           const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
           for (const result of changed) {
@@ -487,7 +529,7 @@ export default function App() {
           const todo = selectedWR.todoSteps ?? [];
           const todoSteps: PM_StepDefinition[] = [...todo].sort((a, b) => a.order - b.order).map((step) => ({ StepId: step.id, StepNumber: step.order, StepTitle: step.title, Instruction: step.instruction, InputType: "Boolean", favourableBoolean: true, RequiresPhotoOnFailure: false, RequiresCommentOnFailure: false }));
           const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? "true" : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
-          return <MobileChecklist {...checklistTimerProps} key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode save={async (results, baseline) => saveSelected((current) => {
+          return <MobileChecklist {...checklistTimerProps} startStep={checklistStart} key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode save={async (results, baseline) => saveSelected((current) => {
             const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
             if (changed.some((result) => !(current.todoSteps ?? []).some((step) => step.id === result.stepId))) throw new Error("A technician step was removed elsewhere. Your edits have not been saved.");
             return { ...current, todoSteps: (current.todoSteps ?? []).map((step) => {
@@ -514,8 +556,13 @@ export default function App() {
         return selectedEquipment ? (
           <EquipmentInspectionView
             equipment={selectedEquipment}
-            activeWRs={[]}
-            historicalWRs={[]}
+            activeWRs={classifyEquipmentWRs(selectedEquipment, siteWRs).activeWRs}
+            historicalWRs={classifyEquipmentWRs(selectedEquipment, siteWRs).historicalWRs}
+            onOpenWR={(wrId) => handleOpenWR(wrId)}
+            onStartPM={(() => {
+              const pm = classifyEquipmentWRs(selectedEquipment, siteWRs).activeWRs.find((wr) => wr.WR_Type === "PM");
+              return pm ? () => handleOpenWR(pm.WR_ID) : undefined;
+            })()}
             buildings={buildings}
             floors={floors}
             rooms={rooms}
@@ -558,7 +605,12 @@ export default function App() {
                 });
               }}
               onApplyFilters={handleApplyFilters}
+              onResetFilters={handleResetFilters}
+              substatusOptions={substatusOptions}
+              defaultSubstatuses={defaultSubstatuses}
             />}
+              substatusChip={percentChip}
+              resetSignal={resetSignal}
               myWRs={applyFilters(myWRs, appliedFilters)}
               unassignedWRs={applyFilters(unassignedWRs, appliedFilters)}
               onClaimWR={access?.permissions.canClaimUnassignedWR ? handleClaimWR : undefined}

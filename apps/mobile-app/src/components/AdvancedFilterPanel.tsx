@@ -12,6 +12,9 @@ interface AdvancedFilterPanelProps {
   currentFilters: FilterCriteria;
   onFiltersChange: (filters: FilterCriteria) => void;
   onApplyFilters: () => void;
+  onResetFilters: () => void;
+  substatusOptions: { value: number; count: number }[];
+  defaultSubstatuses: number[];
   resultCount: number;
 }
 
@@ -24,6 +27,9 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   currentFilters,
   onFiltersChange,
   onApplyFilters,
+  onResetFilters,
+  substatusOptions,
+  defaultSubstatuses,
   resultCount,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -53,12 +59,12 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
     [rooms, currentFilters.bl_id, currentFilters.levelName, currentFilters.roomCode],
   );
 
-  const handleResetFilters = () => {
-    onFiltersChange({ showOnlyWithChecklist: false, selectedEquipmentCodes: new Set() });
-    onApplyFilters();
-  };
+  const handleResetFilters = () => onResetFilters();
   const set = (patch: Partial<FilterCriteria>) => onFiltersChange({ ...currentFilters, ...patch });
-  const activeCount = Object.values(currentFilters).filter((value) => (value instanceof Set ? value.size > 0 : Boolean(value))).length;
+  const selectedPercents = currentFilters.selectedSubstatuses ?? [];
+  const isDefaultSubstatus = selectedPercents.length === defaultSubstatuses.length && defaultSubstatuses.every((value) => selectedPercents.includes(value));
+  const togglePercent = (value: number) => set({ selectedSubstatuses: selectedPercents.includes(value) ? selectedPercents.filter((item) => item !== value) : [...selectedPercents, value].sort((a, b) => a - b) });
+  const activeCount = Object.entries(currentFilters).filter(([key, value]) => key === "selectedSubstatuses" ? !isDefaultSubstatus : (value instanceof Set ? value.size > 0 : Boolean(value))).length;
   const otherCount = [currentFilters.startDateFrom, currentFilters.startDateTo, currentFilters.marginDateFrom, currentFilters.marginDateTo, currentFilters.dueDateFrom, currentFilters.dueDateTo].filter(Boolean).length;
   const otherFields = {
     start: ["startDateFrom", "startDateTo"],
@@ -104,6 +110,14 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
                 onLocationChange={({ building, floor, room }) => set({ bl_id: building?.bl_id, levelName: floor?.LevelName, roomCode: room?.RoomCode })}
                 onEquipmentChange={(codes) => set({ selectedEquipmentCodes: codes })}
               />
+
+              <div>
+                <span className={labelClass}>Substatus (%)</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button type="button" aria-pressed={selectedPercents.length === 0} onClick={() => set({ selectedSubstatuses: [] })} className={`rounded-full border px-2.5 py-1 text-xs font-medium ${selectedPercents.length === 0 ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>All %</button>
+                  {substatusOptions.map((option) => <button key={option.value} type="button" aria-pressed={selectedPercents.includes(option.value)} onClick={() => togglePercent(option.value)} className={`rounded-full border px-2.5 py-1 text-xs font-medium ${selectedPercents.includes(option.value) ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{option.value}% ({option.count})</button>)}
+                </div>
+              </div>
 
               <div className="grid grid-cols-2 gap-1.5">
                 <div>

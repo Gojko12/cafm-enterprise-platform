@@ -97,11 +97,17 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
     if (!signal?.aborted) window.dispatchEvent(new CustomEvent("cafm-sync-connection", { detail: false }));
     throw new Error(`Could not reach the CAFM sync API. Changes remain on this device. ${error instanceof Error ? error.message : ""}`);
   }
-  const data: unknown = await response.json();
+  const raw = await response.text();
+  let data: unknown = null;
+  if (raw.trim()) {
+    try { data = JSON.parse(raw); }
+    catch { throw new SyncRequestError(`Synchronization failed: the portal returned an unreadable response (HTTP ${response.status}).`, response.status); }
+  }
   if (!response.ok) {
     const message = data && typeof data === "object" && "error" in data ? String(data.error) : `HTTP ${response.status}`;
     throw new SyncRequestError(`Synchronization failed: ${message}`, response.status);
   }
+  if (data === null) throw new SyncRequestError(`Synchronization failed: the portal returned an empty response (HTTP ${response.status}).`, response.status);
   const parsed = responseSchema.safeParse(data);
   if (!parsed.success) throw new Error("The portal returned invalid synchronization data.");
   return parsed.data;

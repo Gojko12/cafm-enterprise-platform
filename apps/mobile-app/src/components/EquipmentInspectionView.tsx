@@ -12,6 +12,7 @@ interface EquipmentInspectionViewProps {
   rooms?: Room[];
   equipmentList?: Equipment[];
   onStartPM?: () => void;
+  onOpenWR?: (wrId: string) => void;
   onCreateFJ?: (data: {
     equipmentCode: string;
     bl_id: string;
@@ -41,6 +42,7 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
   rooms = [],
   equipmentList = [],
   onStartPM,
+  onOpenWR,
   onCreateFJ,
   onCreateLJ,
   onLogTechnicalAudit,
@@ -248,12 +250,14 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
             <p className="text-xs text-gray-600">No active work requests</p>
           ) : (
             <div className="space-y-2">
-              {activeWRs.slice(0, 5).map((wr) => (
-                <div key={wr.WR_ID} className="bg-blue-50 border border-blue-200 rounded p-2">
-                  <div className="text-xs font-medium text-gray-900">{wr.WR_ID}</div>
-                  <div className="text-xs text-gray-600">{wr.Description}</div>
-                  <div className="text-xs text-blue-600 mt-1">{wr.Percentage || 50}%</div>
-                </div>
+              {activeWRs.slice(0, 20).map((wr) => (
+                <button type="button" key={wr.WR_ID} onClick={() => onOpenWR?.(wr.WR_ID)} className="w-full rounded-lg border border-blue-200 bg-blue-50 p-2 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-gray-900">{wr.WR_ID} <span className="font-normal text-gray-500">· {wr.WR_Type}</span></span>
+                    <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-semibold text-white">{wr.Percentage ?? 50}%</span>
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-gray-600">{wr.Description}</div>
+                </button>
               ))}
             </div>
           )}
@@ -268,11 +272,14 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
             <p className="text-xs text-gray-600">No historical work requests</p>
           ) : (
             <div className="space-y-2 max-h-40 overflow-y-auto">
-              {historicalWRs.slice(0, 10).map((wr) => (
-                <div key={wr.WR_ID} className="bg-gray-50 border border-gray-200 rounded p-2">
-                  <div className="text-xs font-medium text-gray-900">{wr.WR_ID}</div>
-                  <div className="text-xs text-gray-600 truncate">{wr.Description}</div>
-                </div>
+              {historicalWRs.slice(0, 30).map((wr) => (
+                <button type="button" key={wr.WR_ID} onClick={() => onOpenWR?.(wr.WR_ID)} className="w-full rounded-lg border border-gray-200 bg-gray-50 p-2 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-gray-900">{wr.WR_ID} <span className="font-normal text-gray-500">· {wr.WR_Type}</span></span>
+                    <span className="rounded-full bg-gray-500 px-2 py-0.5 text-[11px] font-semibold text-white">{wr.Percentage ?? 100}%</span>
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-gray-600">{wr.Description}</div>
+                </button>
               ))}
             </div>
           )}
@@ -282,7 +289,7 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
       {/* Action Buttons */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 space-y-2 mobile-equipment-actions">
         <button
-          onClick={onStartPM}
+          onClick={onStartPM ?? (() => notify("No active PM on this asset."))}
           className="w-full px-4 py-3 bg-blue-500 text-white font-medium rounded hover:bg-blue-600 transition-colors text-sm"
         >
           Start Assigned PM
