@@ -13,3 +13,5 @@ install.log
 .secrets/
 .env
 .env.*
+apps/web-portal/public/mobile/
+apps/web-portal/.next-cloud/

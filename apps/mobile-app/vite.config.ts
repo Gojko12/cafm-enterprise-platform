@@ -22,10 +22,11 @@ const proxy: Record<string, ProxyOptions> = {
 };
 
 export default defineConfig({
+  base: process.env.VITE_BASE_PATH || "/",
   plugins: [react(), {
     name: "cafm-offline-assets",
     generateBundle(_, bundle) {
-      const assets = Object.keys(bundle).filter((name) => /\.(js|css|woff2?|ttf|svg|png|webp)$/.test(name)).map((name) => `/${name}`);
+      const assets = Object.keys(bundle).filter((name) => /\.(js|css|woff2?|ttf|svg|png|webp)$/.test(name));
       this.emitFile({ type: "asset", fileName: "offline-assets.json", source: JSON.stringify(assets) });
     },
   }],

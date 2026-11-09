@@ -1,13 +1,15 @@
-const CACHE = "cafm-mobile-shell-v1";
-const CORE = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
+const BASE = new URL("./", self.location.href);
+const CACHE = `cafm-mobile-shell-v2:${BASE.pathname}`;
+const CORE = ["./", "index.html", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"].map((item) => new URL(item, BASE).href);
+const INDEX = new URL("index.html", BASE).href;
 
 async function precache() {
   const cache = await caches.open(CACHE);
-  const response = await fetch("/offline-assets.json", { cache: "no-store" });
+  const response = await fetch(new URL("offline-assets.json", BASE), { cache: "no-store" });
   if (!response.ok) throw new Error("Offline asset manifest unavailable");
   const assets = await response.json();
-  if (!Array.isArray(assets) || !assets.every((url) => typeof url === "string" && url.startsWith("/") && !url.startsWith("//"))) throw new Error("Invalid offline asset manifest");
-  await cache.addAll([...CORE, ...assets]);
+  if (!Array.isArray(assets) || !assets.every((url) => typeof url === "string" && !url.startsWith("/") && !url.includes("..") && new URL(url, BASE).origin === BASE.origin && new URL(url, BASE).pathname.startsWith(BASE.pathname))) throw new Error("Invalid offline asset manifest");
+  await cache.addAll([...CORE, ...assets.map((item) => new URL(item, BASE).href)]);
 }
 
 self.addEventListener("install", (event) => {
@@ -19,7 +21,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
-  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname === "/api" || url.pathname.startsWith("/api/")) return;
+  if (request.method !== "GET" || url.origin !== self.location.origin || !url.pathname.startsWith(BASE.pathname) || url.pathname === "/api" || url.pathname.startsWith("/api/") || url.pathname.startsWith(`${BASE.pathname}api/`)) return;
   if (request.mode !== "navigate" && !["script", "style", "font", "image"].includes(request.destination)) return;
   if (request.mode === "navigate") event.waitUntil(precache().catch((error) => console.error("Could not update offline shell", error)));
   event.respondWith((async () => {
@@ -27,15 +29,15 @@ self.addEventListener("fetch", (event) => {
     try {
       const response = await fetch(request);
       if (response.status >= 500) {
-        const cached = await cache.match(request.mode === "navigate" ? "/index.html" : request);
+        const cached = await cache.match(request.mode === "navigate" ? INDEX : request);
         if (cached) return cached;
       }
       if (response.ok && response.type === "basic") {
-        await cache.put(request.mode === "navigate" ? "/index.html" : request, response.clone());
+        await cache.put(request.mode === "navigate" ? INDEX : request, response.clone());
       }
       return response;
     } catch (error) {
-      const cached = await cache.match(request.mode === "navigate" ? "/index.html" : request);
+      const cached = await cache.match(request.mode === "navigate" ? INDEX : request);
       if (cached) return cached;
       throw error;
     }

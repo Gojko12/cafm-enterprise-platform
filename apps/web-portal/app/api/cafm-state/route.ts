@@ -1,5 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -13,10 +15,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const allowedOrigins = new Set(["http://localhost:3000", "http://localhost:3001"]);
+function allowedOrigin(request: Request, origin: string) {
+  return allowedOrigins.has(origin) || origin === new URL(request.url).origin;
+}
 function cors(request: Request) {
   const origin = request.headers.get("origin");
   return {
-    ...(origin && allowedOrigins.has(origin) ? { "Access-Control-Allow-Origin": origin } : {}),
+    ...(origin && allowedOrigin(request, origin) ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CAFM-Site-Id, X-CAFM-Person",
     "Cache-Control": "no-store",
@@ -152,9 +157,12 @@ const envelopeSchema = z.object({ revision: z.number().int().positive(), state: 
 const databaseSchema = z.object({
   sites: z.partialRecord(siteSchema, envelopeSchema),
 });
-const directory = path.join(process.cwd(), ".data");
-const filename = path.join(directory, "cafm-db.json");
-const lockFile = path.join(directory, "cafm-db.lock");
+type Database = z.infer<typeof databaseSchema>;
+type Backend = { kind: "supabase"; url: string; key: string } | { kind: "disk" | "temporary"; directory: string; filename: string; lockFile: string };
+type StoredDatabase = { database: Database; version: string | null };
+declare global {
+  var __CAFM_CLOUD_STATE__: Database | undefined;
+}
 const maxBytes = 32 * 1024 * 1024;
 
 function reply(request: Request, body: unknown, status = 200) {
@@ -163,7 +171,7 @@ function reply(request: Request, body: unknown, status = 200) {
 
 function scope(request: Request) {
   const origin = request.headers.get("origin");
-  if (origin && !allowedOrigins.has(origin)) return null;
+  if (origin && !allowedOrigin(request, origin)) return null;
   const header = request.headers.get("x-cafm-site-id");
   const query = new URL(request.url).searchParams.get("siteId");
   if (header && query && header !== query) return null;
@@ -208,18 +216,66 @@ function authorize(request: Request) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-async function load() {
+async function backend(): Promise<Backend> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (url || key) {
+    if (!url || !key) throw new Error("Both SUPABASE_URL and a Supabase key are required.");
+    const parsedUrl = new URL(url);
+    if (parsedUrl.protocol !== "https:" && parsedUrl.hostname !== "localhost" && parsedUrl.hostname !== "127.0.0.1") throw new Error("Supabase URL must use HTTPS.");
+    return { kind: "supabase", url: `${url.replace(/\/+$/, "")}/rest/v1/cafm_state`, key };
+  }
+  const directory = path.join(process.cwd(), ".data");
   try {
-    return databaseSchema.parse(JSON.parse(await readFile(filename, "utf8")));
+    if (process.env.VERCEL) throw Object.assign(new Error("Serverless deployment"), { code: "EROFS" });
+    await mkdir(directory, { recursive: true });
+    await access(directory, constants.W_OK);
+    return { kind: "disk", directory, filename: path.join(directory, "cafm-db.json"), lockFile: path.join(directory, "cafm-db.lock") };
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (code !== "EROFS" && code !== "EACCES" && code !== "EPERM") throw error;
+    try { await access(path.join(directory, "cafm-db.json")); throw new Error("Existing CAFM database is not writable; refusing to switch storage."); }
+    catch (existingError) {
+      if (!(existingError instanceof Error && "code" in existingError && existingError.code === "ENOENT")) throw existingError;
+    }
+    const temporaryDirectory = path.join(os.tmpdir(), "cafm-state");
+    await mkdir(temporaryDirectory, { recursive: true });
+    console.warn("CAFM state is using temporary, instance-local storage; it is not durable or shared between instances.");
+    return { kind: "temporary", directory: temporaryDirectory, filename: path.join(temporaryDirectory, "cafm-db.json"), lockFile: path.join(temporaryDirectory, "cafm-db.lock") };
+  }
+}
+
+async function supabaseRequest(storage: Extract<Backend, { kind: "supabase" }>, query: string, init: RequestInit = {}) {
+  const response = await fetch(`${storage.url}${query}`, {
+    ...init,
+    headers: { apikey: storage.key, Authorization: `Bearer ${storage.key}`, "Content-Type": "application/json", Prefer: "return=representation", ...init.headers },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    if (response.status === 409) return null;
+    throw new Error(`Supabase CAFM state request failed (${response.status}); check table, permissions, and configuration.`);
+  }
+  return response.json() as Promise<unknown>;
+}
+
+async function load(storage: Backend): Promise<StoredDatabase> {
+  if (storage.kind === "supabase") {
+    const result = await supabaseRequest(storage, "?id=eq.default&select=payload,version");
+    const rows = z.array(z.object({ payload: databaseSchema, version: z.string().uuid() })).parse(result);
+    if (rows.length > 1) throw new Error("Supabase CAFM state contains duplicate rows.");
+    return rows.length ? { database: rows[0].payload, version: rows[0].version } : { database: { sites: {} }, version: null };
+  }
+  try {
+    return { database: databaseSchema.parse(JSON.parse(await readFile(storage.filename, "utf8"))), version: null };
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return { sites: {} };
+      return { database: storage.kind === "temporary" && globalThis.__CAFM_CLOUD_STATE__ ? databaseSchema.parse(globalThis.__CAFM_CLOUD_STATE__) : { sites: {} }, version: null };
     }
     throw error;
   }
 }
 
-async function replaceDatabase(temporary: string) {
+async function replaceDatabase(temporary: string, filename: string) {
   for (let attempt = 0; ; attempt++) {
     try {
       await rename(temporary, filename);
@@ -245,7 +301,7 @@ function persistenceError(error: unknown) {
 
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get("origin");
-  if (!origin || !allowedOrigins.has(origin)) return new Response(null, { status: 403, headers: cors(request) });
+  if (!origin || !allowedOrigin(request, origin)) return new Response(null, { status: 403, headers: cors(request) });
   return new Response(null, { status: 204, headers: cors(request) });
 }
 
@@ -254,8 +310,11 @@ export async function GET(request: Request) {
   if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
   try {
-    const data = await load();
-    return reply(request, data.sites[site] ?? { revision: 0, state: null });
+    const storage = await backend();
+    const { database } = await load(storage);
+    const response = reply(request, database.sites[site] ?? { revision: 0, state: null });
+    response.headers.set("X-CAFM-Storage", storage.kind);
+    return response;
   } catch (error) {
     console.error("Could not read CAFM state", error);
     return reply(request, { error: "Could not read the persisted CAFM state." }, 500);
@@ -267,6 +326,7 @@ export async function POST(request: Request) {
   if (!site) return reply(request, { error: "A valid site and allowed origin are required." }, 400);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
   let lock: Awaited<ReturnType<typeof open>> | undefined;
+  let lockFile: string | undefined;
   let temporary: string | undefined;
   try {
     const text = await request.text();
@@ -276,16 +336,19 @@ export async function POST(request: Request) {
     const parsed = payloadSchema.safeParse(json);
     if (!parsed.success) return reply(request, { error: "Invalid state or revision.", details: parsed.error.issues }, 400);
     if (!validateSite(parsed.data.state, site)) return reply(request, { error: "State contains records from another site." }, 400);
-    await mkdir(directory, { recursive: true });
-    try {
-      lock = await open(lockFile, "wx", 0o600);
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "EEXIST") {
-        return reply(request, { error: "Another state write is in progress." }, 503);
+    const storage = await backend();
+    if (storage.kind !== "supabase") {
+      lockFile = storage.lockFile;
+      try {
+        lock = await open(lockFile, "wx", 0o600);
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+          return reply(request, { error: "Another state write is in progress." }, 503);
+        }
+        throw error;
       }
-      throw error;
     }
-    const database = await load();
+    const { database, version } = await load(storage);
     const current = database.sites[site];
     if (parsed.data.revision !== (current?.revision ?? 0)) {
       return reply(request, { error: "State has changed; reload and resolve the conflict.", revision: current?.revision ?? 0 }, 409);
@@ -296,23 +359,35 @@ export async function POST(request: Request) {
     if (duplicate) return reply(request, { error: `Follow-up work request ID ${String(duplicate.WR_ID)} is already in use at another site.` }, 409);
     const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(parsed.data.state) };
     database.sites[site] = next;
-    temporary = path.join(directory, `cafm-db-${randomUUID()}.tmp`);
-    const file = await open(temporary, "wx", 0o600);
-    try {
-      await file.writeFile(JSON.stringify(database), "utf8");
-      await file.sync();
-    } finally {
-      await file.close();
+    if (storage.kind === "supabase") {
+      const newVersion = randomUUID();
+      const result = await supabaseRequest(storage, version ? `?id=eq.default&version=eq.${version}` : "", {
+        method: version ? "PATCH" : "POST",
+        body: JSON.stringify({ ...(version ? {} : { id: "default" }), payload: database, version: newVersion, updated_at: new Date().toISOString() }),
+      });
+      if (!Array.isArray(result) || result.length !== 1) return reply(request, { error: "State changed during save; reload and resolve the conflict." }, 409);
+    } else {
+      temporary = path.join(storage.directory, `cafm-db-${randomUUID()}.tmp`);
+      const file = await open(temporary, "wx", 0o600);
+      try {
+        await file.writeFile(JSON.stringify(database), "utf8");
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      await replaceDatabase(temporary, storage.filename);
+      temporary = undefined;
+      if (storage.kind === "temporary") globalThis.__CAFM_CLOUD_STATE__ = database;
     }
-    await replaceDatabase(temporary);
-    temporary = undefined;
-    return reply(request, next);
+    const response = reply(request, next);
+    response.headers.set("X-CAFM-Storage", storage.kind);
+    return response;
   } catch (error) {
     console.error("Could not persist CAFM state", error);
     return reply(request, { error: persistenceError(error) }, 500);
   } finally {
     if (temporary) await unlink(temporary).catch((error) => console.error("Could not remove temporary state file", error));
-    if (lock) {
+    if (lock && lockFile) {
       try {
         await lock.close();
         await unlink(lockFile);

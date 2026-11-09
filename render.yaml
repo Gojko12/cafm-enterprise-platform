@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: cafm-platform
+    runtime: node
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build:cloud
+    startCommand: cd apps/web-portal && pnpm exec next start --hostname 0.0.0.0 --port $PORT

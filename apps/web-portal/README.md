@@ -22,19 +22,64 @@ Restart both development servers after changing the variables. Open the portal
 for a site first so it can initialize that site's server state. No Firebase
 credentials are required for this local sync.
 
-Only the localhost ports 3000 and 3001 are allowed by CORS. Site and person
+Cross-origin access is limited to localhost ports 3000 and 3001; same-origin
+requests are also accepted. Site and person
 headers are demo selectors, not authenticated identities; the token is exposed
 to both clients and is not per-user authorization. Keep the servers on a
 trusted machine and network. This mode does not provide production RBAC or
 security isolation against a user who can access the demo token.
 
-The top-bar phone-sharing dialog accepts a mobile URL or uses
-`NEXT_PUBLIC_MOBILE_APP_URL` when configured. On localhost it suggests port
-3001, which cannot be reached from a phone via `localhost`; enter the mobile
-app's externally reachable HTTPS URL instead. The Vite mobile server can proxy
+The top-bar phone-sharing dialog links to the same-origin `/mobile/` app after
+the unified build. On localhost, enter an externally reachable HTTPS URL in
+the dialog instead: a phone cannot reach the server through `localhost`.
+The Vite mobile server can proxy
 same-origin API requests to the portal, but it exposes the demo's browser-visible
 token and does not add authentication. Use an authenticated, access-restricted
 tunnel and consult the mobile README before sharing.
+
+### Unified deployment and persistence
+
+From the repository root, install the pnpm workspace dependencies and run
+`pnpm run build:cloud`. This builds the shared schema, builds the mobile PWA
+with `/mobile/` as its base, copies it into the portal's public directory, and
+builds Next.js. The copied directory is generated and ignored by Git. To serve
+the result locally, run `pnpm --dir apps/web-portal exec next start`.
+The supplied Render configuration uses this pipeline; cloud deployment
+configuration must also supply the token variables described above at build
+and runtime. Deploy behind HTTPS and an authenticated access-restricted proxy:
+the shared token is visible in the browser and is not user authentication.
+
+By default, the API uses `.data/cafm-db.json` on writable local disk. On Vercel
+or when that directory is read-only, it uses an instance-local temporary file
+and an in-process mirror. Temporary storage can disappear on restart and is not
+shared between serverless instances; it is **not durable or suitable for
+multi-instance production**. API responses expose `X-CAFM-Storage` as `disk`,
+`temporary`, or `supabase`. Existing unreadable/unwritable local databases are
+not silently replaced with empty temporary state.
+Writable container filesystems, including Render's default filesystem, may
+also be ephemeral; `disk` does not guarantee persistence across deployments.
+
+For durable shared state, create the following table in Supabase before setting
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` on the server:
+
+```sql
+create table public.cafm_state (
+  id text primary key,
+  payload jsonb not null,
+  version uuid not null,
+  updated_at timestamptz not null default now(),
+  constraint cafm_state_singleton check (id = 'default')
+);
+alter table public.cafm_state enable row level security;
+```
+
+The server uses conditional version updates to reject concurrent writes. Keep
+the service-role key secret and server-side only. An anon key is supported only
+if deliberately configured database permissions permit all required operations;
+exposing unrestricted state through an anon key is unsafe. A configured but
+unavailable or misconfigured Supabase table fails explicitly rather than
+silently switching to a divergent local database. Back up the table and plan
+data migration before changing storage backends.
 
 ### Bulk import and export
 

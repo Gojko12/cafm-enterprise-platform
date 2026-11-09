@@ -12,7 +12,7 @@ root.render(
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
+    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch((error: unknown) => {
       console.error("Offline app installation failed:", error);
       window.dispatchEvent(new CustomEvent("cafm-offline-install-error"));
     });
