@@ -18,6 +18,7 @@ import {
   SiteId,
   WR_Statuses,
   LocationFreezeSchema,
+  UserAccessProfileSchema,
 } from "@cafm/shared-schema";
 import type { LocationFreeze } from "@cafm/shared-schema";
 import { z } from "zod";
@@ -31,6 +32,7 @@ type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spo
 const siteContextSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
   locationFreezes: z.array(LocationFreezeSchema),
+  userAccessProfiles: z.array(UserAccessProfileSchema).default([]),
 });
 
 export default function App() {
@@ -39,6 +41,7 @@ export default function App() {
   const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("");
   const [technicians, setTechnicians] = useState<z.infer<typeof siteContextSchema>["craftspeople"]>([]);
   const [freezes, setFreezes] = useState<LocationFreeze[]>([]);
+  const [profiles, setProfiles] = useState<z.infer<typeof UserAccessProfileSchema>[]>([]);
   const [followUpDescription, setFollowUpDescription] = useState("");
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
   const [followUpOpen, setFollowUpOpen] = useState(false);
@@ -76,26 +79,34 @@ export default function App() {
     ]);
     if (activeSelection.current.activeSiteId !== activeSiteId ||
         activeSelection.current.currentTechnicianId !== currentTechnicianId) return;
-    setBuildings(storedBuildings.filter((item) => item.SiteId === activeSiteId));
-    setFloors(storedFloors.filter((item) => item.SiteId === activeSiteId));
-    setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId));
-    setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId));
     const siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
-    const siteContext = context ? siteContextSchema.parse(JSON.parse(context.value)) : { craftspeople: [], locationFreezes: [] };
+    const siteContext = context ? siteContextSchema.parse(JSON.parse(context.value)) : { craftspeople: [], locationFreezes: [], userAccessProfiles: [] };
     const people = siteContext.craftspeople.filter((item) => item.SiteId === activeSiteId);
     setTechnicians(people);
     setFreezes(siteContext.locationFreezes.filter((item) => item.siteId === activeSiteId));
+    setProfiles(siteContext.userAccessProfiles.filter((item) => item.siteId === activeSiteId));
     const technician = people.find((item) => item.id === currentTechnicianId);
     if (!technician && people.length) { setCurrentTechnicianId(people[0].id); return; }
     setSiteWRs(siteRequests);
     setMyWRs(siteRequests.filter((wr) => wr.AssignedUserIds?.includes(currentTechnicianId) || wr.AssignedCraftpersonIds.includes(currentTechnicianId)));
-    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length && !wr.AssignedCraftpersonIds.length && !!technician && (wr.TradeName === technician.Trade || wr.TradeId === technician.Trade)));
+    const access = siteContext.userAccessProfiles.find((item) => item.siteId === activeSiteId && item.linkedCraftpersonId === currentTechnicianId);
+    const buildingAllowed = (building: string) => !!access && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(building));
+    setBuildings(storedBuildings.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
+    setFloors(storedFloors.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
+    setRooms(storedRooms.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id)));
+    setEquipment(storedEquipment.filter((item) => item.SiteId === activeSiteId && buildingAllowed(item.bl_id) && !!item.PrimaryTradeId && !!access?.vpaTrades.some((trade) => trade === item.PrimaryTradeId)));
+    setUnassignedWRs(siteRequests.filter((wr) => !wr.AssignedUserIds?.length && !wr.AssignedCraftpersonIds.length && !!access && access.vpaTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id))));
     setSelectedWR((current) => current ? siteRequests.find((wr) => wr.WR_ID === current.WR_ID) ?? current : null);
   }, [activeSiteId, currentTechnicianId]);
 
   useEffect(() => {
     setEngine(initOfflineEngine());
   }, []);
+
+  useEffect(() => {
+    setFilter("trade", undefined);
+    setAppliedFilters((current) => ({ ...current, trade: undefined }));
+  }, [activeSiteId, currentTechnicianId, setFilter]);
 
   useEffect(() => {
     if (!engine) return;
@@ -123,7 +134,7 @@ export default function App() {
 
   const handleClaimWR = async (wrId: string) => {
     const claimed = unassignedWRs.find((wr) => wr.WR_ID === wrId);
-    if (!claimed || !engine) return;
+    if (!claimed || !engine || !access?.permissions.canClaimUnassignedWR) throw new Error("You are not permitted to claim this work request.");
     try {
       await engine.saveWorkRequest({ ...claimed, AssignedCraftpersonIds: [...(claimed.AssignedCraftpersonIds ?? []), currentTechnicianId], AssignedUserIds: [...(claimed.AssignedUserIds ?? []), currentTechnicianId] }, claimed);
       await refreshData();
@@ -176,6 +187,7 @@ export default function App() {
     description: string;
     photoUrl?: string;
   }) => {
+    if (!access?.permissions.canCreateFJ) throw new Error("Permission required to create a Fast Job.");
     const issued = WR_Statuses.find(
       (status) =>
         status.Percentage === 50 &&
@@ -222,6 +234,7 @@ export default function App() {
     roomCode?: string;
     description: string;
   }) => {
+    if (!access?.permissions.canCreateLJ) throw new Error("Permission required to create a Long Job.");
     const now = new Date().toISOString();
     const request: BaseWorkRequest = {
       WR_ID: `LJ-${Date.now()}`,
@@ -258,6 +271,7 @@ export default function App() {
     setAppliedFilters(useFilterStore.getState().filters);
   };
   const person = technicians.find((item) => item.id === currentTechnicianId);
+  const access = profiles.find((item) => item.linkedCraftpersonId === currentTechnicianId && item.siteId === activeSiteId);
   const technicianName = person ? `${person.Name} ${person.LastName}` : currentTechnicianId;
   const saveSelected = async (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => {
     if (!engine || !selectedWR) throw new Error("Offline storage or work request is not ready.");
@@ -272,6 +286,7 @@ export default function App() {
     setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
   };
   const createFollowUp = async () => {
+    if (!access?.permissions.canOpenFollowUpFJ) throw new Error("You are not permitted to create a follow-up FJ.");
     if (!selectedWR || !followUpDescription.trim()) throw new Error("Enter a follow-up description.");
     const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
     if (!issued) throw new Error("Issued status configuration is missing.");
@@ -283,21 +298,21 @@ export default function App() {
     catch (error) { alert(`Follow-up ${request.WR_ID} saved offline. Synchronization failed: ${error instanceof Error ? error.message : "Retry Sync Now."}`); }
   };
   const openFollowUp = () => {
-    if (!selectedWR) return;
+    if (!selectedWR || !access?.permissions.canOpenFollowUpFJ) return;
     setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `);
     setFollowUpError("");
     setFollowUpOpen(true);
   };
-  const finishChecklist = () => { setOpenCompletion(true); setCurrentView("hub"); };
+  const finishChecklist = () => { if (!access?.permissions.canCompleteWR78) return; setOpenCompletion(true); setCurrentView("hub"); };
 
   // Render based on current view
   const renderContent = () => {
     switch (currentView) {
       case "hub":
-        return selectedWR ? <ExecutionHub wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={openFollowUp} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={() => { setOpenCompletion(false); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
-        if (selectedWR.WR_Type === "PM") return <MobileChecklist key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={finishChecklist} followUp={openFollowUp} save={async (results, baseline) => saveSelected((current) => {
+        if (selectedWR.WR_Type === "PM") return <MobileChecklist key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
           const now = new Date().toISOString();
           const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
           for (const result of changed) {
@@ -309,11 +324,11 @@ export default function App() {
           const todo = selectedWR.todoSteps ?? [];
           const todoSteps: PM_StepDefinition[] = [...todo].sort((a, b) => a.order - b.order).map((step) => ({ StepId: step.id, StepNumber: step.order, StepTitle: step.title, Instruction: step.instruction, InputType: "Boolean", favourableBoolean: true, RequiresPhotoOnFailure: false, RequiresCommentOnFailure: false }));
           const todoWR: BaseWorkRequest = { ...selectedWR, ChecklistResults: todo.map((step) => ({ stepId: step.id, value: step.completed ? "true" : "", passed: step.isFavourable ?? true, completedAt: step.completedAt ?? selectedWR.CreatedDate, comment: step.technicianComment, photoPaths: step.photoUrls })) };
-          return <MobileChecklist key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={finishChecklist} followUp={openFollowUp} addSteps={async (titles, scope) => saveSelected((current) => {
+          return <MobileChecklist key={selectedWR.WR_ID} wr={todoWR} steps={todoSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} todoMode addSteps={(selectedWR.WR_Type === "FJ" ? access?.permissions.canDefineChecklistFJ : access?.permissions.canDefineChecklistLJ) ? async (titles, scope) => saveSelected((current) => {
             const existing = current.todoSteps ?? [];
             const start = Math.max(0, ...existing.map((step) => step.order));
             return { ...current, ...(scope !== undefined ? { roughScopeNotes: scope } : {}), todoSteps: [...existing, ...titles.map((title, index) => ({ id: crypto.randomUUID(), order: start + index + 1, title, completed: false }))] };
-          }, `Added ${titles.length} technician to-do step(s).`)} save={async (results, baseline) => saveSelected((current) => {
+          }, `Added ${titles.length} technician to-do step(s).`) : undefined} save={async (results, baseline) => saveSelected((current) => {
             const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
             if (changed.some((result) => !(current.todoSteps ?? []).some((step) => step.id === result.stepId))) throw new Error("A technician step was removed elsewhere. Your edits have not been saved.");
             return { ...current, todoSteps: (current.todoSteps ?? []).map((step) => {
@@ -343,9 +358,9 @@ export default function App() {
             floors={floors}
             rooms={rooms}
             equipmentList={equipment}
-            onCreateFJ={handleCreateMobileFJ}
-            onCreateLJ={handleCreateMobileLJ}
-            onLogTechnicalAudit={() => setCurrentView("qa-spot-check")}
+            onCreateFJ={access?.permissions.canCreateFJ ? handleCreateMobileFJ : undefined}
+            onCreateLJ={access?.permissions.canCreateLJ ? handleCreateMobileLJ : undefined}
+            onLogTechnicalAudit={access?.permissions.canAuditChooseWRs ? () => setCurrentView("qa-spot-check") : undefined}
             onClose={() => {
               setCurrentView("home");
               setSelectedEquipment(null);
@@ -354,7 +369,7 @@ export default function App() {
         ) : null;
 
       case "qa-spot-check":
-        return selectedEquipment ? <div className="space-y-3 p-4 pt-40"><h2 className="text-xl font-bold">QA spot-check · {selectedEquipment.EquipmentCode}</h2><button onClick={() => setCurrentView("inspection")}>Back to equipment</button>{siteWRs.filter((wr) => (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && wr.EquipmentCodes.includes(selectedEquipment.EquipmentCode) && (wr.Percentage === 78 || wr.Percentage === 100)).map((wr) => <div key={wr.WR_ID} className="rounded border bg-white p-3"><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p>QA: {wr.QA_AuditStatus ?? "None"}</p><button disabled={!!wr.QA_AuditStatus && wr.QA_AuditStatus !== "None"} onClick={() => {
+        return selectedEquipment ? <div className="space-y-3 p-4 pt-40"><h2 className="text-xl font-bold">QA spot-check · {selectedEquipment.EquipmentCode}</h2><button onClick={() => setCurrentView("inspection")}>Back to equipment</button>{siteWRs.filter((wr) => (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && !!access?.permissions.canAuditChooseWRs && access.permissions.auditWRTypes.includes(wr.WR_Type) && access.permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) && (!access.vpaBuildingIds.length || access.vpaBuildingIds.includes(wr.bl_id)) && wr.EquipmentCodes.includes(selectedEquipment.EquipmentCode) && (wr.Percentage === 78 || wr.Percentage === 100)).map((wr) => <div key={wr.WR_ID} className="rounded border bg-white p-3"><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p>QA: {wr.QA_AuditStatus ?? "None"}</p><button disabled={!!wr.QA_AuditStatus && wr.QA_AuditStatus !== "None"} onClick={() => {
           if (!engine) { alert("Offline engine is not ready."); return; }
           const now = new Date().toISOString();
           const next: BaseWorkRequest = { ...wr, QA_CompletionDate: (wr.UpdatedAt ?? wr.CreatedDate).slice(0, 10), QA_AuditStatus: "SelectedForAudit", QA_SelectionMode: "QRScanOnSite", UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: currentTechnicianId, actorRole: "MobileTechnician", createdAt: now, text: "Selected for QA audit by equipment QR spot-check." }] };
@@ -366,12 +381,14 @@ export default function App() {
         return (
           <div className="pt-40 pb-20">
             <AdvancedFilterPanel
+              trades={access?.vpaTrades ?? []}
               buildings={buildings}
               floors={floors}
               rooms={rooms}
               equipment={equipment}
               currentFilters={filters}
               onFiltersChange={(newFilters) => {
+                if (newFilters.trade !== filters.trade) setAppliedFilters((current) => ({ ...current, trade: newFilters.trade }));
                 Object.entries(newFilters).forEach(([key, value]) => {
                   setFilter(key as keyof FilterCriteria, value);
                 });
@@ -382,7 +399,7 @@ export default function App() {
             <TechnicianHome
               myWRs={applyFilters(myWRs, appliedFilters)}
               unassignedWRs={applyFilters(unassignedWRs, appliedFilters)}
-              onClaimWR={handleClaimWR}
+              onClaimWR={access?.permissions.canClaimUnassignedWR ? handleClaimWR : undefined}
               onOpenWR={handleOpenWR}
             />
           </div>
@@ -403,7 +420,7 @@ export default function App() {
             alert("Return to the work request list before switching sites.");
             return;
           }
-          setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setTechnicians([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
+          setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
         }}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}

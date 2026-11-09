@@ -91,7 +91,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                 />
 
                 {/* Claim Button for Unassigned */}
-                {activeTab === "unassigned" && (
+                {activeTab === "unassigned" && onClaimWR && (
                   <button
                     onClick={() => void handleClaimWR(wr.WR_ID || "")}
                     className="absolute bottom-4 right-4 px-4 py-2 bg-green-500 text-white text-xs font-bold rounded hover:bg-green-600 transition-colors"

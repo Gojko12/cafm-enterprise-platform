@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema,
   PM_ChecklistStandardSchema, PM_ScheduleSchema,
-  LocationFreezeSchema, SiteIdSchema,
+  LocationFreezeSchema, SiteIdSchema, UserAccessProfileSchema,
 } from "@cafm/shared-schema";
 import type {
   BaseWorkRequest, Building, Floor, Room, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId,
@@ -21,6 +21,7 @@ const stateSchema = z.object({
   schedules: z.array(z.custom<PM_Schedule>((value) => PM_ScheduleSchema.safeParse(value).success)),
   workRequests: z.array(workRequestSchema),
   craftspeople: z.array(z.object({ id: z.string().min(1), Name: z.string().min(1), LastName: z.string(), Trade: z.string(), HourlyRate: z.number().nonnegative(), SiteId: SiteIdSchema }).passthrough()).optional(),
+  userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
   mobileMutationIds: z.array(z.string()).optional(),
 }).passthrough();
@@ -97,6 +98,7 @@ export async function synchronizePortal(
       state.schedules.some((item) => item.SiteId !== site) ||
       state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site) ||
       state.craftspeople?.some((item) => item.SiteId !== site) ||
+      state.userAccessProfiles?.some((item) => item.siteId !== site) ||
       state.locationFreezes?.some((item) => item.siteId !== site) ||
       state.workRequests.some((item) => item.SiteId !== site)) {
     throw new Error("The portal returned records belonging to another site.");
@@ -253,7 +255,7 @@ export async function synchronizePortal(
   for (const item of selected) await tx.objectStore("syncQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   for (const item of selectedPhotos) await tx.objectStore("photoQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: "lastSyncTime", value: syncedAt, updatedAt: syncedAt });
-  await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], locationFreezes: state.locationFreezes ?? [] }), updatedAt: syncedAt });
+  await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], userAccessProfiles: state.userAccessProfiles ?? [], locationFreezes: state.locationFreezes ?? [] }), updatedAt: syncedAt });
   await tx.done;
   const pending = pendingNow.filter((item) => item.SyncStatus === "PENDING" && !confirmed.has(item.QueueId)).length +
     pendingPhotosNow.filter((item) => item.SyncStatus === "PENDING" && !confirmedPhotos.has(item.QueueId)).length;

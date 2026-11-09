@@ -8,7 +8,7 @@ import {
 } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
 import { QAChecklistReview } from "@/components/modules/QAChecklistReview";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
@@ -58,6 +58,7 @@ export function PMWorkRequestPopup({
   onEscalateToLJ,
 }: PMWorkRequestPopupProps) {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const { currentRole } = useApp();
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(TABS[0]);
@@ -183,6 +184,7 @@ export function PMWorkRequestPopup({
   });
 
   const applyStatus = (choice: StatusChoice) => {
+    if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (choice.percentage === 100 && hasOpenQARework(workRequest)) {
       window.alert("QA rework must be verified before closing.");
       return;
@@ -429,6 +431,7 @@ export function PMWorkRequestPopup({
   };
 
   const addFollowUp = () => {
+    if (!permissions?.canOpenFollowUpFJ) { window.alert("Permission required to create a follow-up FJ."); return; }
     if (!fastJobDescription.trim()) {
       window.alert("Enter a description for the Fast Job.");
       return;
@@ -657,7 +660,7 @@ export function PMWorkRequestPopup({
                 Assign Craftperson
               </button>
             </div>
-            <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={currentRole === "TeamLeader" || currentRole === "SiteAdministrator"} />
+            <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
             <div className="grid gap-3 rounded border bg-white p-4 md:grid-cols-[1fr_2fr]">
               <label className="text-sm font-medium">WR Statuses
                 <select aria-label="WR Statuses" value={currentStatusChoice?.key ?? ""}
@@ -786,8 +789,8 @@ export function PMWorkRequestPopup({
                 onChange={(event) => setFastJobUrgency(event.target.value)} className="rounded border px-3 py-2">
                 {["Low", "Normal", "High", "Urgent"].map((item) => <option key={item}>{item}</option>)}
               </select>
-              <button type="button" onClick={addFollowUp}
-                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white">Create FastJob</button>
+              <button type="button" disabled={!permissions?.canOpenFollowUpFJ} onClick={addFollowUp}
+                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-40">Create FastJob</button>
             </div>
             <input aria-label="Filter follow-up Fast Jobs" placeholder="Filter follow-up Fast Jobs..."
               value={followUpFilter} onChange={(event) => setFollowUpFilter(event.target.value)}

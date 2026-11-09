@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { gridStatusChange } from "@/lib/wr-grid";
@@ -27,6 +27,7 @@ const columns: { key: Column; label: string }[] = [
 
 export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, requestType }: { requests: BaseWorkRequest[]; onOpen: (wr: BaseWorkRequest) => void; grouped?: boolean; onFilterCount?: (count: number) => void; requestType: "PM" | "FJ" | "LJ" }) {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activePerson, activeSiteId } = useSiteContext();
   const { currentRole } = useApp();
   const qa = useQAActions();
@@ -81,6 +82,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
     try {
       const targets = selected.map((id) => data.workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId));
       if (targets.some((item) => !item)) throw new Error("A selected work request is no longer available.");
+      if (targets.some((item) => item && !requests.some((visibleRequest) => visibleRequest.WR_ID === item.WR_ID))) throw new Error("A selected work request is outside your current scope.");
       const updates = new Map<string, BaseWorkRequest>();
       for (const wr of targets) if (wr) {
         const next = change(wr);
@@ -103,6 +105,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
     } catch (problem) { setError(problem instanceof Error ? problem.message : "The update failed."); }
   };
   const remove = () => {
+    if (selected.some((id) => !requests.some((wr) => wr.WR_ID === id))) { setError("A selected work request is outside your current scope."); return; }
     if (!window.confirm(`Delete ${selected.length} selected work requests? Their history will be retained in the site archive.`)) return;
     const ids = new Set(selected);
     setData((state) => {
@@ -123,7 +126,10 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       <strong>{selected.length} selected ({selected.filter((id) => !displayed.some((wr) => wr.WR_ID === id)).length} hidden) · Bulk Actions</strong>
       <button onClick={() => { setError(""); void qa.manualSelectForQAAudit(selected, "ManualInspectorPick").then(() => setSelected([])).catch((problem: unknown) => setError(problem instanceof Error ? problem.message : "Could not select QA audits.")); }}>+ Add Selected to QA Audit</button>
       <select aria-label="Bulk status" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}><option value="">Status</option>{[50, 55, 78, 100, 27].map((n) => <option key={n} value={n}>{n}%</option>)}</select>
-      <button disabled={!bulkStatus} onClick={() => apply((wr) => gridStatusChange(wr, Number(bulkStatus), currentRole), `Bulk status changed to ${bulkStatus}%`)}>Apply status</button>
+      <button disabled={!bulkStatus || (Number(bulkStatus) === 78 && !permissions?.canCompleteWR78) || (Number(bulkStatus) === 100 && !permissions?.canCloseWR100)} onClick={() => {
+        if ((Number(bulkStatus) === 78 && !permissions?.canCompleteWR78) || (Number(bulkStatus) === 100 && !permissions?.canCloseWR100)) { setError("Permission required for this status."); return; }
+        apply((wr) => gridStatusChange(wr, Number(bulkStatus), currentRole), `Bulk status changed to ${bulkStatus}%`);
+      }}>Apply status</button>
       <select aria-label="Bulk trade" value={bulkTrade} onChange={(e) => setBulkTrade(e.target.value)}><option value="">Trade</option>{CLASSICAL_TRADES.map((trade) => <option key={trade}>{trade}</option>)}</select>
       <button disabled={!bulkTrade} onClick={() => apply((wr) => ({ ...wr, TradeId: bulkTrade, TradeName: bulkTrade }), `Bulk trade changed to ${bulkTrade}`)}>Apply trade</button>
       <select aria-label="Bulk room" value={bulkRoom} onChange={(e) => setBulkRoom(e.target.value)}><option value="">Room</option>{data.rooms.map((room) => <option key={roomKey(room)} value={roomKey(room)}>{room.bl_id} / {room.LevelName} / {room.RoomCode}</option>)}</select>

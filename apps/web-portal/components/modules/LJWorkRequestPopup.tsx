@@ -6,7 +6,7 @@ import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { TechnicianTodoList } from "@/components/modules/TechnicianTodoList";
 import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest, LJRole } from "@cafm/shared-schema";
-import { useCafmStore, ASSIGNMENT_ROLES } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore, ASSIGNMENT_ROLES } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
@@ -79,6 +79,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   onNavigate: (id: string) => void;
 }) {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const [tab, setTab] = useState<Tab>(TABS[0]);
@@ -115,6 +116,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
     }) }));
   };
   const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[], allowBackward = false) => {
+    if (((percentage === 78 || (percentage === 94 && workRequest.Percentage < 78)) && !permissions?.canCompleteWR78) || (percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (percentage < 0 || percentage > 100) return;
     if (allowedRoles && !hasPermission(allowedRoles)) {
       window.alert(`This stage requires an assigned role: ${allowedRoles.join(", ")}.`);
@@ -438,7 +440,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
               craftpersonId: person.id, hourlyRate: person.HourlyRate, workingTimeMinutes: 0, name: person.Name, lastName: person.LastName,
             }), `${actorName} assigned craftperson ${person.Name} ${person.LastName} (${person.Trade}).`);
           }} className="ml-3 rounded border px-3 py-2"><option value="">Select craftperson</option>{data.craftspeople.filter((item) => item.SiteId === workRequest.SiteId).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} — {person.Trade}</option>)}</select></label>
-          <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={currentRole === "TeamLeader" || currentRole === "SiteAdministrator"} />
+          <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
           <button disabled={workRequest.Percentage !== 50 && workRequest.Percentage !== 55} onClick={() => stage(required ? 78 : 94, required ? "Technically Completed" : "All acceptance gates waived", {}, ["TRADE_TM", "TRADE_LONG_JOB", "ESA_IM"])} className="rounded bg-green-700 px-4 py-2 font-semibold text-white disabled:opacity-40">Technically Completed ({required ? "78%" : "94%"})</button>
           <p className="text-xs text-slate-500">Acceptance configured: {required ? "Yes" : "No"}; SLA margin dates remain available in the core record.</p>
         </section>}

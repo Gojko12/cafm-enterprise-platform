@@ -11,17 +11,17 @@ import { QAAnalytics } from "@/components/modules/QAAnalytics";
 import { QAInspectorSettings, QAFailureReasonSettings } from "@/components/modules/QASettings";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useQAActions } from "@/lib/use-qa-actions";
 import { isQACompleted, isQAEligibleType, qaMatches, qaStatus } from "@/lib/qa-audits";
-import { canInspectWR } from "@/lib/qa-settings";
 import { addDays, calendarDate } from "@/lib/dispatch";
 
 type Tab = "pool" | "chosen" | "queue" | "qr" | "report" | "reasons";
 export default function TechnicalAuditsPage() {
   const { data } = useCafmStore();
-  const { activeSiteId, activePerson } = useSiteContext();
+  const { profile, permissions } = useActiveUserPermissions();
+  const { activeSiteId } = useSiteContext();
   const actions = useQAActions();
   const [tab, setTab] = useState<Tab>("pool");
   const [period, setPeriod] = useState("all");
@@ -41,7 +41,10 @@ export default function TechnicalAuditsPage() {
   const today = calendarDate(new Date());
   const start = period === "week" ? addDays(today, -((new Date(`${today}T12:00:00`).getDay() + 6) % 7)) : period === "month" ? `${today.slice(0, 7)}-01` : period === "custom" ? from : "";
   const end = period === "custom" ? to : period === "all" ? "" : today;
-  const requests = data.workRequests.filter((wr) => wr.SiteId === activeSiteId && isQAEligibleType(wr));
+  const requests = data.workRequests.filter((wr) => wr.SiteId === activeSiteId && isQAEligibleType(wr) && !!profile &&
+    (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && profile.permissions.auditWRTypes.includes(wr.WR_Type) &&
+    profile.permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) &&
+    (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id)));
   const completed = requests.filter((wr) => qaMatches(wr, { dateFrom: start || undefined, dateTo: end || undefined }));
   const chosen = requests.filter((wr) => qaStatus(wr) === "SelectedForAudit");
   const queue = requests.filter((wr) => !["None", "SelectedForAudit"].includes(qaStatus(wr)));
@@ -74,7 +77,7 @@ export default function TechnicalAuditsPage() {
     { id: "hours", label: "Actual / Estimated", value: (wr: BaseWorkRequest) => `${((wr.TotalTimeMinutes ?? 0) / 60).toFixed(1)} / ${wr.ExpectedHours ?? 0} h` },
     { id: "inspector", label: "Inspector", value: (wr: BaseWorkRequest) => wr.QA_InspectedBy },
     { id: "issue", label: "Issue / Correction", value: (wr: BaseWorkRequest) => `${wr.QA_IssueDescription ?? ""} ${wr.QA_CorrectionComment ?? ""}` },
-    { id: "actions", label: "Actions", value: () => "", render: (wr: BaseWorkRequest) => <span><button onClick={(event) => { event.stopPropagation(); setId(wr.WR_ID); }}>Inspect</button>{" "}<button onClick={(event) => { event.stopPropagation(); setPopup(wr.WR_ID); }}>Open Full WR Details</button>{tab === "chosen" && <button disabled={busy || !canInspectWR(activePerson, wr, data.qaInspectorAssignments)} onClick={(event) => { event.stopPropagation(); void run(() => actions.transitionAudits([wr.WR_ID], "unselect"), "Selection removed."); }}> ✕ Unselect</button>}</span> },
+    { id: "actions", label: "Actions", value: () => "", render: (wr: BaseWorkRequest) => <span><button onClick={(event) => { event.stopPropagation(); setId(wr.WR_ID); }}>Inspect</button>{" "}<button onClick={(event) => { event.stopPropagation(); setPopup(wr.WR_ID); }}>Open Full WR Details</button>{tab === "chosen" && <button disabled={busy || !permissions?.canAuditChooseWRs} onClick={(event) => { event.stopPropagation(); void run(() => actions.transitionAudits([wr.WR_ID], "unselect"), "Selection removed."); }}> ✕ Unselect</button>}</span> },
   ];
   return <main className="space-y-3 p-4 text-sm"><h1 className="text-2xl font-bold">Technical Audits</h1>
     <div><select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="all">All Time</option><option value="week">Weekly</option><option value="month">Monthly</option><option value="custom">Custom Date Range</option></select>{period === "custom" && <><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></>}</div>
@@ -85,8 +88,8 @@ export default function TechnicalAuditsPage() {
     </section>
     <nav className="flex flex-wrap gap-2">{([["pool", "1. All Completed WRs Pool (Select for Audit)"], ["chosen", `2. Chosen WRs — Confirm List (${chosen.length})`], ["queue", `3. Active Inspection Queue (${queue.length})`], ["qr", "4. Equipment QR Spot-Check"], ["report", "5. QA BI Analytics & Inspector Settings"], ["reasons", "6. Predefined Failure Reasons"]] as const).map(([key, title]) => <button key={key} className={`rounded border p-2 ${tab === key ? "border-blue-700 bg-blue-600 font-semibold text-white shadow-sm" : "border-slate-300 bg-white text-slate-700"}`} aria-pressed={tab === key} onClick={() => { setTab(key); setSelected([]); }}>{title}</button>)}</nav>
     {error && <p role="alert" className="bg-red-100 p-2">{error}</p>}{notice && <p role="status" className="bg-green-100 p-2">{notice}</p>}
-    {tab === "pool" && <button disabled={busy || !selectedRows.length} onClick={() => void run(() => actions.manualSelectForQAAudit(selectedRows.map((wr) => wr.WR_ID), "ManualInspectorPick"), "Selected for audit.")}>+ Add selected to QA Audit</button>}
-    {tab === "chosen" && <div className="flex gap-2"><button disabled={busy || !selectedRows.length} onClick={() => void run(() => actions.transitionAudits(selectedRows.map((wr) => wr.WR_ID), "unselect"), "Selections removed.")}>✕ Unselect checked</button><button disabled={busy || !chosen.length} onClick={() => void run(() => actions.transitionAudits((selectedRows.length ? selectedRows : chosen).map((wr) => wr.WR_ID), "confirm"), "Confirmed for inspection.")}>✓ Yes, I am going to inspect these (Confirm Selected / All)</button></div>}
+    {tab === "pool" && <button disabled={busy || !permissions?.canAuditChooseWRs || !selectedRows.length} onClick={() => void run(() => actions.manualSelectForQAAudit(selectedRows.map((wr) => wr.WR_ID), "ManualInspectorPick"), "Selected for audit.")}>+ Add selected to QA Audit</button>}
+    {tab === "chosen" && <div className="flex gap-2"><button disabled={busy || !permissions?.canAuditChooseWRs || !selectedRows.length} onClick={() => void run(() => actions.transitionAudits(selectedRows.map((wr) => wr.WR_ID), "unselect"), "Selections removed.")}>✕ Unselect checked</button><button disabled={busy || !permissions?.canAuditChooseWRs || !chosen.length} onClick={() => void run(() => actions.transitionAudits((selectedRows.length ? selectedRows : chosen).map((wr) => wr.WR_ID), "confirm"), "Confirmed for inspection.")}>✓ Yes, I am going to inspect these (Confirm Selected / All)</button></div>}
     {tab === "qr" && <label>Equipment code <select value={equipment} onChange={(e) => setEquipment(e.target.value)}><option value="">Select equipment</option>{data.equipment.map((item) => <option key={item.EquipmentCode} value={item.EquipmentCode}>{item.EquipmentCode} · {item.EquipmentName}</option>)}</select></label>}
     {tab === "reasons" ? <QAFailureReasonSettings /> : tab === "report" ? <div className="space-y-3"><QAAnalytics onResolve={(wrId) => { setTab("queue"); setId(wrId); }} /><QAInspectorSettings /></div> : <div className="flex gap-2"><div className="min-w-0 flex-1"><OverviewTable preferenceKey="qa-audits" rows={rows} columns={columns} rowKey={(wr) => wr.WR_ID} onRow={(wr) => setId(wr.WR_ID)} /></div>{active && <aside className="w-1/2 space-y-3 overflow-auto rounded border bg-white p-3"><button onClick={() => setId("")}>✕ Close</button>{" "}<button onClick={() => setPopup(active.WR_ID)}>Open Full WR Details</button><h2 className="font-bold">{active.WR_ID} · {active.Description}</h2><p>Craftspeople: {active.AssignedCraftpersonIds.join(", ")} · Actual: {active.TotalTimeMinutes ?? 0} min · Estimated: {active.ExpectedHours ?? 0} h</p><p>Parts: {(active.SpareParts ?? []).map((part) => `${part.description} (${part.quantity})`).join(", ") || "—"}</p><QAChecklistReview key={active.WR_ID} wr={active} />{tab === "qr" && qaStatus(active) === "None" && <button disabled={busy} onClick={() => void run(() => actions.manualSelectForQAAudit([active.WR_ID], "QRScanOnSite"), "Selected for QR audit.")}>Select WR (QR Spot-Check)</button>}<QAAuditPanel wr={active} /><h3>History</h3>{[...(active.Activity ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => <p key={item.id}>{item.createdAt} · {item.text}</p>)}</aside>}</div>}
     {popupWR?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={popupWR} onClose={() => setPopup("")} onNavigate={setPopup} onEscalateToLJ={() => setError("Create Long Jobs from the work request overview.")} />}

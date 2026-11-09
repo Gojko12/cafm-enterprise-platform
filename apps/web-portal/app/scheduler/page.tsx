@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
@@ -37,6 +37,7 @@ export default function SchedulerPage() {
 function SchedulerContent() {
   const searchParams = useSearchParams();
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const [date, setDate] = useState("2026-11-09");
@@ -112,6 +113,7 @@ function SchedulerContent() {
     return { ...wr, UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: activePerson, actorName: activePerson, actorRole: currentRole, createdAt: now, text }] };
   };
   const assign = (move: Move) => {
+    if (!permissions?.canScheduleCraftperson) { setError("Permission required to schedule craftspeople."); return; }
     const wr = siteRequests.find((item) => item.WR_ID === move.id);
     const person = people.find((item) => item.id === move.person);
     if (!wr || !person) { setError("The selected request or craftsperson is unavailable."); return; }
@@ -219,6 +221,7 @@ function SchedulerContent() {
     if (searchParams.get("focusStart") && searchParams.get("focusStart") !== intervalFor(wr, person)?.assignedStartDateTime) setNotice("The assignment has moved; showing its current scheduled time.");
   });
   const removeAssignment = (id: string, person: string) => {
+    if (!permissions?.canScheduleCraftperson) { setError("Permission required to schedule craftspeople."); return; }
     const original = siteRequests.find((item) => item.WR_ID === id);
     if (!original || !original.AssignedCraftpersonIds.includes(person)) { setError("Assignment is no longer available."); return; }
     if (!window.confirm(`Remove ${person} from ${id}?`)) return;
@@ -230,6 +233,7 @@ function SchedulerContent() {
     setEditTime(null);
   };
   return <div className="space-y-2 p-3 text-xs">
+    {!permissions?.canScheduleCraftperson && <p role="status" className="rounded bg-amber-100 p-2">Scheduling is read-only. Ask a site administrator for permission.</p>}
     <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button></div>
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}

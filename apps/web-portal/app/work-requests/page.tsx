@@ -6,7 +6,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LongJobDrawer } from "@/components/modules/long-jobs/LongJobDrawer";
 import { BaseWorkRequest, WR_Statuses, WR_Type } from "@cafm/shared-schema";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { FastJobModal, type FastJobData } from "@/components/modules/FastJobModal";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
@@ -109,6 +109,7 @@ export default function WorkRequestsPage() {
   const { activeSiteId, currentUser } = useSiteContext();
   const { currentRole } = useApp();
   const { data, setData } = useCafmStore();
+  const { profile, permissions } = useActiveUserPermissions();
   const workRequests = data.workRequests;
   const [requestType, setRequestType] = useState<WR_Type>("PM");
   const [view, setView] = useState<"grid" | "card">("grid");
@@ -161,7 +162,9 @@ export default function WorkRequestsPage() {
   const siteEquipment = data.equipment.filter((item) => item.SiteId === activeSiteId);
 
   // Filter by active site
-  const siteRequests = workRequests.filter((wr) => wr.SiteId === activeSiteId && wr.WR_Type === requestType);
+  const siteRequests = workRequests.filter((wr) => wr.SiteId === activeSiteId && wr.WR_Type === requestType && !!profile &&
+    profile.vpaTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) &&
+    (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id)));
   const buckets = [
     { id: "issued" as const, label: "Issued PM WRs" },
     { id: "inspection" as const, label: "To Be Inspected PM WRs" },
@@ -211,6 +214,7 @@ export default function WorkRequestsPage() {
   });
 
   const handleSubmitFJ = (job: FastJobData) => {
+    if (!permissions?.canCreateFJ) { alert("Permission required to create a Fast Job."); return; }
     const createdAt = new Date().toISOString();
     const issuedStatus = WR_Statuses.find(
       (status) =>
@@ -262,6 +266,7 @@ export default function WorkRequestsPage() {
   };
 
   const handleCreateLJ = () => {
+    if (!permissions?.canCreateLJ) { alert("Permission required to create a Long Job."); return; }
     setSelectedWR(null);
     setDrawerMode("create");
     setDrawerOpen(true);
@@ -278,12 +283,14 @@ export default function WorkRequestsPage() {
   };
 
   const handleEscalateToLJ = (wr: BaseWorkRequest) => {
+    if (!permissions?.canCreateLJ) { alert("Permission required to create a Long Job."); return; }
     setSelectedWR(wr);
     setDrawerMode("escalate");
     setDrawerOpen(true);
   };
 
   const handleSubmitWR = (wr: Partial<BaseWorkRequest>) => {
+    if (!permissions?.canCreateLJ) { alert("Permission required to create a Long Job."); return; }
     if (drawerMode === "create") {
       if (!wr.bl_id || !wr.TradeId || !wr.Description?.trim()) {
         alert("A description, trade and building are required.");
@@ -367,8 +374,8 @@ export default function WorkRequestsPage() {
       <section className="bg-white border rounded-lg">
         <div className="min-h-10 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
-          {requestType === "LJ" && <button onClick={handleCreateLJ} className="rounded bg-blue-600 px-2 py-1 text-white">+ Create LJ</button>}
-          {requestType === "FJ" && <button onClick={() => setFastJobOpen(true)} className="rounded bg-blue-600 px-2 py-1 text-white">+ Create FJ</button>}
+          {requestType === "LJ" && <button disabled={!permissions?.canCreateLJ} onClick={handleCreateLJ} className="rounded bg-blue-600 px-2 py-1 text-white disabled:opacity-40">+ Create LJ</button>}
+          {requestType === "FJ" && <button disabled={!permissions?.canCreateFJ} onClick={() => setFastJobOpen(true)} className="rounded bg-blue-600 px-2 py-1 text-white disabled:opacity-40">+ Create FJ</button>}
           <button type="button" aria-expanded={isFilterExpanded} onClick={() => setFilterExpanded((value) => !value)} className="font-semibold whitespace-nowrap">
             {isFilterExpanded ? "▼" : "▶"} Filter Work Requests <span className="rounded-full bg-blue-100 px-2">{columnFilterCount + [!!locationFilter.building, !!locationFilter.floor, !!locationFilter.room, selectedEquipmentCodes.length > 0, !!textFilter.trim(), !!dueDateFrom, !!dueDateTo].filter(Boolean).length}</span>
           </button>
@@ -556,7 +563,8 @@ export default function WorkRequestsPage() {
                   </div>
                 )}
                 {requestType === "PM" && bucket === "passed" && wr.Percentage === 78 && (
-                  <button type="button" onClick={() => {
+                  <button type="button" disabled={!permissions?.canCloseWR100} onClick={() => {
+                    if (!permissions?.canCloseWR100) return;
                     const complete = WR_Statuses.find((status) => status.ESAWorkType === wr.ESAWorkType && status.Percentage === 100);
                     if (!complete) { alert(`No 100% WR_Statuses configuration exists for ${wr.ESAWorkType}.`); return; }
                     const now = new Date().toISOString();

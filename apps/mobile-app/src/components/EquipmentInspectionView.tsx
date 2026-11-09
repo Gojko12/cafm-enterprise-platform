@@ -287,27 +287,27 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
           Start Assigned PM
         </button>
 
-        <button
+        {onCreateFJ && <button
           onClick={handleCreateFJ}
           className="w-full px-4 py-3 bg-green-500 text-white font-medium rounded hover:bg-green-600 transition-colors text-sm"
         >
           Create Fast Job (&lt;750€)
-        </button>
+        </button>}
 
-        <button
+        {onCreateLJ && <button
           onClick={() => setShowLJModal(true)}
           className="w-full px-4 py-3 bg-orange-500 text-white font-medium rounded hover:bg-orange-600 transition-colors text-sm"
         >
           Create Long Job (≥750€)
-        </button>
+        </button>}
 
         <div className="flex gap-2">
-          <button
+          {onLogTechnicalAudit && <button
             onClick={onLogTechnicalAudit}
             className="flex-1 px-4 py-2 bg-purple-500 text-white font-medium rounded hover:bg-purple-600 transition-colors text-sm"
           >
             Technical Audit
-          </button>
+          </button>}
           <button
             onClick={onDeskCheckIn}
             className="flex-1 px-4 py-2 bg-gray-500 text-white font-medium rounded hover:bg-gray-600 transition-colors text-sm"

@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CraftpersonAbsenceSchema, LocationFreezeSchema } from "@cafm/shared-schema";
+import { CraftpersonAbsenceSchema, LocationFreezeSchema, UserAccessProfileSchema } from "@cafm/shared-schema";
 // Bypass Next's optimized barrel cache, which can retain an outdated export table.
 import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 
@@ -33,6 +33,7 @@ const stateSchema = z.object({
   blueprints: records,
   schedules: records,
   craftspeople: records,
+  userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
   craftpersonAbsences: z.array(CraftpersonAbsenceSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
   siteRoleAssignments: records,
@@ -60,7 +61,7 @@ function reply(request: Request, body: unknown, status = 200) {
 }
 
 function unavailableSharedSchemas() {
-  return Object.entries({ CraftpersonAbsenceSchema, LocationFreezeSchema, QAInspectorAssignmentSchema })
+  return Object.entries({ CraftpersonAbsenceSchema, LocationFreezeSchema, QAInspectorAssignmentSchema, UserAccessProfileSchema })
     .filter(([, schema]) => !schema || typeof schema.safeParse !== "function")
     .map(([name]) => name);
 }
@@ -88,6 +89,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
   if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
+  if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;
   if (state.locationFreezes?.some((item) => item.siteId !== site ||

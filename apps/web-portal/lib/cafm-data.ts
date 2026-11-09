@@ -1,4 +1,4 @@
-import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile } from "@cafm/shared-schema";
 
 type AssignmentRole = "ESA_TM" | "ESA_CCM" | "TRADE_TM" | "TRADE_CM" | "ESA_TO" | "ESA_LJM" | "ESA_DO" | "ESA_IM";
 export interface TradeRoleMapping {
@@ -36,6 +36,7 @@ export interface DemoData {
   workRequests: BaseWorkRequest[];
   deletedWorkRequests?: BaseWorkRequest[];
   users: UserAccess[];
+  userAccessProfiles: UserAccessProfile[];
   craftspeople: { id: string; Name: string; LastName: string; username?: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number; shiftStart?: string; shiftEnd?: string; baseShiftType?: ShiftType; shiftOverrides?: Record<string, CraftpersonShift>; secondaryTradeIds?: string[]; Activity?: NonNullable<BaseWorkRequest["Activity"]> }[];
   craftpersonAbsences: CraftpersonAbsence[];
   locationFreezes: LocationFreeze[];

@@ -17,6 +17,7 @@ import {
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useCafmStore } from "@/lib/cafm-store";
 import { QAInspectorSettings } from "@/components/modules/QASettings";
+import { UserAccessMatrix } from "@/components/modules/UserAccessMatrix";
 
 const ROLE_NAMES: Record<LJRole, string> = {
   ESA_TM: "ESA Trade Manager",
@@ -117,9 +118,10 @@ export default function SiteRoleAssignmentsPage() {
   }));
 
   return <div className="space-y-5 p-6">
+    <UserAccessMatrix />
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Site Role Assignments</h1>
+        <h1 className="text-2xl font-bold text-slate-900">2. Long Job Trade Managers (01–07)</h1>
         <p className="mt-1 text-sm text-slate-600">Manage Main and Deputy workflow roles and notification recipients by site and trade.</p>
       </div>
       <button type="button" onClick={openNew} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">Add Assignment</button>

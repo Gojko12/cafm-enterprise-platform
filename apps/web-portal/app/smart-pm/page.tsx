@@ -9,7 +9,7 @@ import type {
   PM_Schedule,
   Room,
 } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { generatePMWorkRequests } from "@/lib/pm-generation";
@@ -22,6 +22,7 @@ type TabType = "schedules" | "blueprints" | "generator" | "assignment" | "craftp
 export default function SmartPMPage() {
   const [activeTab, setActiveTab] = useState<TabType>("schedules");
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { activeSiteId, currentUser } = useSiteContext();
   const { currentRole } = useApp();
   const [editing, setEditing] = useState<PM_ChecklistStandard | undefined>();
@@ -92,6 +93,7 @@ export default function SmartPMPage() {
 
   const handleCreateSchedule = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!permissions?.canDefinePMSchedule) { alert("Permission required: Define PM Schedule."); return; }
     if (!blueprints.some((blueprint) => blueprint.ChecklistCode === scheduleChecklistCode && blueprint.IsActive)) {
       alert("Select an active blueprint at this site.");
       return;
@@ -148,6 +150,7 @@ export default function SmartPMPage() {
   };
 
   const openSchedule = (schedule?: PM_Schedule) => {
+    if (!permissions?.canDefinePMSchedule) { alert("Permission required: Define PM Schedule."); return; }
     setEditingSchedule(schedule ?? null);
     setScheduleChecklistCode(schedule?.ChecklistCode ?? "");
     setScheduleFrequency(schedule?.Frequency ?? "Monthly");
@@ -166,6 +169,7 @@ export default function SmartPMPage() {
   };
 
   const handleBlueprintSave = (blueprint: PM_ChecklistStandard) => {
+    if (!permissions?.canDefineChecklistPM) { alert("Permission required: Define PM Checklist."); return; }
     if (!editing && data.blueprints.some((item) => item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)) {
       alert("A blueprint with this code already exists at this site.");
       return;
@@ -179,6 +183,7 @@ export default function SmartPMPage() {
   };
 
   const handleGenerateWRs = () => {
+    if (!permissions?.canGeneratePM_WR) { alert("Permission required: Generate PM WR."); return; }
     try {
       const result = generatePMWorkRequests({ schedules: data.schedules, blueprints: data.blueprints,
         equipment: data.equipment, workRequests: data.workRequests, siteId: activeSiteId, mode: generatorMode,
@@ -192,6 +197,7 @@ export default function SmartPMPage() {
   };
 
   const assignBlueprint = () => {
+    if (!permissions?.canAssignPMPToEQ) { alert("Permission required: Assign PMP to EQ."); return; }
     const blueprint = blueprints.find((item) => item.ChecklistCode === assignmentBlueprint && item.IsActive);
     if (!blueprint) { alert("Select an active checklist blueprint."); return; }
     if (!assignmentEquipmentCodes.length) { alert("Select at least one equipment item."); return; }
@@ -290,12 +296,14 @@ export default function SmartPMPage() {
 
         {/* Tab Content */}
         <div className="bg-white rounded-b-lg p-6">
+          {((activeTab === "schedules" && !permissions?.canDefinePMSchedule) || (activeTab === "blueprints" && !permissions?.canDefineChecklistPM) || (activeTab === "generator" && !permissions?.canGeneratePM_WR) || (activeTab === "assignment" && !permissions?.canAssignPMPToEQ)) && <p role="status" className="mb-3 rounded bg-amber-100 p-3 text-amber-900">Permission required: ask a site administrator to grant access to this action.</p>}
           {activeTab === "schedules" && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-gray-900">PM Schedules</h2>
                 <button
                   type="button"
+                  disabled={!permissions?.canDefinePMSchedule}
                   onClick={() => openSchedule()}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                 >
@@ -347,10 +355,10 @@ export default function SmartPMPage() {
                           {schedule.leadTimeDays} days
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
-                          <button onClick={() => openSchedule(data.schedules.find((item) => item.ScheduleId === schedule.scheduleId && item.SiteId === activeSiteId))} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                          <button disabled={!permissions?.canDefinePMSchedule} onClick={() => openSchedule(data.schedules.find((item) => item.ScheduleId === schedule.scheduleId && item.SiteId === activeSiteId))} className="text-blue-600 hover:text-blue-800 text-sm font-medium disabled:opacity-40">
                             Edit
                           </button>
-                          <button onClick={() => {
+                          <button disabled={!permissions?.canDefinePMSchedule} onClick={() => {
                             if (data.workRequests.some((wr) => wr.SiteId === activeSiteId && wr.ScheduleId === schedule.scheduleId)) {
                               alert("Schedules with work requests cannot be deleted.");
                               return;
@@ -376,11 +384,11 @@ export default function SmartPMPage() {
               {blueprints.map((blueprint) => (
                 <div key={blueprint.ChecklistCode} className="flex items-center justify-between border rounded p-3">
                   <span>{blueprint.ChecklistCode} — {blueprint.Title}</span>
-                  <button className="text-blue-600" onClick={() => { setEditing(blueprint); setBuilderVersion((version) => version + 1); }}>Edit</button>
+                  <button disabled={!permissions?.canDefineChecklistPM} className="text-blue-600 disabled:opacity-40" onClick={() => { setEditing(blueprint); setBuilderVersion((version) => version + 1); }}>Edit</button>
                 </div>
               ))}
-              <button className="text-blue-600" onClick={() => { setEditing(undefined); setBuilderVersion((version) => version + 1); }}>New Blueprint</button>
-              <ChecklistBuilder key={`${activeSiteId}-${builderVersion}`} initialBlueprint={editing} onSave={handleBlueprintSave} />
+              <button disabled={!permissions?.canDefineChecklistPM} className="text-blue-600 disabled:opacity-40" onClick={() => { setEditing(undefined); setBuilderVersion((version) => version + 1); }}>New Blueprint</button>
+              {permissions?.canDefineChecklistPM && <ChecklistBuilder key={`${activeSiteId}-${builderVersion}`} initialBlueprint={editing} onSave={handleBlueprintSave} />}
             </div>
           )}
 
@@ -480,6 +488,7 @@ export default function SmartPMPage() {
 
               <button
                 onClick={handleGenerateWRs}
+                disabled={!permissions?.canGeneratePM_WR}
                 className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-lg"
               >
                 Generate Work Requests
@@ -509,7 +518,7 @@ export default function SmartPMPage() {
               selectedEquipmentCodes={assignmentEquipmentCodes} onLocationChange={setAssignmentLocation}
               onEquipmentChange={setAssignmentEquipmentCodes} />
             <p className="text-sm text-slate-600">Selected: {assignmentEquipmentCodes.length} equipment item(s).</p>
-            <button type="button" onClick={assignBlueprint} className="rounded bg-blue-700 px-5 py-3 font-semibold text-white">Assign selected equipment</button>
+            <button type="button" disabled={!permissions?.canAssignPMPToEQ} onClick={assignBlueprint} className="rounded bg-blue-700 px-5 py-3 font-semibold text-white disabled:opacity-40">Assign selected equipment</button>
           </div>}
           {activeTab === "craftpeople" && <CraftpersonShiftWorkspace key={activeSiteId} />}
         </div>

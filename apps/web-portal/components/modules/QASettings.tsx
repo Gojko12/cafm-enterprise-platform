@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { QAInspectorAssignment } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 
@@ -37,15 +37,14 @@ export function QAInspectorSettings() {
 
 export function QAFailureReasonSettings() {
   const { data, commitSnapshot } = useCafmStore();
-  const { activePerson, activeSiteId } = useSiteContext();
-  const { currentRole } = useApp();
+  const { permissions } = useActiveUserPermissions();
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const reasons = data.qaFailureReasons ?? [];
-  const allowed = currentRole === "SiteAdministrator" || (data.qaInspectorAssignments ?? []).some((entry) => entry.siteId === activeSiteId && entry.personName === activePerson);
+  const allowed = !!permissions?.canManageFailureReasons;
   const save = async (next: string[]) => {
     if (!allowed) { setError("Only a QA inspector or Site Administrator can manage failure reasons."); return false; }
     setBusy(true); setError("");

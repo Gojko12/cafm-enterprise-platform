@@ -81,6 +81,14 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
         LastName: ["GOJKOŠEK", "Gojkošek", "Gojkošek", "Veselič", "Weber", "Costa", "Bianchi", "Schmidt", "Fischer", "Silva", "Kovac", "Moretti"][i],
         username: ["gregor123", "321zamot", "Blaz123", "eva1234"][i], Trade: trade, HourlyRate: 38 + i * 3, ShiftHours: i % 3 === 0 ? 7.5 : 8, baseShiftType: shift.shiftType, shiftStart: shift.shiftStart, shiftEnd: shift.shiftEnd, shiftOverrides: { [tomorrow]: DEFAULT_SHIFTS[(["Late", "Late", "Night", "Early"] as const)[i % 4]], [addDays(today, 3)]: DEFAULT_SHIFTS[i % 2 ? "Early" : "Late"], [addDays(today, 8)]: DEFAULT_SHIFTS[i % 2 ? "Late" : "Early"] }, secondaryTradeIds: [], SkillLevel: 2 + i % 3 });
     }
+    for (const [index, person] of [
+      { Name: "Marko", LastName: "Novak", Trade: "Mechanical" },
+      { Name: "Pieter", LastName: "Visser", Trade: "Electrical" },
+      { Name: "Anna", LastName: "Meyer", Trade: "Civil" },
+      { Name: "Sofia", LastName: "Rossi", Trade: "MultiTechnic" },
+    ].entries()) {
+      craftspeople.push({ id: `S${tag}-C${index + 13}`, SiteId: site, ...person, HourlyRate: 45, ShiftHours: 8, SkillLevel: 3 });
+    }
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
       const system = systems[i % systems.length];

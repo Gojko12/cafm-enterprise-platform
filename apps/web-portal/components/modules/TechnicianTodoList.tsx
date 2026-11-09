@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
-import { useApp } from "@/lib/hooks/useApp";
 import { generateTechnicianSteps } from "@/lib/technician-steps";
+import { useActiveUserPermissions } from "@/lib/cafm-store";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 
@@ -11,8 +11,8 @@ export function TechnicianTodoList({ wr, update }: {
   wr: BaseWorkRequest;
   update: (change: (wr: BaseWorkRequest) => BaseWorkRequest, log?: string) => void;
 }) {
-  const { currentRole } = useApp();
-  const allowed = currentRole === "TeamLeader" || currentRole === "SiteAdministrator";
+  const { permissions } = useActiveUserPermissions();
+  const allowed = wr.WR_Type === "FJ" ? !!permissions?.canDefineChecklistFJ : wr.WR_Type === "LJ" && !!permissions?.canDefineChecklistLJ;
   const [scope, setScope] = useState(wr.roughScopeNotes ?? "");
   const [title, setTitle] = useState("");
   const [instruction, setInstruction] = useState("");

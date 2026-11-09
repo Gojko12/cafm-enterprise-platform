@@ -7,7 +7,7 @@ import { TechnicianTodoList } from "@/components/modules/TechnicianTodoList";
 import { assignPerson } from "@/lib/dispatch";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
 import { hasOpenQARework } from "@/lib/qa-settings";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -24,6 +24,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
   onEscalateToLJ: (wr: BaseWorkRequest) => void;
 }) {
   const { data, setData } = useCafmStore();
+  const { permissions } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const [tab, setTab] = useState<Tab>("Work request details");
@@ -65,6 +66,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
     setEditing(null);
   };
   const transition = (percentage: number, label: string) => {
+    if ((percentage === 78 && !permissions?.canCompleteWR78) || (percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (percentage === 100 && hasOpenQARework(workRequest)) { window.alert("QA rework must be verified before closing."); return; }
     const configured = WR_Statuses.find((status) => status.ESAWorkType === workRequest.ESAWorkType && status.Percentage === percentage);
     if ([50, 78, 100].includes(percentage) && !configured) {
@@ -151,7 +153,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
               }}><option value="">Select…</option>{craftpeople.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} ({person.Trade})</option>)}</select>
             </label>
           </div>
-          <WorkRequestLabor wr={workRequest} people={craftpeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={currentRole === "TeamLeader" || currentRole === "SiteAdministrator"} />
+          <WorkRequestLabor wr={workRequest} people={craftpeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
           <section className="rounded border bg-white p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">Spare parts / materials</h3><button type="button" onClick={() => update((wr) => ({ ...wr, SpareParts: [...(wr.SpareParts ?? []), { id: crypto.randomUUID(), description: "", quantity: 1, unitCostEur: 0 }] }), `Spare part row added by ${actorName}`)} className="rounded border px-3 py-1 text-sm">+ Add Part</button></div>
             <div className="mt-3 space-y-2">{(workRequest.SpareParts ?? []).map((part) => <div key={part.id} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
               <input aria-label="Spare part description" value={part.description} onChange={(e) => update((wr) => ({ ...wr, SpareParts: (wr.SpareParts ?? []).map((item) => item.id === part.id ? { ...item, description: e.target.value } : item) }))} placeholder="Description" className="rounded border px-2 py-1" />
