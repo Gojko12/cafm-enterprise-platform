@@ -12,13 +12,15 @@ const statuses = {
   None: "Not selected",
   SelectedForAudit: "Selected for Audit",
   ToBeInspected: "To Be Inspected",
+  QA_Staged_Pass: "⏳ Staged: PASS (Pending Commit in Tab 5)",
+  QA_Staged_Fail: "⏳ Staged: FAIL — Correction (Pending Commit in Tab 5)",
   QA_Passed: "QA Passed",
   QA_Failed_ActionRequired: "QA Failed - Action Required",
   QA_Corrected: "QA Corrected",
   QA_Verified: "QA Verified",
 } as const;
 
-export function QAAuditPanel({ wr }: { wr: BaseWorkRequest }) {
+export function QAAuditPanel({ wr, onReviewBatch }: { wr: BaseWorkRequest; onReviewBatch?: () => void }) {
   const actions = useQAActions();
   const { data } = useCafmStore();
   const { activePerson } = useSiteContext();
@@ -51,14 +53,23 @@ export function QAAuditPanel({ wr }: { wr: BaseWorkRequest }) {
       reasonRef.current?.focus();
       return;
     }
-    const message = value === "Fail" ? `Inspection marked as FAILED — WR sent to correction${reopen ? " (50%)" : " (status unchanged)"}.` : undefined;
-    void run(() => actions.submitQAVerdict(wr.WR_ID, value, { issue, correction, reopen: reopen && !!permissions?.canAuditReopenWR, photos: wr.QA_AuditPhotos, spawnFollowUp: value === "Fail" && spawn && !!permissions?.canOpenFollowUpFJ }), message);
+    const message = value === "Fail" || value === "Pass" ? "Finding staged; finalize it in Tab 5." : undefined;
+    void run(() => actions.submitQAVerdict(wr.WR_ID, value, { issue, correction, reopen: reopen && !!permissions?.canAuditReopenWR, photos: wr.QA_AuditPhotos, spawnFollowUp: value === "Fail" && spawn && !!permissions?.canOpenFollowUpFJ, failureReason: reason, additionalNotes: notes }), message);
   };
   const badgeColor = status === "QA_Failed_ActionRequired" ? "bg-rose-100 text-rose-800" : status === "QA_Passed" || status === "QA_Verified" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800";
   return <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
     {status !== "None" && <div className="space-y-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">QA Inspection</h3><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badgeColor}`}>{statuses[status]}</span></div><p className="text-xs text-slate-600">Inspector: {wr.QA_InspectedBy || "—"} · {wr.QA_InspectedDate ? new Date(wr.QA_InspectedDate).toLocaleString() : "—"}</p>{wr.QA_IssueDescription && <p>Issue: {wr.QA_IssueDescription}</p>}{wr.QA_CorrectionComment && <p>Correction: {wr.QA_CorrectionComment}</p>}</div>}
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}
     {notice && <p role="status" className="rounded bg-emerald-50 p-2 text-emerald-800">{notice}</p>}
+    {(status === "QA_Staged_Pass" || status === "QA_Staged_Fail") && <div className="space-y-2 rounded bg-blue-50 p-3">
+      <p>Finding staged! Go to Tab 5 (Review, Report &amp; Commit) to finalize and notify Team Leaders →</p>
+      {onReviewBatch ? <button className={secondary} onClick={onReviewBatch}>Go to Tab 5 →</button> : <a className="underline" href="/technical-audits?tab=report">Go to Tab 5 →</a>}
+      {allowed && <button className={secondary} disabled={busy} onClick={() => {
+        setReason(wr.qaStagedVerdict?.failureReason ?? ""); setNotes(wr.qaStagedVerdict?.additionalNotes ?? "");
+        setReopen(!!wr.qaStagedVerdict?.reopenTo50); setSpawn(!!wr.qaStagedVerdict?.spawnFollowUpFJ);
+        void run(() => actions.unstageVerdict(wr.WR_ID), "Verdict unstaged; edit and stage it again.");
+      }}>Undo / Edit Staged Verdict</button>}
+    </div>}
     {status === "None" && canChoose && <button className={`${button} bg-blue-600 hover:bg-blue-700`} disabled={busy} onClick={() => void run(() => actions.transitionAudits([wr.WR_ID], "direct"))}>🔍 Mark as &quot;To Be Inspected&quot;</button>}
     {status === "SelectedForAudit" && canChoose && <div className="flex gap-2"><button className={`${button} bg-blue-600 hover:bg-blue-700`} disabled={busy} onClick={() => void run(() => actions.transitionAudits([wr.WR_ID], "confirm"))}>✓ Confirm &quot;To Be Inspected&quot;</button><button className={secondary} disabled={busy} onClick={() => void run(() => actions.transitionAudits([wr.WR_ID], "unselect"))}>✕ Unselect from QA Audit</button></div>}
     {status === "ToBeInspected" && allowed && <>

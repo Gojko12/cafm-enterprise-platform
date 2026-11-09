@@ -75,6 +75,18 @@ const LocationFreezeSchema = z.preprocess((value) => {
   if (entry.endDateTime <= entry.startDateTime) context.addIssue({ code: "custom", path: ["endDateTime"], message: "End must be after start." });
 }));
 const records = z.array(z.record(z.string(), z.unknown()));
+const qaStagedVerdictSchema = z.object({
+  verdict: z.enum(["Pass", "Fail"]), inspector: z.string().min(1), stagedAt: z.string().min(1),
+  failureReason: z.string().optional(), additionalNotes: z.string().optional(), issueDescription: z.string().optional(),
+  reopenTo50: z.boolean(), spawnFollowUpFJ: z.boolean(),
+});
+const qaReportSchema = z.object({
+  id: z.string().min(1), siteId: siteSchema, createdAt: z.string().min(1), inspector: z.string().min(1),
+  executiveSummary: z.string(), recipients: z.array(z.string().trim().min(1)),
+  totalInspected: z.number().int().nonnegative(), passedCount: z.number().int().nonnegative(), failedCount: z.number().int().nonnegative(),
+  tradeStats: z.array(z.object({ trade: z.string(), inspected: z.number().int().nonnegative(), passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), passRate: z.number().min(0).max(100) })),
+  items: z.array(z.object({ wrId: z.string().min(1), wrType: z.enum(["PM", "FJ"]), trade: z.string(), buildingId: z.string(), craftperson: z.string(), verdict: z.enum(["Pass", "Fail"]), issueDescription: z.string().optional(), reopenedTo50: z.boolean().optional(), followUpWrId: z.string().optional() })),
+});
 const technicianFieldUpdateSchema = z.object({
   id: z.string().min(1), wrId: z.string().min(1), craftpersonId: z.string().min(1), craftpersonName: z.string().min(1),
   createdAt: z.string().min(1),
@@ -85,6 +97,8 @@ const technicianFieldUpdateSchema = z.object({
 });
 const workRequestRecord = z.object({
   WR_ID: z.string().min(1),
+  QA_AuditStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
+  qaStagedVerdict: qaStagedVerdictSchema.optional(),
   technicianFieldUpdates: z.array(technicianFieldUpdateSchema).optional(),
 }).catchall(z.unknown()).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." });
 const stateSchema = z.object({
@@ -104,6 +118,7 @@ const stateSchema = z.object({
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),
+  qaAuditReports: z.array(qaReportSchema).optional(),
   workRequests: z.array(workRequestRecord),
   deletedWorkRequests: records.optional(),
   users: records,
@@ -141,6 +156,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
   if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
+  if (state.qaAuditReports?.some((item) => item.siteId !== site)) return false;
   if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;

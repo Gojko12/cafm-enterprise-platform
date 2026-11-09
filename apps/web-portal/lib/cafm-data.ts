@@ -1,4 +1,4 @@
-import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, QAAuditReport, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
 
 type AssignmentRole = "ESA_TM" | "ESA_CCM" | "TRADE_TM" | "TRADE_CM" | "ESA_TO" | "ESA_LJM" | "ESA_DO" | "ESA_IM";
 export interface TradeRoleMapping {
@@ -46,5 +46,6 @@ export interface DemoData {
   siteRoleAssignments: SiteRoleAssignment[];
   qaInspectorAssignments?: QAInspectorAssignment[];
   qaFailureReasons?: string[];
+  qaAuditReports?: QAAuditReport[];
   mobileMutationIds: string[];
 }

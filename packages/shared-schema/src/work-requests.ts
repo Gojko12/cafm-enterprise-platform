@@ -153,7 +153,20 @@ export const WR_Statuses: readonly WRStatusDefinition[] = Object.freeze([
 ]);
 
 export const WR_StatusesSchema = z.array(WRStatusDefinitionSchema);
-export const QAAuditStatusSchema = z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]);
+export const QAAuditStatusSchema = z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]);
+export const QAStagedVerdictSchema = z.object({
+  verdict: z.enum(["Pass", "Fail"]), inspector: z.string().min(1), stagedAt: z.string().min(1),
+  failureReason: z.string().optional(), additionalNotes: z.string().optional(), issueDescription: z.string().optional(),
+  reopenTo50: z.boolean(), spawnFollowUpFJ: z.boolean(),
+});
+export const QAAuditReportSchema = z.object({
+  id: z.string().min(1), siteId: SiteIdSchema, createdAt: z.string().min(1), inspector: z.string().min(1),
+  executiveSummary: z.string(), recipients: z.array(z.string().trim().min(1)),
+  totalInspected: z.number().int().nonnegative(), passedCount: z.number().int().nonnegative(), failedCount: z.number().int().nonnegative(),
+  tradeStats: z.array(z.object({ trade: z.string(), inspected: z.number().int().nonnegative(), passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), passRate: z.number().min(0).max(100) })),
+  items: z.array(z.object({ wrId: z.string().min(1), wrType: z.enum(["PM", "FJ"]), trade: z.string(), buildingId: z.string(), craftperson: z.string(), verdict: z.enum(["Pass", "Fail"]), issueDescription: z.string().optional(), reopenedTo50: z.boolean().optional(), followUpWrId: z.string().optional() })),
+});
+export type QAAuditReport = z.infer<typeof QAAuditReportSchema>;
 export const QASelectionModeSchema = z.enum(["ComputerRandom5Percent", "ManualInspectorPick", "QRScanOnSite"]);
 
 // Long Job Acceptance Gates Schema
@@ -288,6 +301,7 @@ export const BaseWorkRequestSchema = z.object({
   QA_InspectionStatus: z.enum(["Pending", "Passed", "ToBeCorrected"]).optional(),
   QA_InspectedBy: z.string().optional(),
   QA_AuditStatus: QAAuditStatusSchema.optional(),
+  qaStagedVerdict: QAStagedVerdictSchema.optional(),
   QA_SelectionMode: QASelectionModeSchema.nullish(),
   QA_InspectedDate: z.string().optional(),
   QA_CompletionDate: z.string().optional(),

@@ -90,6 +90,7 @@ function scopeData(data: DemoData, site: SiteId): DemoData {
     siteRoleMappings: data.siteRoleMappings.filter((item) => item.SiteId === site),
     siteRoleAssignments: data.siteRoleAssignments.filter((item) => item.SiteId === site),
     qaInspectorAssignments: (data.qaInspectorAssignments ?? []).filter((item) => item.siteId === site),
+    qaAuditReports: (data.qaAuditReports ?? []).filter((item) => item.siteId === site),
   };
 }
 

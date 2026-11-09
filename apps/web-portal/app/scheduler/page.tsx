@@ -10,6 +10,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
 import { HourlyTimeline } from "@/components/modules/HourlyTimeline";
 import { FieldAlerts } from "@/components/modules/FieldAlerts";
+import { QAReportNotifications } from "@/components/modules/QAReportNotifications";
 import type { TimelineSpotlight } from "@/components/modules/HourlyTimeline";
 import { MultiSelectFilter } from "@/components/common/MultiSelectFilter";
 import { tradeColor } from "@/lib/trade-colors";
@@ -239,6 +240,7 @@ function SchedulerContent() {
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
+    <QAReportNotifications />
     <FieldAlerts requests={siteRequests} canReply={!!permissions?.canScheduleCraftperson} onOpen={setOpen} onShow={(wr, update) => {
       setIsolateWrId(null); setDisputeMode("all");
       if (intervalFor(wr, update.craftpersonId)) locate(wr, update.craftpersonId);

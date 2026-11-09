@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/lib/hooks/useApp";
 import { getSampleData } from "@/lib/utils/sampleData";
+import { QAReportNotifications } from "@/components/modules/QAReportNotifications";
 
 export default function DashboardPage() {
   const { currentRole, useSampleData } = useApp();
@@ -53,6 +54,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-8">
+      <QAReportNotifications />
       {/* Welcome Banner */}
       <div className="max-w-7xl mx-auto bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg p-8 text-white">
         <h1 className="text-3xl font-bold">Welcome to Enterprise CAFM</h1>
