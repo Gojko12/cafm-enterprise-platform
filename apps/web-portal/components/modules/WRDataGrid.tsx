@@ -13,11 +13,15 @@ import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
 import { mapWRDisputes } from "@/lib/disputes";
 import type { DisputeViewMode } from "@/lib/disputes";
 import { useQAActions } from "@/lib/use-qa-actions";
+import { WRSignals } from "./WRSignals";
+import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import type { SignalTab } from "@/lib/wr-signals";
 
-type Column = "id" | "description" | "status" | "percentage" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes" | "qa";
+type Column = "id" | "description" | "status" | "percentage" | "signals" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes" | "qa";
 const columns: { key: Column; label: string }[] = [
   { key: "id", label: "WR ID" }, { key: "description", label: "Title / Description" },
   { key: "status", label: "Status" }, { key: "percentage", label: "Substatus %" },
+  { key: "signals", label: "Signals / Alerts" },
   { key: "trade", label: "Trade" }, { key: "building", label: "Building" },
   { key: "floor", label: "Floor" }, { key: "room", label: "Room" }, { key: "equipment", label: "Equipment" },
   { key: "cost", label: "Estimated Cost (EUR)" }, { key: "costType", label: "Cost Type" },
@@ -25,7 +29,7 @@ const columns: { key: Column; label: string }[] = [
   { key: "margin", label: "Margin Date" }, { key: "created", label: "Created" }, { key: "disputes", label: "Disputes" }, { key: "qa", label: "QA Audit Status" },
 ];
 
-export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, requestType }: { requests: BaseWorkRequest[]; onOpen: (wr: BaseWorkRequest) => void; grouped?: boolean; onFilterCount?: (count: number) => void; requestType: "PM" | "FJ" | "LJ" }) {
+export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, requestType, signalFilters }: { requests: BaseWorkRequest[]; onOpen: (wr: BaseWorkRequest, tab?: SignalTab) => void; grouped?: boolean; onFilterCount?: (count: number) => void; requestType: "PM" | "FJ" | "LJ"; signalFilters?: React.ReactNode }) {
   const { data, setData } = useCafmStore();
   const { permissions } = useActiveUserPermissions();
   const { activePerson, activeSiteId } = useSiteContext();
@@ -47,6 +51,11 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "description": return wr.Description;
       case "status": return `${wr.WorkRequestStatus} · ${wr.WorkRequestSubstatus}`;
       case "percentage": return `${wr.Percentage}%`;
+      case "signals": return [
+        getUnfavourableStepCount(wr, data) ? `${getUnfavourableStepCount(wr, data)} Unfavourable` : "",
+        wr.WR_Type === "PM" && getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length ? `${getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length} Follow-Up FJ` : "",
+        getParentPM(wr, data.workRequests) ? `Follow-up of PM #${getParentPM(wr, data.workRequests)!.WR_ID}` : "",
+      ].filter(Boolean).join(" · ");
       case "trade": return wr.TradeName ?? wr.TradeId ?? "";
       case "building": return wr.bl_id;
       case "floor": return wr.LevelName ?? "";
@@ -65,7 +74,11 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "qa": return wr.WR_Type === "LJ" ? "—" : wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? "⚠ QA REWORK REQUIRED" : wr.QA_AuditStatus ?? "None";
     }
   };
-  const config = useTableColumns(`work-requests-${requestType}`, columns.map(({ key, label }) => ({ id: key, label, value: (wr: BaseWorkRequest) => key === "cost" ? wr.EstimatedCostEur : key === "percentage" ? wr.Percentage : value(wr, key) })));
+  const savedConfig = useTableColumns(`work-requests-${requestType}`, columns.map(({ key, label }) => ({ id: key, label, value: (wr: BaseWorkRequest) => key === "cost" ? wr.EstimatedCostEur : key === "percentage" ? wr.Percentage : value(wr, key) })));
+  const visibleColumns = savedConfig.visible.filter((column) => !["id", "percentage", "signals"].includes(column.id));
+  const signalColumn = savedConfig.ordered.find((column) => column.id === "signals")!;
+  const primaryColumns = ["id", "percentage"].flatMap((id) => savedConfig.visible.filter((column) => column.id === id));
+  const config = { ...savedConfig, visible: [...primaryColumns, signalColumn, ...visibleColumns], width: (id: string) => id === "signals" ? Math.max(240, savedConfig.width(id)) : savedConfig.width(id) };
   const visible = config.sorted(requests.filter((wr) => (disputeMode !== "only" || (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0) && config.visible.every(({ id }) =>
     value(wr, id as Column).toLowerCase().includes((filters[id as Column] ?? "").trim().toLowerCase()))));
   const groups = grouped ? groupLongJobs(visible) : [];
@@ -117,10 +130,10 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
   };
   const row = (wr: BaseWorkRequest) => <tr key={wr.WR_ID} className={`border-t hover:bg-slate-50 ${disputeMode === "highlight" ? (disputeMap.get(wr.WR_ID)?.length ? "border-l-4 border-l-rose-600 bg-rose-50 ring-1 ring-rose-300" : "opacity-40") : ""}`} onDoubleClick={() => onOpen(wr)}>
     <td className="p-2" title={`Select ${wr.WR_ID}`} onDoubleClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${wr.WR_ID}`} checked={selected.includes(wr.WR_ID)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, wr.WR_ID] : current.filter((id) => id !== wr.WR_ID))} /></td>
-    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : value(wr, key)}><div className="truncate">{key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{value(wr, key)}</span> : value(wr, key) || "—"}</div></td>; })}
+    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : value(wr, key)}><div className={key === "signals" ? "" : "truncate"}>{key === "signals" ? <WRSignals wr={wr} onOpen={onOpen} /> : key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{value(wr, key)}</span> : value(wr, key) || "—"}</div></td>; })}
     <td className="p-2" title="Open / Edit" onDoubleClick={(event) => event.stopPropagation()}><button className="block max-w-full truncate text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
   return <div className="space-y-2">
-    <div className="flex justify-between"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{config.menu}</div>
+    <div className="flex flex-wrap items-center gap-2"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{signalFilters}<div className="ml-auto">{config.menu}</div></div>
     {error && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
     {selected.length > 0 && <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded border bg-white p-2 text-xs shadow">
       <strong>{selected.length} selected ({selected.filter((id) => !displayed.some((wr) => wr.WR_ID === id)).length} hidden) · Bulk Actions</strong>

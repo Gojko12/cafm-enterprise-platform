@@ -27,6 +27,7 @@ interface TechnicianHomeProps {
   viewMode?: "card" | "compact";
   layout?: WrLayout;
   onLayoutChange?: (layout: WrLayout) => void;
+  onResetFilters?: () => void;
 }
 
 export type Agenda = "agenda" | "overdue" | "today" | "upcoming" | "all";
@@ -58,6 +59,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   viewMode = "card",
   layout = "list",
   onLayoutChange,
+  onResetFilters,
 }) => {
   const [activeTab, setActiveTabState] = useState<"my-wrs" | "unassigned">("my-wrs");
   const setActiveTab = (next: "my-wrs" | "unassigned") => { setActiveTabState(next); onTabChange?.(next); };
@@ -79,15 +81,12 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   };
 
   const currentDate = localDateTime(new Date(now)).slice(0, 10);
-  const typedFor = (list: BaseWorkRequest[]) => list;
-  const typed = typedFor(activeTab === "my-wrs" ? myWRs : unassignedWRs);
+  const typed = activeTab === "my-wrs" ? myWRs : unassignedWRs;
   const dateOf = (wr: BaseWorkRequest) => scheduledSlot(wr, technician)?.assignedStartDateTime.slice(0, 10) ?? wr.StartDate_DateToPerform;
   const overdue = (wr: BaseWorkRequest) => isOverdue(wr, new Date(now), technician);
-  const agendaMatch = (wr: BaseWorkRequest) => agenda === "agenda" || agenda === "all" || (agenda === "overdue" ? overdue(wr) : agenda === "today" ? dateOf(wr) === currentDate : !!dateOf(wr) && dateOf(wr)! > currentDate);
-  const displayWRs = typed.filter(agendaMatch);
-  const myCount = typedFor(myWRs).filter(agendaMatch).length;
-  const unassignedCount = typedFor(unassignedWRs).length;
-  const scheduleBlockedUnassigned = activeTab === "unassigned" && displayWRs.length === 0 && typed.length > 0;
+  const displayWRs = typed;
+  const myCount = myWRs.length;
+  const unassignedCount = unassignedWRs.length;
   const group = (wr: BaseWorkRequest) => {
     if (overdue(wr)) return "🚨 Overdue / Behind Planned Schedule";
     const date = dateOf(wr);
@@ -132,11 +131,11 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
     <div className="flex flex-col h-full mobile-technician-home">
       {/* Tab Switcher */}
       <div className="border-b border-gray-200 bg-white sticky top-0 z-30">
-        <div className="flex items-center gap-2 px-3">
+        <div className="flex min-w-0 items-center gap-1 px-2">
           {menuButton}
           <button
             onClick={() => setActiveTab("my-wrs")}
-            className={`py-3 px-2 font-medium text-sm border-b-2 transition-colors ${
+            className={`shrink-0 whitespace-nowrap py-3 px-1 font-medium text-xs border-b-2 transition-colors ${
               activeTab === "my-wrs"
                 ? "border-blue-500 text-blue-600"
                 : "border-transparent text-gray-600 hover:text-gray-900"
@@ -147,19 +146,19 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
           </button>
           <button
             onClick={() => setActiveTab("unassigned")}
-            className={`py-3 px-2 font-medium text-sm border-b-2 transition-colors ${
+            className={`shrink-0 whitespace-nowrap py-3 px-1 font-medium text-xs border-b-2 transition-colors ${
               activeTab === "unassigned"
                 ? "border-blue-500 text-blue-600"
                 : "border-transparent text-gray-600 hover:text-gray-900"
             }`}
             aria-selected={activeTab === "unassigned"}
           >
-            Unassigned ({unassignedCount})
+            <span className="hidden min-[380px]:inline">Unassigned</span><span className="min-[380px]:hidden">Pool</span> ({unassignedCount})
           </button>
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             <div role="group" aria-label="WR layout" className="flex overflow-hidden rounded-lg border border-slate-300">
-              <button type="button" aria-label="List view" aria-pressed={layout === "list"} title="List" onClick={() => onLayoutChange?.("list")} className={`px-2 py-1.5 text-xs font-semibold ${layout === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`}>☰</button>
-              <button type="button" aria-label="Calendar view" aria-pressed={layout === "calendar"} title="Calendar" onClick={() => onLayoutChange?.("calendar")} className={`px-2 py-1.5 text-xs font-semibold ${layout === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`}>📅</button>
+              <button type="button" aria-label="List view" aria-pressed={layout === "list"} title="List" onClick={() => onLayoutChange?.("list")} className={`flex h-9 shrink-0 items-center px-2 ${layout === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" /></svg></button>
+              <button type="button" aria-label="Calendar view" aria-pressed={layout === "calendar"} title="Calendar" onClick={() => onLayoutChange?.("calendar")} className={`flex h-9 shrink-0 items-center px-2 ${layout === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1" /><path d="M5 1v4M11 1v4M2 7h12M5 10h2M9 10h2" /></svg></button>
             </div>
             {filterControl}
           </div>
@@ -170,15 +169,9 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-20">
         {layout === "calendar" ? (
-          <TechnicianCalendarView wrs={activeTab === "my-wrs" ? myWRs : unassignedWRs} technician={technician} now={now} freezes={freezes} onOpenWR={onOpenWR} />
+          <TechnicianCalendarView wrs={displayWRs} technician={technician} now={now} freezes={freezes} onOpenWR={onOpenWR} onResetFilters={onResetFilters} />
         ) : isEmptyState ? (
           <div className="flex h-64 items-center justify-center">
-            {scheduleBlockedUnassigned ? (
-              <div className="space-y-3 px-4 text-center">
-                <p className="text-sm font-medium text-gray-600">No unassigned WRs match '{agenda === "overdue" ? "Overdue" : agenda === "today" ? "Today" : "Upcoming"}' / current filters — {typed.length} unassigned WR{typed.length === 1 ? "" : "s"} available</p>
-                <button className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white" onClick={() => setAgenda("all")}>Show Available Unassigned WRs</button>
-              </div>
-            ) : (
             <div className="text-center">
               <p className="text-gray-500 text-lg font-medium mb-2">
                 {activeTab === "my-wrs"
@@ -190,8 +183,8 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                   ? "Check back later for new assignments"
                   : "Browse My WRs to get started"}
               </p>
+              <button type="button" className="mt-3 rounded-lg border px-3 py-2 text-sm text-blue-700" onClick={onResetFilters}>Reset Filters</button>
             </div>
-            )}
           </div>
         ) : (
           <div className="space-y-0">

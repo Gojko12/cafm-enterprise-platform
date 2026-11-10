@@ -120,6 +120,15 @@ const technicianFieldUpdateSchema = z.object({
 });
 const workRequestRecord = z.object({
   WR_ID: z.string().min(1),
+  ParentPM_WR_ID: z.string().min(1).optional(),
+  ParentWR_ID: z.string().min(1).optional(),
+  parentWrId: z.string().min(1).optional(),
+  sourcePmWrId: z.string().min(1).optional(),
+  OriginWR_ID: z.string().min(1).optional(),
+  FollowUpFJIds: z.array(z.string().min(1)).optional(),
+  originatingChecklistStepId: z.string().min(1).optional(),
+  originatingChecklistStepLabel: z.string().min(1).optional(),
+  updatedAt: z.string().optional(),
   QA_AuditStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
   qaStagedVerdict: qaStagedVerdictSchema.optional(),
   qaTeamLeaderChallenges: z.array(qaChallengeSchema).optional(),

@@ -31,9 +31,10 @@ interface Props {
   now: number;
   freezes?: LocationFreeze[];
   onOpenWR?: (wrId: string) => void;
+  onResetFilters?: () => void;
 }
 
-export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, freezes = [], onOpenWR }) => {
+export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, freezes = [], onOpenWR, onResetFilters }) => {
   const today = calendarDate(new Date(now));
   const [basis, setBasis] = useState<DateBasis>("scheduled");
   const [density, setDensity] = useState<"month" | "week">("month");
@@ -94,6 +95,7 @@ export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, 
   };
 
   return <div className="space-y-2" data-testid="technician-calendar">
+    {!wrs.length && <div className="rounded-lg border p-3 text-center text-sm">No matching work requests. <button type="button" onClick={onResetFilters} className="text-blue-700 underline">Reset Filters</button></div>}
     <div role="group" aria-label="Calendar date basis" className="grid grid-cols-4 overflow-hidden rounded-lg border border-slate-300">
       {BASES.map((item) => <button key={item.id} type="button" aria-pressed={basis === item.id} className={seg(basis === item.id)} onClick={() => setBasis(item.id)}>{item.label}</button>)}
     </div>

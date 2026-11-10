@@ -1,7 +1,8 @@
 "use client";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { getChecklistFinding, getChecklistSteps, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import {
   BaseWorkRequest,
   PM_ScheduleStep,
@@ -52,6 +53,7 @@ interface PMWorkRequestPopupProps {
   onClose: () => void;
   onNavigate: (workRequestId: string) => void;
   onEscalateToLJ: (workRequest: BaseWorkRequest) => void;
+  initialTab?: (typeof TABS)[number];
 }
 
 export function PMWorkRequestPopup({
@@ -59,12 +61,14 @@ export function PMWorkRequestPopup({
   onClose,
   onNavigate,
   onEscalateToLJ,
+  initialTab = TABS[0],
 }: PMWorkRequestPopupProps) {
   const { data, setData } = useCafmStore();
   const { permissions } = useActiveUserPermissions();
   const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const { currentRole } = useApp();
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(TABS[0]);
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(initialTab);
+  useEffect(() => { setActiveTab(initialTab); }, [initialTab, workRequest.WR_ID]);
   const [checklistHistoryOpen, setChecklistHistoryOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [executorOpen, setExecutorOpen] = useState(false);
@@ -89,6 +93,7 @@ export function PMWorkRequestPopup({
   const [commentDraft, setCommentDraft] = useState("");
   const [fastJobDescription, setFastJobDescription] = useState("");
   const [fastJobUrgency, setFastJobUrgency] = useState("Normal");
+  const [fastJobStep, setFastJobStep] = useState("");
 
   const actorId = currentUser?.UserId ?? "current-user";
   const actorName = currentUser?.DisplayName ?? "Current user";
@@ -100,7 +105,8 @@ export function PMWorkRequestPopup({
     item.ChecklistCode === checklistStandard &&
     (!item.SiteId || item.SiteId === workRequest.SiteId),
   );
-  const checklistSteps: PM_ScheduleStep[] = workRequest.ChecklistSteps ?? blueprint?.Steps ?? [];
+  const checklistSteps: PM_ScheduleStep[] = getChecklistSteps(workRequest, data);
+  const unfavourableCount = getUnfavourableStepCount(workRequest, data);
   const equipment = workRequest.EquipmentCodes
     .map((code) => data.equipment.find((item) =>
       item.EquipmentCode === code && item.SiteId === workRequest.SiteId,
@@ -110,11 +116,8 @@ export function PMWorkRequestPopup({
   const stampFreezeAcknowledgment = () => updateWorkRequest((current) => ({
     ...current, freezeAcknowledged: buildFreezeAcknowledgment(wrFreezes, actorName),
   }), `Freeze period safety acknowledgment confirmed by ${actorName}`);
-  const linkedFastJobs = data.workRequests.filter((item) =>
-    (item.WR_Type === "FJ" || item.WR_Type === "LJ") &&
-    item.ParentPM_WR_ID === workRequest.WR_ID &&
-    item.SiteId === workRequest.SiteId,
-  );
+  const linkedFastJobs = getFollowUpFJsForPM(workRequest.WR_ID, data.workRequests);
+  const linkedLongJobs = data.workRequests.filter((item) => item.WR_Type === "LJ" && item.SiteId === workRequest.SiteId && item.ParentPM_WR_ID === workRequest.WR_ID);
   const currentStatusChoice = STATUS_CHOICES.find((item) =>
     item.percentage === workRequest.Percentage &&
     (item.percentage !== 55 || ("reason" in item && workRequest.WorkRequestSubstatus.includes(item.reason))),
@@ -486,9 +489,14 @@ export function PMWorkRequestPopup({
       RequiresInventoryUpdate: false,
       AcceptanceGates: [],
       ParentPM_WR_ID: workRequest.WR_ID,
+      ParentWR_ID: workRequest.WR_ID,
+      sourcePmWrId: workRequest.WR_ID,
+      originatingChecklistStepId: fastJobStep || undefined,
+      originatingChecklistStepLabel: checklistSteps.find((step) => step.StepId === fastJobStep)?.Title,
       EstimatedCostEur: 0,
       Urgency: fastJobUrgency,
       UpdatedAt: now,
+      updatedAt: now,
       Activity: [{
         id: crypto.randomUUID(),
         kind: "log",
@@ -506,6 +514,9 @@ export function PMWorkRequestPopup({
           item.WR_ID === workRequest.WR_ID && item.SiteId === workRequest.SiteId
             ? {
               ...item,
+              FollowUpFJIds: [...new Set([...(item.FollowUpFJIds ?? []), job.WR_ID])],
+              UpdatedAt: now,
+              updatedAt: now,
               Activity: [...(item.Activity ?? []), {
                 id: crypto.randomUUID(),
                 kind: "log" as const,
@@ -522,6 +533,7 @@ export function PMWorkRequestPopup({
       ],
     }));
     setFastJobDescription("");
+    setFastJobStep("");
   };
 
   const setInstallation = (equipmentCode: string, isInstallation: boolean) => {
@@ -594,10 +606,12 @@ export function PMWorkRequestPopup({
           {TABS.map((tab) => (
             <button type="button" key={tab} role="tab" aria-label={tab} title={tab} aria-selected={activeTab === tab}
               onClick={() => setActiveTab(tab)}
-              className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${activeTab === tab
+              className={`flex min-w-0 flex-1 items-center justify-center gap-1 rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${activeTab === tab
                 ? "border-blue-600 bg-blue-50 font-semibold text-blue-800"
                 : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
-              {tab}
+              <span className="min-w-0 truncate">{tab}</span>
+              {tab === "Checklist - Smart PM" && unfavourableCount > 0 && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 text-rose-900">{unfavourableCount}</span>}
+              {tab === "PM Follow-up" && linkedFastJobs.length > 0 && <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 text-indigo-900">{linkedFastJobs.length}</span>}
             </button>
           ))}
         </nav>
@@ -810,20 +824,21 @@ export function PMWorkRequestPopup({
             <input aria-label="Filter follow-up Fast Jobs" placeholder="Filter follow-up Fast Jobs..."
               value={followUpFilter} onChange={(event) => setFollowUpFilter(event.target.value)}
               className="rounded border px-3 py-2" />
+            <label className="block text-sm">Originating checklist step <select aria-label="Originating checklist step" value={fastJobStep} onChange={(event) => setFastJobStep(event.target.value)} className="rounded border px-3 py-2"><option value="">General follow-up</option>{checklistSteps.map((step) => <option key={step.StepId} value={step.StepId}>{step.Title}</option>)}</select></label>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[950px] text-left text-sm">
                 <thead className="bg-slate-50"><tr>
-                  {["Urgency", "Description", "Reported date", "Problem location", "Job ID", "Due date", "Start date", "Actions"].map((title) => <th key={title} className="p-3">{title}</th>)}
+                  {["FJ WR ID", "Title", "Status", "Substatus %", "Originating checklist step", "Due date", "Start date", "Actions"].map((title) => <th key={title} className="p-3">{title}</th>)}
                 </tr></thead>
                 <tbody>{linkedFastJobs.filter((job) =>
                   `${job.WR_ID} ${job.Description} ${job.ProblemLocation ?? ""}`.toLowerCase().includes(followUpFilter.toLowerCase()),
                 ).map((job) => <tr key={job.WR_ID} className="border-t">
-                  <td className="p-3">{job.Urgency ?? "Normal"}</td><td className="p-3">{job.Description}</td>
-                  <td className="p-3">{job.CreatedDate}</td><td className="p-3">{job.ProblemLocation}</td>
-                  <td className="p-3">{job.JobID ?? job.WR_ID}</td><td className="p-3">{job.DueDate ?? "—"}</td>
+                  <td className="p-3">{job.WR_ID}</td><td className="p-3">{job.Description}</td>
+                  <td className="p-3">{job.WorkRequestStatus} · {job.WorkRequestSubstatus}</td><td className="p-3">{job.Percentage}%</td>
+                  <td className="p-3">{job.originatingChecklistStepLabel ?? job.originatingChecklistStepId ?? "—"}</td><td className="p-3">{job.DueDate ?? "—"}</td>
                   <td className="p-3">{job.StartDate ?? "—"}</td>
                   <td className="space-x-2 p-3">
-                    <button type="button" onClick={() => onNavigate(job.WR_ID)} className="text-blue-700 underline">Open {job.WR_Type}</button>
+                    <button type="button" onClick={() => onNavigate(job.WR_ID)} className="text-blue-700 underline">Open FJ →</button>
                     {job.WR_Type === "FJ" && !job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onEscalateToLJ(job)} className="text-orange-700 underline">Escalate to LJ</button>}
                     {job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onNavigate(job.EscalatedToLJ_WR_ID!)} className="text-orange-700 underline">Open LJ</button>}
                   </td>
@@ -832,6 +847,7 @@ export function PMWorkRequestPopup({
                 </tbody>
               </table>
             </div>
+            {linkedLongJobs.length > 0 && <div className="space-y-1 rounded border p-3"><h4 className="font-semibold">Linked Long Jobs</h4>{linkedLongJobs.map((job) => <p key={job.WR_ID}><button type="button" className="text-blue-700 underline" onClick={() => onNavigate(job.WR_ID)}>Open LJ {job.WR_ID} →</button> · {job.Description} · {job.Percentage}%</p>)}</div>}
           </section>}
 
           {activeTab === "AuditLog" && <section className="space-y-4 rounded border bg-white p-4">
@@ -880,22 +896,23 @@ export function PMWorkRequestPopup({
                 </tr></thead>
                 <tbody>{checklistSteps.filter((step) => {
                   const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
-                  const isComplete = !!answer;
+                  const isComplete = !!getChecklistFinding(workRequest, step.StepId);
                   return `${step.Title} ${step.StepId}`.toLowerCase().includes(stepFilter.toLowerCase()) &&
                     (stepCompletionFilter === "all" || (stepCompletionFilter === "yes") === isComplete);
                 }).map((step, index) => {
                   const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
+                  const finding = getChecklistFinding(workRequest, step.StepId);
                   const shownValue = answer
                     ? Array.isArray(answer.value) ? answer.value.join(", ") : String(answer.value)
                     : "—";
                   return <tr key={step.StepId} className="border-t">
                     <td className="p-3">{index + 1}</td><td className="p-3">{step.Title}</td>
                     <td className="p-3">{step.Unit ? `${step.MinThreshold ?? "—"}–${step.MaxThreshold ?? "—"} ${step.Unit}` : step.Unit ?? "—"}</td>
-                    <td className="p-3">{shownValue}</td><td className="p-3">{answer ? "Yes" : "No"}</td>
+                    <td className="p-3">{shownValue}</td><td className="p-3">{finding ? "Yes" : "No"}</td>
                     <td className="p-3">{answer?.comment ?? "—"}</td>
                     <td className="p-3">
-                      {answer && <span className={`rounded px-2 py-1 text-xs font-semibold ${answer.passed ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                        {answer.passed ? "Favourable" : "Unfavourable"}
+                      {finding && <span className={`rounded px-2 py-1 text-xs font-semibold ${finding === "Favourable" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                        {finding}
                       </span>}
                       {answer?.photoPaths?.map((photo) => <img key={photo} src={photo} alt={`Failure evidence for ${step.Title}`} className="mt-2 max-h-20 max-w-32 rounded object-cover" />)}
                     </td>

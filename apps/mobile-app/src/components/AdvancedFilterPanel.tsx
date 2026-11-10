@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Building, Equipment, Floor, Room } from "@cafm/shared-schema";
-import { FilterCriteria, WorkTypeCode } from "@/lib/store";
+import { extractPctKey, FilterCriteria, WorkTypeCode } from "@/lib/store";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
 
 interface AdvancedFilterPanelProps {
@@ -11,7 +12,6 @@ interface AdvancedFilterPanelProps {
   trades: string[];
   currentFilters: FilterCriteria;
   onFiltersChange: (filters: FilterCriteria) => void;
-  onApplyFilters: () => void;
   onResetFilters: () => void;
   substatusOptions: { value: number; count: number }[];
   defaultSubstatuses: number[];
@@ -30,7 +30,6 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   trades,
   currentFilters,
   onFiltersChange,
-  onApplyFilters,
   onResetFilters,
   substatusOptions,
   defaultSubstatuses,
@@ -69,7 +68,7 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
 
   const handleResetFilters = () => onResetFilters();
   const set = (patch: Partial<FilterCriteria>) => onFiltersChange({ ...currentFilters, ...patch });
-  const selectedPercents = currentFilters.selectedSubstatuses ?? [];
+  const selectedPercents = (currentFilters.selectedSubstatuses ?? []).map((Percentage) => Number(extractPctKey({ Percentage }).replace("%", "")));
   const isDefaultSubstatus = selectedPercents.length === defaultSubstatuses.length && defaultSubstatuses.every((value) => selectedPercents.includes(value));
   const togglePercent = (value: number) => set({ selectedSubstatuses: selectedPercents.includes(value) ? selectedPercents.filter((item) => item !== value) : [...selectedPercents, value].sort((a, b) => a - b) });
   const activeCount = Object.entries(currentFilters).filter(([key, value]) => key === "selectedSubstatuses" ? !isDefaultSubstatus : key === "workTypes" ? false : (value instanceof Set ? value.size > 0 : Boolean(value))).length + (workTypes.length > 0 && workTypes.length < 3 ? 1 : 0) + (schedule === "overdue" || schedule === "today" ? 1 : 0);
@@ -92,15 +91,14 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
     <div className="mobile-filter-panel">
       <button
         onClick={() => setIsExpanded(true)}
-        className="relative rounded-full border bg-white px-3 py-2 text-sm font-medium"
+        className="flex h-9 shrink-0 items-center whitespace-nowrap rounded-xl border bg-white px-2.5 text-xs font-semibold"
         aria-expanded={isExpanded}
       >
-        <span>⚡ Filter ({activeCount})</span>
-        {activeCount > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-blue-600" />}
+        <span>⚡ <span className="hidden min-[380px]:inline">Filter </span>({activeCount})</span>
       </button>
 
-      {isExpanded && (
-        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50" onClick={() => setIsExpanded(false)}>
+      {isExpanded && createPortal(
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-900/50" onClick={() => setIsExpanded(false)}>
           <div role="dialog" aria-modal="true" aria-label="Advanced filters" className="flex max-h-[85%] w-full flex-col rounded-t-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b px-4 py-2.5">
               <h2 className="text-base font-bold">Filters</h2>
@@ -194,11 +192,12 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
             </div>
 
             <div className="flex gap-2 border-t bg-white px-3.5 py-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))]">
-              <button onClick={handleResetFilters} className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700">Reset</button>
-              <button onClick={() => { onApplyFilters(); setIsExpanded(false); }} className="flex-[2] rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white">Apply Filters ({resultCount} matches)</button>
+              <button onClick={handleResetFilters} className="flex-1 rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700">Reset all</button>
+              <button onClick={() => setIsExpanded(false)} className="flex-[2] rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white">Done · Show {resultCount} WRs</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.querySelector(".mobile-app") ?? document.body,
       )}
     </div>
   );

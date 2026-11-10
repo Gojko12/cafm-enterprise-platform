@@ -4,13 +4,14 @@ import type { PM_StepDefinition } from "./ChecklistExecutor";
 
 type Result = NonNullable<BaseWorkRequest["ChecklistResults"]>[number];
 
-export function MobileChecklist({ wr, steps, save, exit, followUp, complete, todoMode = false, timerLabel, timerRunning, navigationRef, startStep = 0 }: {
+export function MobileChecklist({ wr, steps, save, exit, followUp, complete, todoMode = false, timerLabel, timerRunning, navigationRef, startStep = 0, canAmend = false }: {
   wr: BaseWorkRequest;
   steps: PM_StepDefinition[];
   startStep?: number;
   save: (results: Result[], baseline: Result[]) => Promise<void>;
   exit: () => void;
-  followUp?: () => void;
+  followUp?: (step: { id: string; label: string }) => void;
+  canAmend?: boolean;
   complete?: () => void;
   todoMode?: boolean;
   timerLabel: string;
@@ -24,6 +25,10 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
+  const review = wr.Percentage >= 78;
+  const readOnly = review && !(wr.Percentage === 78 && canAmend && unlocked);
+  const editable = !readOnly && (review || timerRunning);
   const readingRef = useRef(false);
   const latest = useRef(values);
   const saved = useRef(JSON.stringify(values));
@@ -50,6 +55,7 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
     return () => window.clearTimeout(timer);
   }, [values]);
   const change = (step: PM_StepDefinition, patch: Partial<Result>) => {
+    if (!editable) { setError("Unlock the completed checklist or start timing before changing answers."); return; }
     const previous = latest.current.find((item) => item.stepId === step.StepId);
     const next: Result = { stepId: step.StepId, value: "", passed: true, ...previous, ...patch, completedAt: patch.value !== undefined && JSON.stringify(patch.value) !== JSON.stringify(previous?.value) ? new Date().toISOString() : previous?.completedAt ?? new Date().toISOString() };
     const updated = [...latest.current.filter((item) => item.stepId !== step.StepId), next];
@@ -68,7 +74,7 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
     const result = values.find((item) => item.stepId === step.StepId);
     const val = result?.value;
     const optionClass = (selected: boolean) => `flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left ${selected ? "border-2 border-blue-700 bg-blue-600 font-semibold text-white shadow-sm" : "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"}`;
-    return <article key={step.StepId} className="space-y-3 rounded border bg-white p-4">
+    return <article key={step.StepId} className="space-y-3 rounded border bg-white p-4"><fieldset disabled={leaving || !editable} className="space-y-3">
       <h3 className="font-semibold">{step.StepNumber}. {step.StepTitle}</h3>
       {step.Instruction && <p className="whitespace-pre-wrap text-sm text-slate-600">{step.Instruction}</p>}
       {step.InputType === "Boolean" && (todoMode ? <button type="button" aria-pressed={val !== undefined && val !== ""} className={optionClass(val !== undefined && val !== "")} onClick={() => change(step, { value: val !== undefined && val !== "" ? "" : "true", passed: result?.passed ?? true })}><span>☑ Completed</span><span>{val !== undefined && val !== "" ? "✓ Selected" : "○"}</span></button> : <div className="grid gap-2">{([true, false] as const).map((value) => <button type="button" key={String(value)} aria-pressed={val === String(value)} className={optionClass(val === String(value))} onClick={() => change(step, { value: String(value), passed: value === (step.favourableBoolean ?? true) })}><span>{value ? "Yes" : "No"}</span><span>{val === String(value) ? "● Selected" : "○"}</span></button>)}</div>)}
@@ -78,17 +84,18 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
       {step.InputType === "MultiSelect" && <div role="group" aria-label="Answers" className="grid gap-2">{step.Options?.map((option) => { const selected = Array.isArray(val) ? val : []; const checked = selected.includes(option.OptionValue); return <button type="button" key={option.OptionId} aria-pressed={checked} className={optionClass(checked)} onClick={() => { const next = checked ? selected.filter((item) => item !== option.OptionValue) : [...selected, option.OptionValue]; change(step, { value: next, passed: !step.Options?.some((item) => next.includes(item.OptionValue) && item.TriggersFailure) }); }}><span>{option.OptionValue}</span><span>{checked ? "✓ Selected" : "□"}</span></button>; })}</div>}
       {todoMode && <div className="grid gap-2">{([true, false] as const).map((value) => <button type="button" key={String(value)} aria-pressed={!!result && result.passed === value} className={optionClass(!!result && result.passed === value)} onClick={() => change(step, { passed: value })}><span>{value ? "Favourable" : "Unfavourable"}</span><span>{result && result.passed === value ? "● Selected" : "○"}</span></button>)}</div>}
       {result && (typeof val === "number" || (typeof val === "string" && !!val.trim()) || (Array.isArray(val) && val.length > 0)) && <p className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${result.passed ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{result.passed ? "✓ Favourable" : "⚠ Unfavourable — Action / Comment Recommended"}</p>}
-      <div className="space-y-2 rounded bg-slate-50 p-3">{result && !result.passed && !todoMode && <p className="text-rose-700">{step.RequiresCommentOnFailure !== false ? "Comment required" : "Comment optional"} · {step.RequiresPhotoOnFailure !== false ? "Photo required" : "Photo optional"}</p>}<label className="block text-sm">Technician Step Comment<textarea aria-label="Technician comment" className="block w-full rounded border p-2" value={result?.comment ?? ""} onChange={(e) => change(step, { comment: e.target.value })} /></label>{todoMode && <p className="text-xs text-slate-600">Add before and after photos as needed.</p>}<div className="flex flex-wrap items-center gap-2"><label className="inline-flex cursor-pointer rounded border bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">📷 + Add Photo<input type="file" className="hidden" accept="image/*" disabled={reading} onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (!file) return; if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Choose an image no larger than 2 MB."); return; } readingRef.current = true; setReading(true); const reader = new FileReader(); reader.onerror = () => setError("Could not read photo."); reader.onload = () => { if (typeof reader.result === "string") change(step, { photoPaths: [...(latest.current.find((item) => item.stepId === step.StepId)?.photoPaths ?? []), reader.result] }); else setError("Could not read photo."); }; reader.onloadend = () => { readingRef.current = false; setReading(false); }; reader.readAsDataURL(file); }} /></label>{followUp && <button type="button" className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50" onClick={() => leaveSafely(followUp, true)}>+ Follow-up FJ</button>}</div><div className="flex flex-wrap gap-2">{result?.photoPaths?.map((url, i) => <a key={i} href={url} target="_blank" rel="noreferrer"><img src={url} alt={`Step photo ${i + 1}`} className="h-20 w-20 rounded border object-cover" /></a>)}</div></div>
-    </article>;
+      <div className="space-y-2 rounded bg-slate-50 p-3">{result && !result.passed && !todoMode && <p className="text-rose-700">{step.RequiresCommentOnFailure !== false ? "Comment required" : "Comment optional"} · {step.RequiresPhotoOnFailure !== false ? "Photo required" : "Photo optional"}</p>}<label className="block text-sm">Technician Step Comment<textarea aria-label="Technician comment" className="block w-full rounded border p-2" value={result?.comment ?? ""} onChange={(e) => change(step, { comment: e.target.value })} /></label>{todoMode && <p className="text-xs text-slate-600">Add before and after photos as needed.</p>}<div className="flex flex-wrap items-center gap-2"><label className="inline-flex cursor-pointer rounded border bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">📷 + Add Photo<input type="file" className="hidden" accept="image/*" disabled={reading} onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (!file) return; if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Choose an image no larger than 2 MB."); return; } readingRef.current = true; setReading(true); const reader = new FileReader(); reader.onerror = () => setError("Could not read photo."); reader.onload = () => { if (typeof reader.result === "string") change(step, { photoPaths: [...(latest.current.find((item) => item.stepId === step.StepId)?.photoPaths ?? []), reader.result] }); else setError("Could not read photo."); }; reader.onloadend = () => { readingRef.current = false; setReading(false); }; reader.readAsDataURL(file); }} /></label>{followUp && <button type="button" className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50" onClick={() => leaveSafely(() => followUp({ id: step.StepId, label: step.StepTitle }), true)}>+ Follow-up FJ</button>}</div><div className="flex flex-wrap gap-2">{result?.photoPaths?.map((url, i) => <a key={i} href={url} target="_blank" rel="noreferrer"><img src={url} alt={`Step photo ${i + 1}`} className="h-20 w-20 rounded border object-cover" /></a>)}</div></div>
+    </fieldset></article>;
   };
   return <div className="space-y-3 p-4 pb-24"><div className="sticky top-0 z-30 space-y-2 rounded border bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><button disabled={leaving} className="text-blue-700" onClick={() => leaveSafely(exit)}>← Exit to WR Overview (Progress Auto-Saved)</button><button disabled={leaving} className="rounded-full bg-emerald-100 px-2 py-1 text-sm text-emerald-800" onClick={() => leaveSafely(exit)}>⏱ {timerLabel}</button></div><div className="flex gap-2"><button aria-pressed={!all} onClick={() => setAll(false)}>Step-by-Step Mode</button><button aria-pressed={all} onClick={() => setAll(true)}>All Steps List Mode</button></div><div className="flex flex-wrap gap-1">{steps.map((step, i) => <button key={step.StepId} className={`rounded-full border px-2 py-1 text-xs ${!all && i === index ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => { setIndex(i); setAll(false); }}>Step {i + 1}{values.some((item) => item.stepId === step.StepId && item.value !== "") ? " ✓" : ""}</button>)}</div><p className="text-xs">{reading ? "Loading photo…" : saving ? "Saving…" : error ? "Progress not saved" : JSON.stringify(values) !== saved.current ? "Changes pending…" : "Progress saved locally"}</p></div>
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}
-    {!timerRunning && <p role="alert" className="rounded bg-amber-50 p-2 text-amber-900">Your timer is no longer running. Return to the work request and start timing to continue.</p>}
+    {review && <div className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900"><span>{readOnly ? "Completed checklist · read-only review" : "Amending completed answers · changes are audited"}</span>{wr.Percentage === 78 && canAmend && readOnly && <button type="button" className="text-xs underline" onClick={() => setUnlocked(true)}>Unlock to amend answers</button>}</div>}
+    {!timerRunning && !review && <p role="alert" className="rounded bg-amber-50 p-2 text-amber-900">Your timer is no longer running. Return to the work request and start timing to continue.</p>}
     {!steps.length && todoMode && <div className="rounded border bg-white p-4"><p>No checklist steps have been defined by the Team Leader for this Work Request.</p><button disabled={leaving} className="mt-2 text-blue-700 underline" onClick={() => leaveSafely(exit)}>← Exit to WR Overview</button></div>}
-    <fieldset disabled={leaving || !timerRunning} className="space-y-3">
+    <fieldset disabled={leaving} className="space-y-3">
       {all ? steps.map(renderStep) : steps[index] ? renderStep(steps[index]) : !todoMode && <p>No checklist steps available.</p>}
       {!all && steps.length > 0 && <div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex(index - 1)}>← Previous</button><button disabled={index >= steps.length - 1} onClick={() => setIndex(index + 1)}>Next →</button></div>}
-      {complete && steps.length > 0 && (all || index === steps.length - 1) && <button className="rounded bg-blue-800 px-3 py-2 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}
+      {complete && !review && timerRunning && steps.length > 0 && (all || index === steps.length - 1) && <button className="rounded bg-blue-800 px-3 py-2 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}
     </fieldset>
   </div>;
 }

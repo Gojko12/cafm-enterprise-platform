@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
+import { isOverdue } from "../../../web-portal/lib/field-updates";
 
 export type WorkTypeCode = "PM" | "FJ" | "LJ";
 
@@ -9,7 +10,7 @@ export interface FilterCriteria {
   roomCode?: string;
   wrId?: string;
   trade?: string;
-  selectedSubstatuses?: number[];
+  selectedSubstatuses?: Array<number | string>;
   workTypes?: WorkTypeCode[];
   scheduledDateFrom?: string;
   scheduledDateTo?: string;
@@ -133,6 +134,21 @@ export const scheduledSlotStartOf = (wr: BaseWorkRequest) => wr.CraftpersonAssig
 export const scheduledDateOf = (wr: BaseWorkRequest) => scheduledSlotStartOf(wr)?.slice(0, 10);
 export const startDateOf = (wr: BaseWorkRequest) => (wr.StartDate_DateToPerform || wr.StartDate)?.slice(0, 10);
 
+export function extractPctKey(wr: { Percentage?: unknown }): string {
+  const match = String(wr.Percentage ?? "").trim().match(/^(\d+(?:\.\d+)?)/);
+  return match ? `${Number(match[1])}%` : "";
+}
+
+export function matchesAgenda(wr: BaseWorkRequest, agenda: string, technician: string, now: number): boolean {
+  if (agenda === "agenda" || agenda === "all") return true;
+  const date = scheduledDateOf(wr);
+  const today = new Date(now);
+  const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  if (agenda === "today") return date === day;
+  if (agenda === "upcoming") return !!date && date > day;
+  return isOverdue(wr, today, technician);
+}
+
 /**
  * Apply filter criteria to work requests
  */
@@ -145,8 +161,8 @@ export function applyFilters(wrs: BaseWorkRequest[], filters: FilterCriteria): B
   }
 
   if (filters.selectedSubstatuses?.length) {
-    const allowed = new Set(filters.selectedSubstatuses);
-    result = result.filter((wr) => allowed.has(Number(wr.Percentage)));
+    const allowed = new Set(filters.selectedSubstatuses.map((Percentage) => extractPctKey({ Percentage })));
+    result = result.filter((wr) => allowed.has(extractPctKey(wr)));
   }
 
   if (filters.bl_id) {
@@ -162,7 +178,11 @@ export function applyFilters(wrs: BaseWorkRequest[], filters: FilterCriteria): B
   }
 
   if (filters.wrId) {
-    result = result.filter((wr) => wr.WR_ID.includes(filters.wrId!));
+    const query = filters.wrId.trim().toLowerCase();
+    result = result.filter((wr) => {
+      const aliases = wr as BaseWorkRequest & { wr_id?: unknown; id?: unknown };
+      return String(wr.WR_ID ?? aliases.wr_id ?? aliases.id ?? "").toLowerCase().includes(query);
+    });
   }
 
   if (filters.trade) {

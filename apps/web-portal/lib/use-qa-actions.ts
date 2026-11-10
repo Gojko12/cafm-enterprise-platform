@@ -201,16 +201,18 @@ export function useQAActions() {
       followId = `${year}${String(sequence).padStart(6, "0")}`;
       used.add(followId);
       const entry = { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `Created QA corrective follow-up ${followId}.` };
-      updated = { ...updated, Activity: [...(updated.Activity ?? []), entry] };
+      updated = { ...updated, UpdatedAt: now, updatedAt: now,
+        ...(parent.WR_Type === "PM" ? { FollowUpFJIds: [...new Set([...(updated.FollowUpFJIds ?? []), followId])] } : {}),
+        Activity: [...(updated.Activity ?? []), entry] };
       const followUp: BaseWorkRequest = {
         WR_ID: followId, WR_Type: "FJ",
         Description: `QA Rework Follow-Up for ${parent.WR_ID}: ${decision.issueDescription!.trim()}`,
         ProblemLocation: parent.ProblemLocation, TradeId: parent.TradeId, TradeName: parent.TradeName,
         SiteId: parent.SiteId, bl_id: parent.bl_id, LevelName: parent.LevelName, RoomCode: parent.RoomCode,
-        EquipmentCodes: [...parent.EquipmentCodes], OriginatingWR_ID: parent.WR_ID,
-        ...(parent.WR_Type === "PM" ? { ParentPM_WR_ID: parent.WR_ID } : {}),
+        EquipmentCodes: [...parent.EquipmentCodes], OriginatingWR_ID: parent.WR_ID, ParentWR_ID: parent.WR_ID,
+        ...(parent.WR_Type === "PM" ? { ParentPM_WR_ID: parent.WR_ID, sourcePmWrId: parent.WR_ID } : {}),
         ...(parent.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: parent.WR_ID } : {}),
-        ...issued, CreatedDate: now.slice(0, 10), UpdatedAt: now, CreatedBy: actor.name,
+        ...issued, CreatedDate: now.slice(0, 10), UpdatedAt: now, updatedAt: now, CreatedBy: actor.name,
         AssignedCraftpersonIds: [], AssignedUserIds: [], TotalTimeMinutes: 0, StartDateTBD: false,
         IsFrozen: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false,
         AcceptanceGates: [], Activity: [{ ...entry, id: crypto.randomUUID(), text: `Created as QA corrective follow-up for ${parent.WR_ID}.` }],

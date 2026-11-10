@@ -106,26 +106,32 @@ export class OfflineEngine {
    * Write work request to local persistence
    */
   async saveWorkRequest(input: BaseWorkRequest, expectedBase?: BaseWorkRequest | null): Promise<void> {
+    await this.saveWorkRequests([{ input, expectedBase }]);
+  }
+
+  async saveWorkRequests(changes: Array<{ input: BaseWorkRequest; expectedBase?: BaseWorkRequest | null }>): Promise<void> {
     const stampedAt = new Date().toISOString();
-    const wr = { ...input, updatedAt: stampedAt, UpdatedAt: stampedAt } as BaseWorkRequest;
     const db = await getDB();
     const tx = db.transaction(["workRequests", "syncQueue"], "readwrite");
-    const previous = await tx.objectStore("workRequests").get(wr.WR_ID);
-    if (expectedBase !== undefined && stable(previous ?? null) !== stable(expectedBase)) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new Error(`Work request ${wr.WR_ID} changed while it was being edited. Your edits were not saved.`);
+    for (const { input, expectedBase } of changes) {
+      const wr: BaseWorkRequest = { ...input, updatedAt: stampedAt, UpdatedAt: stampedAt };
+      const previous = await tx.objectStore("workRequests").get(wr.WR_ID);
+      if (expectedBase !== undefined && stable(previous ?? null) !== stable(expectedBase)) {
+        tx.abort();
+        await tx.done.catch(() => undefined);
+        throw new Error(`Work request ${wr.WR_ID} changed while it was being edited. Your edits were not saved.`);
+      }
+      await tx.objectStore("workRequests").put(wr);
+      await tx.objectStore("syncQueue").put({
+        QueueId: uuidv4(),
+        MutationType: "WR_UPDATE",
+        Payload: wr,
+        BaseWorkRequest: previous ?? null,
+        SyncStatus: "PENDING",
+        CreatedAt: stampedAt,
+        RetryCount: 0,
+      });
     }
-    await tx.objectStore("workRequests").put(wr);
-    await tx.objectStore("syncQueue").put({
-      QueueId: uuidv4(),
-      MutationType: "WR_UPDATE",
-      Payload: wr,
-      BaseWorkRequest: previous ?? null,
-      SyncStatus: "PENDING",
-      CreatedAt: new Date().toISOString(),
-      RetryCount: 0,
-    });
     await tx.done;
   }
 

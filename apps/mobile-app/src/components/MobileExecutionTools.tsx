@@ -33,6 +33,7 @@ export function stopTechnicianTimer(current: BaseWorkRequest, technician: string
 }
 
 export function startTechnicianTimer(current: BaseWorkRequest, technician: string, technicianName: string): BaseWorkRequest {
+  if (current.Percentage >= 78) throw new Error("Completed work requests cannot start a work timer.");
   if ((current.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt)) throw new Error("A timer is already running on this work request.");
   const now = new Date();
   const slot = scheduledSlot(current, technician);
@@ -52,10 +53,6 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [opinion, setOpinion] = useState(() => {
-    const value = wr.laborEntries?.find((entry) => entry.craftpersonId === technician)?.technicianOpinionMinutes;
-    return value === undefined ? "" : String(value);
-  });
   const active = (wr.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
   const execute = async (change: (current: BaseWorkRequest) => BaseWorkRequest, message: string) => {
     setBusy(true); setError("");
@@ -74,6 +71,7 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
   const legacySessions = (wr.MobileWorkSessions ?? []).filter((item) => item.TechnicianId === technician && !(wr.timeSessions ?? []).some((session) => session.id === item.SessionId));
   const total = laborFor(wr, wr.timeSessions ?? [], technician, new Date(now).toISOString(), person).recordedTimerMinutes;
   const clock = [Math.floor(elapsed / 3600), Math.floor(elapsed / 60) % 60, elapsed % 60].map((n) => String(n).padStart(2, "0")).join(":");
+  if (wr.Percentage >= 78) return <details className="rounded-2xl border bg-white p-4"><summary className="cursor-pointer font-semibold">Recorded Time &amp; Session Log · {total}m across {completedSessions.length + legacySessions.length} sessions</summary><div className="mt-3 space-y-2 text-sm">{completedSessions.map((session) => <p key={session.id}>{formatHumanDateTimeRange(session.startedAt, session.endedAt!)} · {session.durationMinutes}m</p>)}{legacySessions.map((session) => <p key={session.SessionId}>{formatHumanDateTimeRange(session.StartedAt, session.StoppedAt)} · {session.TotalTimeMinutes}m</p>)}{!completedSessions.length && !legacySessions.length && <p>No recorded sessions.</p>}</div></details>;
   return <section id="work-timer" tabIndex={-1} className="space-y-3 rounded border bg-white p-4 focus:ring-4 focus:ring-emerald-400">
     {mode === "timer" && <>
     <h2 className="font-bold">Work timer</h2>
@@ -82,15 +80,6 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
     <p className="rounded bg-blue-50 p-2 text-sm">Total Recorded: {Math.floor(total / 60)}h {total % 60}m across {completedSessions.length + legacySessions.length} sessions</p>
     {completedSessions.map((session) => <p key={session.id} className="text-xs text-slate-600">{formatHumanDateTimeRange(session.startedAt, session.endedAt!)} · {session.durationMinutes} recorded min</p>)}
     {legacySessions.map((session) => <p key={session.SessionId} className="text-xs text-slate-600">{formatHumanDateTimeRange(session.StartedAt, session.StoppedAt)} · {session.TotalTimeMinutes} recorded min{session.PausedDurationMs ? " (excluding pauses)" : ""}</p>)}
-    {wr.Percentage === 78 && <div><label className="block">Technician opinion time (minutes)<input className="ml-2 w-24 rounded border p-1" type="number" min="0" step="1" value={opinion} onChange={(e) => setOpinion(e.target.value)} /></label><button disabled={busy} className="mt-2 rounded border px-3 py-1" onClick={() => {
-      const value = Number(opinion);
-      if (!opinion.trim() || !Number.isInteger(value) || value < 0) { setError("Enter non-negative whole minutes."); return; }
-      void execute((current) => {
-        if (current.Percentage !== 78) throw new Error("The work request is no longer at 78%.");
-        const entry = laborFor(current, current.timeSessions ?? [], technician, new Date().toISOString(), person);
-        return { ...current, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), { ...entry, technicianOpinionMinutes: value, effectiveMinutes: entry.teamLeaderOverrideMinutes ?? value }] };
-      }, `Technician opinion time recorded: ${value} minutes.`);
-    }}>Save opinion time</button></div>}
     </>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {mode === "todo" && wr.WR_Type !== "PM" && <><h2 className="font-bold">Technician To-Do</h2>{!(wr.todoSteps ?? []).length && <p>No steps have been assigned yet.</p>}{[...(wr.todoSteps ?? [])].sort((a, b) => a.order - b.order).map((step) => <TodoStep key={step.id} step={step} disabled={busy} save={(changes) => execute((current) => {

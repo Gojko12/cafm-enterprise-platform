@@ -1,7 +1,9 @@
 "use client";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { getUnfavourableStepCount } from "@/lib/wr-signals";
+import { WRChecklistReview } from "./WRChecklistReview";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { TechnicianTodoList } from "@/components/modules/TechnicianTodoList";
@@ -23,6 +25,7 @@ const TABS = [
   "Financial Closure & Yellow Page (94% - 100%)",
   "Attached Documents",
   "Technician To-Do & AI Task List",
+  "Checklist - Smart PM",
 ] as const;
 type Tab = (typeof TABS)[number];
 const ROLE_LABEL: Record<string, string> = {
@@ -76,8 +79,9 @@ const LJ_ACTIONS: readonly MendixAction[] = [
   { id: "archive", label: "Manual Archiving (100% archived) (100)", source: [100], target: 100, roles: ["ESA_TO", "ESA_LJM", "ESA_LONG_JOB"], substatus: "100% archived", tracks: ["RFW"], handler: "archive" },
 ];
 
-export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
+export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTab = TABS[0] }: {
   workRequest: BaseWorkRequest;
+  initialTab?: Tab;
   onClose: () => void;
   onNavigate: (id: string) => void;
 }) {
@@ -85,7 +89,9 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
   const { permissions } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
-  const [tab, setTab] = useState<Tab>(TABS[0]);
+  const [tab, setTab] = useState<Tab>(initialTab);
+  useEffect(() => { setTab(initialTab); }, [initialTab, workRequest.WR_ID]);
+  const unfavourableCount = getUnfavourableStepCount(workRequest, data);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [actionsOpen, setActionsOpen] = useState(true);
   const [showAllActions, setShowAllActions] = useState(false);
@@ -345,9 +351,10 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate }: {
       <FieldUpdateBadges wr={workRequest} />
       <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Long Job detail tabs">
         {TABS.map((item) => <button key={item} role="tab" aria-label={item} title={item} aria-selected={tab === item} onClick={() => setTab(item)}
-          className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
+          className={`flex min-w-0 flex-1 items-center justify-center gap-1 rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}><span className="min-w-0 truncate">{item}</span>{item === "Checklist - Smart PM" && unfavourableCount > 0 && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 text-rose-900">{unfavourableCount}</span>}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        {tab === "Checklist - Smart PM" && <WRChecklistReview wr={workRequest} />}
         {(() => { const frozen = getWorkRequestFreezes(workRequest, data.locationFreezes ?? [], localNowIso()); return frozen.length > 0 ? <div className="mb-3"><FreezeBadge freezes={frozen} /></div> : null; })()}        {tab === TABS[0] && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
           <section className="rounded border border-blue-200 bg-white shadow-sm">

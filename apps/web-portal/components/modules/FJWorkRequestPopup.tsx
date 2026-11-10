@@ -1,7 +1,9 @@
 "use client";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { WRChecklistReview } from "./WRChecklistReview";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { TechnicianTodoList } from "@/components/modules/TechnicianTodoList";
@@ -18,19 +20,23 @@ import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 
-type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA";
+type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA" | "Checklist - Smart PM";
 
-export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalateToLJ }: {
+export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalateToLJ, initialTab = "Work request details" }: {
   workRequest: BaseWorkRequest;
   onClose: () => void;
   onNavigate: (id: string) => void;
   onEscalateToLJ: (wr: BaseWorkRequest) => void;
+  initialTab?: Tab;
 }) {
   const { data, setData } = useCafmStore();
   const { permissions } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
-  const [tab, setTab] = useState<Tab>("Work request details");
+  const [tab, setTab] = useState<Tab>(initialTab);
+  useEffect(() => { setTab(initialTab); }, [initialTab, workRequest.WR_ID]);
+  const parentPM = getParentPM(workRequest, data.workRequests);
+  const unfavourableCount = getUnfavourableStepCount(workRequest, data);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [historyFilter, setHistoryFilter] = useState<"all" | "comment" | "log">("all");
   const [message, setMessage] = useState("");
@@ -101,7 +107,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
     };
     reader.readAsDataURL(file);
   };
-  const tabs: Tab[] = ["Work request details", "Labor, parts & Completion", "Technician To-Do & AI Task List", "Attached Documents", "AuditLog & QA"];
+  const tabs: Tab[] = ["Work request details", "Labor, parts & Completion", "Technician To-Do & AI Task List", "Attached Documents", "AuditLog & QA", "Checklist - Smart PM"];
   const group = (title: string, children: React.ReactNode) => <details open className="rounded border bg-white">
     <summary className="cursor-pointer bg-slate-50 px-4 py-3 font-semibold">{title}</summary>
     <div className="grid gap-3 p-4 sm:grid-cols-2">{children}</div>
@@ -118,9 +124,10 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
       <FieldUpdateBadges wr={workRequest} />
       <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Fast Job detail tabs">
         {tabs.map((item) => <button key={item} role="tab" aria-label={item} title={item} aria-selected={tab === item} onClick={() => setTab(item)}
-          className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
+          className={`flex min-w-0 flex-1 items-center justify-center gap-1 rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}><span className="min-w-0 truncate">{item}</span>{item === "Checklist - Smart PM" && unfavourableCount > 0 && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 text-rose-900">{unfavourableCount}</span>}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        {parentPM && <div className="mb-3 rounded-xl border border-indigo-300 bg-indigo-50 p-3 text-indigo-900"><strong>🔗 Follow-up of PM #{parentPM.WR_ID}</strong><p>{parentPM.Description}</p>{workRequest.originatingChecklistStepLabel && <p>Checklist step: {workRequest.originatingChecklistStepLabel}</p>}<button type="button" className="mt-1 font-semibold underline" onClick={() => onNavigate(parentPM.WR_ID)}>Open parent PM →</button></div>}
         {(() => { const frozen = getWorkRequestFreezes(workRequest, data.locationFreezes ?? [], localNowIso()); return frozen.length > 0 ? <div className="mb-3"><FreezeBadge freezes={frozen} /></div> : null; })()}        {tab === "Work request details" && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
           {group("Fast Job Details", <>
@@ -136,7 +143,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
               }} className="w-36 rounded border px-2 py-1" /> EUR</label>)}{field("Actual Cost (EUR)", `${workRequest.ActualCostEur ?? 0} EUR`)}
             {field("Created date", workRequest.CreatedDate)}{field("Start date", workRequest.StartDate)}
             {field("Due date", workRequest.DueDate)}{field("Margin date", workRequest.MarginDate)}
-            {field("Parent PM WR ID", workRequest.ParentPM_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.ParentPM_WR_ID!)}>{workRequest.ParentPM_WR_ID}</button> : "—")}
+            {field("Parent PM WR ID", parentPM ? <button className="text-blue-700 underline" onClick={() => onNavigate(parentPM.WR_ID)}>{parentPM.WR_ID}</button> : "—")}
             {workRequest.OriginatingWR_ID && field("Originating QA WR ID", <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingWR_ID!)}>{workRequest.OriginatingWR_ID}</button>)}
           </>)}
           {group("Work Location", <>{field("Room code", workRequest.RoomCode)}{field("Level name", workRequest.LevelName)}{field("bl id", workRequest.bl_id)}{field("Problem location", workRequest.ProblemLocation)}</>)}
@@ -191,6 +198,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
         </section>}
         {tab === "Technician To-Do & AI Task List" && <TechnicianTodoList wr={workRequest} update={update} />}
         {tab === "AuditLog & QA" && <QAAuditPanel wr={workRequest} />}
+        {tab === "Checklist - Smart PM" && <WRChecklistReview wr={workRequest} />}
       </main>
       <ResizableHistory>
         <button aria-expanded={historyOpen} onClick={() => setHistoryOpen((open) => !open)} className="flex w-full items-center justify-between px-5 py-3 font-semibold">History <span>{historyOpen ? "−" : "+"}</span></button>

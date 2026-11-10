@@ -16,6 +16,9 @@ import { WRDataGrid } from "@/components/modules/WRDataGrid";
 import { groupLongJobs } from "@/lib/wr-overview";
 import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
+import { WRSignals } from "@/components/modules/WRSignals";
+import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import type { SignalTab } from "@/lib/wr-signals";
 
 const mockWorkRequests: BaseWorkRequest[] = [
   {
@@ -138,6 +141,9 @@ export default function WorkRequestsPage() {
   );
   const [selectedWR, setSelectedWR] = useState<BaseWorkRequest | null>(null);
   const [pmPopupWR, setPmPopupWR] = useState<BaseWorkRequest | null>(null);
+  const [initialTab, setInitialTab] = useState<SignalTab>();
+  const [signalFilter, setSignalFilter] = useState<"unfavourable" | "follow-up" | "parent" | null>(null);
+  useEffect(() => { setSignalFilter(null); }, [activeSiteId, requestType]);
   const [locationFilter, setLocationFilter] = useState<{
     building: Building | null;
     floor: Floor | null;
@@ -185,7 +191,7 @@ export default function WorkRequestsPage() {
       case "cancelled": return wr.Percentage === 27;
     }
   };
-  const filteredRequests = siteRequests.filter((wr) => {
+  const scopedRequests = siteRequests.filter((wr) => {
     if (requestType === "FJ" && teamQueue && wr.Percentage !== 78) return false;
     if (
       requestType === "PM" &&
@@ -212,6 +218,18 @@ export default function WorkRequestsPage() {
       wr.TradeName?.toLowerCase().includes(query)
     );
   });
+  const hasSignal = (wr: BaseWorkRequest, signal: NonNullable<typeof signalFilter>) =>
+    signal === "unfavourable" ? getUnfavourableStepCount(wr, data) > 0 :
+      signal === "follow-up" ? wr.WR_Type === "PM" && getFollowUpFJsForPM(wr.WR_ID, workRequests).length > 0 :
+        !!getParentPM(wr, workRequests);
+  const filteredRequests = scopedRequests.filter((wr) => !signalFilter || hasSignal(wr, signalFilter));
+  const signalFilters = <div className="flex flex-wrap gap-2 text-xs">
+    {([
+      ["unfavourable", "⚠ Unfavourable Checklist"],
+      ...(requestType === "PM" ? [["follow-up", "🔧 Has Follow-Up FJ"]] : []),
+      ...(requestType === "FJ" ? [["parent", "🔗 PM Follow-Ups Only"]] : []),
+    ] as Array<[NonNullable<typeof signalFilter>, string]>).map(([signal, label]) => <button key={signal} type="button" aria-pressed={signalFilter === signal} className={`rounded-lg border px-2 py-1 font-semibold ${signalFilter === signal ? "border-blue-600 bg-blue-100 text-blue-900" : "bg-white"}`} onClick={() => setSignalFilter((current) => current === signal ? null : signal)}>{label} ({scopedRequests.filter((wr) => hasSignal(wr, signal)).length})</button>)}
+  </div>;
 
   const handleSubmitFJ = (job: FastJobData) => {
     if (!permissions?.canCreateFJ) { alert("Permission required to create a Fast Job."); return; }
@@ -272,7 +290,10 @@ export default function WorkRequestsPage() {
     setDrawerOpen(true);
   };
 
-  const handleViewWR = (wr: BaseWorkRequest) => {
+  const handleViewWR = (wr: BaseWorkRequest, tab?: SignalTab) => {
+    setInitialTab(tab);
+    setSelectedWR(null);
+    setPmPopupWR(null);
     if (wr.WR_Type === "PM") {
       setPmPopupWR(wr);
       return;
@@ -453,7 +474,8 @@ export default function WorkRequestsPage() {
         </button>)}
       </div>}
       {requestType === "LJ" && <div className="flex gap-2 text-xs"><button aria-pressed={groupLJ} onClick={() => setGroupLJ(true)} className="rounded border px-2 py-1">Group by Substatus</button><button aria-pressed={!groupLJ} onClick={() => setGroupLJ(false)} className="rounded border px-2 py-1">Flat List</button></div>}
-      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}-${filterVersion}`} requestType={requestType} requests={filteredRequests} onOpen={handleViewWR} grouped={requestType === "LJ" && groupLJ} onFilterCount={setColumnFilterCount} /> :
+      {view === "card" && signalFilters}
+      {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}-${filterVersion}`} requestType={requestType} requests={filteredRequests} onOpen={handleViewWR} grouped={requestType === "LJ" && groupLJ} onFilterCount={setColumnFilterCount} signalFilters={signalFilters} /> :
       <div className="grid gap-4">
         {filteredRequests.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
@@ -496,6 +518,7 @@ export default function WorkRequestsPage() {
                   </div>
                   <p className="text-gray-700">{wr.Description}</p>
                   <p className="text-sm text-gray-600 mt-1">{wr.ProblemLocation}</p>
+                  <div className="mt-2"><WRSignals wr={wr} onOpen={handleViewWR} /></div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -617,10 +640,12 @@ export default function WorkRequestsPage() {
       </div>}
       {/* Drawer */}
       {pmPopupWR && <PMWorkRequestPopup
+        initialTab={initialTab}
         key={`${pmPopupWR.SiteId}-${pmPopupWR.WR_ID}`}
         workRequest={workRequests.find((wr) => wr.WR_ID === pmPopupWR.WR_ID && wr.SiteId === pmPopupWR.SiteId) ?? pmPopupWR}
         onClose={() => setPmPopupWR(null)}
         onNavigate={(id) => {
+          setInitialTab(undefined);
           const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId);
           if (!target) { alert(`Work request ${id} is not available at this site.`); return; }
           if (target.WR_Type === "LJ") {
@@ -642,10 +667,12 @@ export default function WorkRequestsPage() {
         }}
       />}
       {selectedWR && drawerMode === "view" && selectedWR.WR_Type === "FJ" && <FJWorkRequestPopup
+        initialTab={initialTab === "Checklist - Smart PM" ? initialTab : undefined}
         key={`${selectedWR.SiteId}-${selectedWR.WR_ID}`}
         workRequest={workRequests.find((wr) => wr.WR_ID === selectedWR.WR_ID && wr.SiteId === selectedWR.SiteId) ?? selectedWR}
         onClose={() => setSelectedWR(null)}
         onNavigate={(id) => {
+          setInitialTab(undefined);
           const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId);
           if (!target) { alert(`Work request ${id} is not available at this site.`); return; }
           if (target.WR_Type === "PM") {
@@ -662,10 +689,12 @@ export default function WorkRequestsPage() {
         }}
       />}
       {selectedWR && drawerMode === "view" && selectedWR.WR_Type === "LJ" && <LJWorkRequestPopup
+        initialTab={initialTab === "Checklist - Smart PM" ? initialTab : undefined}
         key={`${selectedWR.SiteId}-${selectedWR.WR_ID}`}
         workRequest={workRequests.find((wr) => wr.WR_ID === selectedWR.WR_ID && wr.SiteId === selectedWR.SiteId) ?? selectedWR}
         onClose={() => setSelectedWR(null)}
         onNavigate={(id) => {
+          setInitialTab(undefined);
           const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId);
           if (!target) { alert(`Work request ${id} is not available at this site.`); return; }
           if (target.WR_Type === "PM") {

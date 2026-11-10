@@ -26,7 +26,7 @@ import {
 } from "@cafm/shared-schema";
 import type { LocationFreeze, UserAccessProfile, TechnicianFieldUpdate } from "@cafm/shared-schema";
 import { z } from "zod";
-import { applyFilters, useFilterStore } from "./lib/store";
+import { applyFilters, extractPctKey, matchesAgenda, useFilterStore } from "./lib/store";
 import { classifyEquipmentWRs } from "./lib/equipment-wrs";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
@@ -75,6 +75,7 @@ export default function App() {
   const [freezes, setFreezes] = useState<LocationFreeze[]>([]);
   const [profiles, setProfiles] = useState<z.infer<typeof UserAccessProfileSchema>[]>([]);
   const [followUpDescription, setFollowUpDescription] = useState("");
+  const [followUpStep, setFollowUpStep] = useState<{ id: string; label: string }>();
   const [creatingFollowUp, setCreatingFollowUp] = useState(false);
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
@@ -125,7 +126,7 @@ export default function App() {
   // Filters
   const filters = useFilterStore((state) => state.filters);
   const setFilter = useFilterStore((state) => state.setFilter);
-  const [appliedFilters, setAppliedFilters] = useState(filters);
+  const appliedFilters = filters;
   const [resetSignal, setResetSignal] = useState(0);
   const [pctOpen, setPctOpen] = useState(false);
   const [wrViewMode, setWrViewMode] = useState<"card" | "compact">(readWrViewMode);
@@ -137,7 +138,7 @@ export default function App() {
   const [homeTab, setHomeTab] = useState<"my-wrs" | "unassigned">("my-wrs");
   const [menuOpen, setMenuOpen] = useState(false);
   const siteDefaultPercents = (() => {
-    const values = [...new Set(siteWRs.map((wr) => Number(wr.Percentage)).filter(Number.isFinite))].sort((a, b) => a - b);
+    const values = [...new Set(siteWRs.map((wr) => Number(extractPctKey(wr).replace("%", ""))).filter(Number.isFinite))].sort((a, b) => a - b);
     const preferred = values.filter((value) => value === 50 || value === 55);
     return preferred.length ? preferred : values.filter((value) => value < 78);
   })();
@@ -145,30 +146,30 @@ export default function App() {
   const defaultKey = siteDefaultPercents.join(",");
   // Options are scoped to the selected work type, My/Unassigned scope, and the location/trade filters.
   const percentCounts = new Map<number, number>();
-  const optionPool = applyFilters(homeTab === "my-wrs" ? myWRs : unassignedWRs, { ...appliedFilters, selectedSubstatuses: [] });
-  for (const wr of optionPool) { const value = Number(wr.Percentage); if (Number.isFinite(value)) percentCounts.set(value, (percentCounts.get(value) ?? 0) + 1); }
+  const optionPool = applyFilters(homeTab === "my-wrs" ? myWRs : unassignedWRs, { ...appliedFilters, selectedSubstatuses: [] })
+    .filter((wr) => matchesAgenda(wr, agenda, currentTechnicianId, now));
+  for (const wr of optionPool) { const key = extractPctKey(wr); const value = Number(key.replace("%", "")); if (key) percentCounts.set(value, (percentCounts.get(value) ?? 0) + 1); }
+  for (const Percentage of appliedFilters.selectedSubstatuses ?? []) {
+    const key = extractPctKey({ Percentage });
+    const value = Number(key.replace("%", ""));
+    if (key && !percentCounts.has(value)) percentCounts.set(value, 0);
+  }
   const substatusOptions = [...percentCounts.entries()].sort(([a], [b]) => a - b).map(([value, count]) => ({ value, count }));
-  const existingPercents = substatusOptions.map((option) => option.value);
-  const rawPercents = appliedFilters.selectedSubstatuses ?? [];
-  const effectivePercents = rawPercents.length && !rawPercents.some((value) => existingPercents.includes(value)) ? existingPercents.filter((value) => value < 78) : rawPercents;
-  const effectiveFilters: FilterCriteria = effectivePercents === rawPercents ? appliedFilters : { ...appliedFilters, selectedSubstatuses: effectivePercents };
+  const effectiveFilters = appliedFilters;
   useEffect(() => {
     if (loadedSite !== activeSiteId || !siteWRs.length || substatusInitSite.current === activeSiteId) return;
     substatusInitSite.current = activeSiteId;
     const defaults = defaultKey ? defaultKey.split(",").map(Number) : [];
     useFilterStore.getState().setFilter("selectedSubstatuses", defaults);
-    setAppliedFilters((current) => ({ ...current, selectedSubstatuses: defaults }));
   }, [loadedSite, activeSiteId, siteWRs.length, defaultKey]);
   const workTypes: WorkTypeCode[] = appliedFilters.workTypes ?? [];
   const setWorkTypes = (types: WorkTypeCode[]) => {
     useFilterStore.getState().setFilter("workTypes", types);
-    setAppliedFilters((current) => ({ ...current, workTypes: types }));
   };
   const handleResetFilters = () => {
     const defaults = defaultKey ? defaultKey.split(",").map(Number) : [];
     const base: FilterCriteria = { workTypes: [], selectedEquipmentCodes: new Set(), selectedSubstatuses: defaults };
     useFilterStore.setState({ filters: base });
-    setAppliedFilters(base);
     setPctOpen(false);
     setAgenda("agenda");
     setResetSignal((value) => value + 1);
@@ -272,7 +273,6 @@ export default function App() {
 
   useEffect(() => {
     setFilter("trade", undefined);
-    setAppliedFilters((current) => ({ ...current, trade: undefined }));
   }, [activeSiteId, currentTechnicianId, setFilter]);
 
   useEffect(() => {
@@ -439,9 +439,6 @@ export default function App() {
     await persistCreatedRequest(request);
   };
 
-  const handleApplyFilters = () => {
-    setAppliedFilters(useFilterStore.getState().filters);
-  };
   const person = technicians.find((item) => item.id === currentTechnicianId);
   const access = findProfile(profiles, person, activeSiteId);
   const vpaTrades = access?.vpaTrades ?? (person ? [...CLASSICAL_TRADES] : []);
@@ -454,6 +451,10 @@ export default function App() {
     const current = await engine.getWorkRequest(selectedWR.WR_ID);
     if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
     const changed = change(current), now = new Date().toISOString();
+    const answersChanged = stable(current.ChecklistResults) !== stable(changed.ChecklistResults) || stable(current.todoSteps) !== stable(changed.todoSteps);
+    if (answersChanged && current.Percentage >= 78 && (current.Percentage !== 78 || !access?.permissions.canCompleteWR78)) {
+      throw new Error("Checklist amendments are allowed only at 78% by an authorized technician.");
+    }
     const updated: BaseWorkRequest = { ...changed, UpdatedAt: now, Activity: [...(changed.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: message }] };
     await engine.saveWorkRequest(updated, current);
     setSelectedWR(updated);
@@ -468,15 +469,29 @@ export default function App() {
     const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
     if (!issued) throw new Error("Issued status configuration is missing.");
     const now = new Date().toISOString();
-    const request: BaseWorkRequest = { WR_ID: `FJ-${crypto.randomUUID()}`, WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}.` }] };
-    await persistCreatedRequest(request);
+    if (!engine) throw new Error("Offline storage is not ready.");
+    if (savingWR.current) throw new Error("Another save is in progress. Try again.");
+    const request: BaseWorkRequest = { WR_ID: `FJ-${crypto.randomUUID()}`, WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, ParentWR_ID: selectedWR.WR_ID, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID, sourcePmWrId: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), originatingChecklistStepId: followUpStep?.id, originatingChecklistStepLabel: followUpStep?.label, UpdatedAt: now, updatedAt: now, CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}${followUpStep ? `, step ${followUpStep.label}` : ""}.` }] };
+    savingWR.current = true;
+    try {
+      const current = await engine.getWorkRequest(selectedWR.WR_ID);
+      if (!current || current.SiteId !== activeSiteId) throw new Error("The originating work request is no longer available.");
+      const parent: BaseWorkRequest = { ...current, UpdatedAt: now, updatedAt: now,
+        ...(current.WR_Type === "PM" ? { FollowUpFJIds: [...new Set([...(current.FollowUpFJIds ?? []), request.WR_ID])] } : {}),
+        Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Follow-up Fast Job ${request.WR_ID} created${followUpStep ? ` from step ${followUpStep.label}` : ""}.` }],
+      };
+      await engine.saveWorkRequests([{ input: parent, expectedBase: current }, { input: request, expectedBase: null }]);
+      setSelectedWR(await engine.getWorkRequest(parent.WR_ID) ?? parent);
+      await refreshData();
+    } finally { savingWR.current = false; }
     setFollowUpOpen(false);
     try { await handleSyncNow(); notify(`Follow-up ${request.WR_ID} saved and synchronized.`); }
     catch (error) { notify(`Follow-up ${request.WR_ID} saved offline. Synchronization failed: ${error instanceof Error ? error.message : "Retry Sync Now."}`); }
   };
-  const openFollowUp = () => {
+  const openFollowUp = (step?: { id: string; label: string }) => {
     if (!selectedWR || !access?.permissions.canOpenFollowUpFJ) return;
-    setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}: `);
+    setFollowUpStep(step);
+    setFollowUpDescription(`Follow-up for ${selectedWR.WR_ID}${step ? `, ${step.label}` : ""}: `);
     setFollowUpError("");
     setFollowUpOpen(true);
   };
@@ -522,6 +537,7 @@ export default function App() {
     timerRunning: !!selectedTimer,
     timerLabel: selectedTimer ? `Timer Running: ${timerClock(selectedTimer.startedAt, now)}` : "Timer stopped",
     navigationRef: checklistNavigation,
+    canAmend: !!access?.permissions.canCompleteWR78,
   };
 
   const offlineNow = isSimulatedOffline || !browserOnline || !apiReachable;
@@ -535,6 +551,7 @@ export default function App() {
   const pageTitles: Partial<Record<AppView, string>> = { scanner: "Scan QR", timers: "Timers", "audit-assurance": "Audit & Assurance", settings: "Profile & Settings" };
   const pageTitle = pageTitles[currentView];
   const checklistFreezes = selectedWR ? getWorkRequestFreezes(selectedWR, freezes, localNowIso()) : [];
+  const visibleWRs = (requests: BaseWorkRequest[]) => applyFilters(requests, effectiveFilters).filter((wr) => matchesAgenda(wr, agenda, currentTechnicianId, now));
 
   // Render based on current view
   const renderContent = () => {
@@ -543,7 +560,7 @@ export default function App() {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
       case "hub":
-        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} allWorkRequests={siteWRs} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? () => openFollowUp() : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
         if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} startStep={checklistStart} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
@@ -626,14 +643,10 @@ export default function App() {
               rooms={rooms}
               equipment={equipment}
               currentFilters={filters}
-              resultCount={applyFilters(myWRs, filters).length + applyFilters(unassignedWRs, filters).length}
+              resultCount={visibleWRs(homeTab === "my-wrs" ? myWRs : unassignedWRs).length}
               onFiltersChange={(newFilters) => {
-                if (newFilters.trade !== filters.trade) setAppliedFilters((current) => ({ ...current, trade: newFilters.trade }));
-                Object.entries(newFilters).forEach(([key, value]) => {
-                  setFilter(key as keyof FilterCriteria, value);
-                });
+                useFilterStore.setState({ filters: newFilters });
               }}
-              onApplyFilters={handleApplyFilters}
               onResetFilters={handleResetFilters}
               substatusOptions={substatusOptions}
               defaultSubstatuses={defaultSubstatuses}
@@ -647,8 +660,9 @@ export default function App() {
               agenda={agenda}
               onAgendaChange={setAgenda}
               onTabChange={setHomeTab}
-              myWRs={applyFilters(myWRs, effectiveFilters)}
-              unassignedWRs={applyFilters(unassignedWRs, effectiveFilters)}
+              myWRs={visibleWRs(myWRs)}
+              unassignedWRs={visibleWRs(unassignedWRs)}
+              onResetFilters={handleResetFilters}
               onClaimWR={access?.permissions.canClaimUnassignedWR ? handleClaimWR : undefined}
               onOpenWR={handleOpenWR}
               onReport={setFieldWR}
@@ -697,7 +711,7 @@ export default function App() {
       {timerStorageError && <p role="alert" className="bg-rose-100 px-3 py-1 text-xs text-rose-800">{timerStorageError}</p>}
       {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
       {/* Main Content */}
-      <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{currentView === "checklist" && selectedWR && checklistFreezes.length > 0
+      <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{currentView === "checklist" && selectedWR && selectedWR.Percentage < 78 && checklistFreezes.length > 0
         ? <FreezeChecklistGate key={selectedWR.WR_ID} freezes={checklistFreezes} onBack={() => setCurrentView("hub")} acknowledge={() => saveSelected((current) => ({ ...current, freezeAcknowledged: buildFreezeAcknowledgment(checklistFreezes, technicianName) }), `Freeze period safety acknowledgment confirmed by ${technicianName}`)}>{renderContent()}</FreezeChecklistGate>
         : renderContent()}</main>
       {fieldWR && <FieldUpdateModal key={fieldWR} wrId={fieldWR} submit={submitFieldUpdate} close={() => setFieldWR(null)} />}
