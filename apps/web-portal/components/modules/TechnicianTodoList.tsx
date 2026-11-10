@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { TechnicianPromptBuilder } from "./TechnicianPromptBuilder";
 import { TechnicianStepExecution } from "./TechnicianStepExecution";
@@ -46,7 +47,7 @@ export function TechnicianTodoList({ wr, update }: {
   };
   const renderStep = (step: Step, index: number) => <li key={step.id} className="space-y-2 rounded border border-slate-200 p-3">
     {allowed && editId === step.id ? <div className="space-y-2"><input aria-label="Step title" className="w-full rounded border p-2" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /><textarea aria-label="Step instruction" className="w-full rounded border p-2" value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} /><button className="rounded bg-blue-700 px-3 py-1 text-white" onClick={saveEdit}>Save</button>{" "}<button onClick={() => setEditId(null)}>Cancel</button></div> : <><div className="flex flex-wrap justify-between gap-2"><strong>{index + 1}. {step.title}</strong><span className={step.completed ? "text-emerald-700" : "text-slate-500"}>{step.completed ? "✓ Completed" : "Pending"}</span></div>{step.instruction && <p className="whitespace-pre-wrap">{step.instruction}</p>}</>}
-    {step.completedBy && <p className="text-xs text-slate-500">Completed by {step.completedBy}{step.completedAt ? ` · ${new Date(step.completedAt).toLocaleString()}` : ""}{step.isFavourable !== undefined ? ` · ${step.isFavourable ? "Favourable" : "Unfavourable"}` : ""}</p>}
+    {step.completedBy && <p className="text-xs text-slate-500">Completed by {step.completedBy}{step.completedAt ? ` · ${formatDateTimeDDMMYYYY(step.completedAt)}` : ""}{step.isFavourable !== undefined ? ` · ${step.isFavourable ? "Favourable" : "Unfavourable"}` : ""}</p>}
     {step.technicianComment && <p>Technician: {step.technicianComment}</p>}
     {!!step.photoUrls?.length && <div className="flex flex-wrap gap-2">{step.photoUrls.map((url, i) => <a key={`${i}-${url}`} href={url} target="_blank" rel="noreferrer" className="text-blue-700 underline">Photo {i + 1}</a>)}</div>}
     <TechnicianStepExecution step={step} actor={activePerson} actorRole={currentRole} update={update} />

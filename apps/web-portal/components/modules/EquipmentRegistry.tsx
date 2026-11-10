@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES, EquipmentSchema, EquipmentStatusSchema, TechnicalSpecificationsSchema } from "@cafm/shared-schema";
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES, EquipmentSchema, EquipmentStatusSchema, formatDateDDMMYYYY, formatDateTimeDDMMYYYY, TechnicalSpecificationsSchema } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
+import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -124,7 +125,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
     { id: "title", label: "Title / Description", value: (wr: BaseWorkRequest) => wr.Description },
     { id: "status", label: "Status", value: (wr: BaseWorkRequest) => wr.WorkRequestStatus },
     { id: "percentage", label: "Substatus %", value: (wr: BaseWorkRequest) => wr.Percentage },
-    { id: "due", label: "Due Date", value: (wr: BaseWorkRequest) => wr.DueDate },
+    { id: "due", label: "Due Date", value: (wr: BaseWorkRequest) => wr.DueDate, render: (wr: BaseWorkRequest) => formatDateDDMMYYYY(wr.DueDate) || "—" },
     { id: "cost", label: "Cost (EUR)", value: (wr: BaseWorkRequest) => wr.EstimatedCostEur },
     { id: "action", label: "Action", value: () => "Open / Edit", render: (wr: BaseWorkRequest) => <button className="text-blue-700 underline" onClick={() => setOpenWR(wr)}>Open / Edit</button> },
   ];
@@ -174,7 +175,9 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
     setError("");
   };
   const text = (label: string, value: string | undefined, change: (value: string) => void, inputType = "text") =>
-    <label className="text-xs">{label}<input type={inputType} value={value ?? ""} onChange={(event) => change(event.target.value)} className="mt-1 block w-full rounded border p-1 text-sm" /></label>;
+    <label className="text-xs">{label}{inputType === "date"
+      ? <DateInputDDMMYYYY aria-label={label} value={value ?? ""} onValueChange={change} className="mt-1 block w-full text-sm" />
+      : <input type={inputType} value={value ?? ""} onChange={(event) => change(event.target.value)} className="mt-1 block w-full rounded border p-1 text-sm" />}</label>;
   const number = (label: string, key: "LengthCm" | "WidthCm" | "HeightCm" | "WeightKg" | "ReplacementCostEur") =>
     <label className="text-xs">{label}<input type="number" min="0" value={draft[key] ?? ""} onChange={(event) => {
       const raw = event.target.value; setDraft((current) => ({ ...current, [key]: raw === "" ? undefined : Number(raw) }));
@@ -247,9 +250,9 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
       <button className="rounded bg-blue-700 px-3 py-1 text-white" onClick={submitComment}>{editing ? "Save edit" : "Add comment"}</button>
       {editing && <button className="ml-2 underline" onClick={() => { setEditing(null); setComment(""); }}>Cancel edit</button>}
       {newestFirst((item.Activity ?? []).filter((entry) => activityFilter === "All" || (activityFilter === "Human Comments Only" ? entry.kind === "comment" : entry.kind === "log")), (entry) => entry.createdAt).map((entry) => <article key={entry.id} className="border-t py-2">
-        <div className="font-semibold">{entry.actorName} · {entry.kind === "log" ? "Automatic log" : "Comment"} · {entry.createdAt}</div><p className="whitespace-pre-wrap">{entry.text}</p>
+        <div className="font-semibold">{entry.actorName} · {entry.kind === "log" ? "Automatic log" : "Comment"} · {formatDateTimeDDMMYYYY(entry.createdAt)}</div><p className="whitespace-pre-wrap">{entry.text}</p>
         {entry.kind === "comment" && entry.actorId === activePerson && <button className="text-blue-700 underline" onClick={() => { setEditing(entry.id); setComment(entry.text); }}>Edit</button>}
-        {!!entry.editHistory?.length && <details><summary className="cursor-pointer">Edited - View Previous Versions</summary>{newestFirst(entry.editHistory, (version) => version.timestamp).map((version, index) => <p key={`${version.timestamp}-${index}`}>{version.timestamp}: {version.text}</p>)}</details>}
+        {!!entry.editHistory?.length && <details><summary className="cursor-pointer">Edited - View Previous Versions</summary>{newestFirst(entry.editHistory, (version) => version.timestamp).map((version, index) => <p key={`${version.timestamp}-${index}`}>{formatDateTimeDDMMYYYY(version.timestamp)}: {version.text}</p>)}</details>}
       </article>)}
     </div>}
     {actual?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={actual} onClose={() => setOpenWR(null)} onNavigate={(id) => setOpenWR(data.workRequests.find((wr) => wr.SiteId === item.SiteId && wr.WR_ID === id) ?? null)} onEscalateToLJ={() => { setOpenWR(null); setError("Create the Long Job from the work request overview."); }} />}

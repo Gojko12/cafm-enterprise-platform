@@ -17,6 +17,8 @@ import { groupLongJobs } from "@/lib/wr-overview";
 import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
 import { WRSignals } from "@/components/modules/WRSignals";
+import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import type { SignalTab } from "@/lib/wr-signals";
 
@@ -440,20 +442,20 @@ export default function WorkRequestsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <label className="text-sm text-gray-600">
             Due From
-            <input
-              type="date"
+            <DateInputDDMMYYYY
               value={dueDateFrom}
-              onChange={(event) => setDueDateFrom(event.target.value)}
+              onValueChange={setDueDateFrom}
               className="mt-1 block w-full px-3 py-2 border rounded"
+              aria-label="Due date from"
             />
           </label>
           <label className="text-sm text-gray-600">
             Due To
-            <input
-              type="date"
+            <DateInputDDMMYYYY
               value={dueDateTo}
-              onChange={(event) => setDueDateTo(event.target.value)}
+              onValueChange={setDueDateTo}
               className="mt-1 block w-full px-3 py-2 border rounded"
+              aria-label="Due date to"
             />
           </label>
         </div></div>}
@@ -556,7 +558,7 @@ export default function WorkRequestsPage() {
                   </div>
                   <div>
                     <p className="text-gray-600">Created</p>
-                    <p className="font-medium text-gray-900">{wr.CreatedDate}</p>
+                    <p className="font-medium text-gray-900">{formatDateDDMMYYYY(wr.CreatedDate)}</p>
                   </div>
                 </div>
 

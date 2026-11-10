@@ -1,51 +1,76 @@
-import { createPMCycleKey, pmTargetKey } from "@cafm/shared-schema";
+import { createPMCycleKey, getPmCycle, pmVisit, firstVisitOnOrAfter, getNextUnsuppressedOccurrence, addCycleInterval } from "@cafm/shared-schema";
 import type { BaseWorkRequest, PM_ChecklistStandard, PM_Schedule } from "@cafm/shared-schema";
-import { isUnstarted, nextTickOnOrAfter, resolveBlueprintSchedule, shiftDays } from "./pm-suppression";
+import { isUnstarted, resolveBlueprintSchedule, shiftDays } from "./pm-suppression";
 
 export function shiftPmSchedule(schedules: PM_Schedule[], blueprints: PM_ChecklistStandard[], requests: BaseWorkRequest[],
-  order: PM_Schedule, currentCycle: string, newDate: string, action: "move" | "keep", actor: string, now: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || !Number.isFinite(Date.parse(newDate)) || !Number.isFinite(Date.parse(currentCycle)))
-    throw new Error("Choose valid current-cycle and new target dates.");
-  if (newDate < now.slice(0, 10)) throw new Error("Schedule changes must take effect today or later.");
-  const delta = Math.round((Date.parse(newDate) - Date.parse(currentCycle)) / 86400000);
-  if (!delta) throw new Error("The new target date is unchanged.");
-  const affected = schedules.filter((item) => item.IsActive && item.SiteId === order.SiteId && pmTargetKey(item) === pmTargetKey(order) &&
-    (order.suppressionMode === "independent" ? item.ScheduleId === order.ScheduleId : item.suppressionGroupKey === order.suppressionGroupKey));
-  const ids = new Set(affected.map((item) => item.ScheduleId));
-  const cycleDue = (wr: BaseWorkRequest, schedule: PM_Schedule) => [...(schedule.scheduleChangeLog ?? [])].reverse()
-    .flatMap((change) => change.preservedCycles ?? []).find((cycle) => cycle.wrId === wr.WR_ID)?.dueDate ?? wr.DueDate!.slice(0, 10);
-  const updatedSchedules = schedules.map((item) => {
-    if (!ids.has(item.ScheduleId) || item.SiteId !== order.SiteId) return item;
-    const anchor = shiftDays(item.anchorDate!, delta);
-    const changed = resolveBlueprintSchedule({ ...item, anchorDate: anchor, effectiveFromDate: newDate }, blueprints);
-    let nextDue = nextTickOnOrAfter(changed, shiftDays(item.NextDueDate, delta) < newDate ? newDate : shiftDays(item.NextDueDate, delta));
-    // Issued, started and completed cycles retain their identities across the cutover.
-    for (const wr of requests.filter((wr) => wr.SiteId === item.SiteId && wr.ScheduleId === item.ScheduleId && wr.DueDate && cycleDue(wr, item) >= currentCycle)) {
-      if (action === "keep" || !isUnstarted(wr)) {
-        const consumed = shiftDays(cycleDue(wr, item), delta);
-        if (nextDue === consumed) nextDue = nextTickOnOrAfter(changed, shiftDays(consumed, 1));
+  order: PM_Schedule, currentCycle: string, newDate: string, action: "move" | "keep", actor: string, now: string, peakSlotIndex?: number) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || !Number.isFinite(Date.parse(newDate)))
+    throw new Error("Choose a valid Cycle Date.");
+  addCycleInterval(newDate, 0, "days");
+  const configured = schedules.map((item) => resolveBlueprintSchedule(item, blueprints));
+  const original = configured.find((item) => item.SiteId === order.SiteId && item.ScheduleId === order.ScheduleId);
+  if (!original) throw new Error("The selected PMS no longer exists.");
+  const oldCycle = getPmCycle(original, configured);
+  const peak = peakSlotIndex ?? oldCycle.peakSlotIndex;
+  if (newDate === oldCycle.cycleDate && peak === oldCycle.peakSlotIndex) throw new Error("The cycle date and peak position are unchanged.");
+  const ids = new Set(oldCycle.group.map((item) => item.ScheduleId));
+  const effective = newDate > now.slice(0, 10) ? newDate : now.slice(0, 10);
+  const changed = configured.map((item) => item.SiteId === order.SiteId && ids.has(item.ScheduleId) ? {
+    ...item, cycleDate: newDate, anchorDate: newDate, sharedAnchorDate: newDate, peakSlotIndex: peak,
+    annualSlotIndex: oldCycle.unit === "months" ? (peak - 1) % Math.max(1, oldCycle.visitsPerYear) + 1 : undefined,
+    peakYearIndex: oldCycle.unit === "months" ? Math.floor((peak - 1) / Math.max(1, oldCycle.visitsPerYear)) + 1 : undefined,
+    effectiveFromDate: effective, UpdatedAt: now,
+  } : item);
+  const newCycle = getPmCycle(changed.find((item) => item.ScheduleId === order.ScheduleId)!, changed);
+  const mappings = new Map<string, Array<{ wrId: string; dueDate: string }>>();
+  const moved = new Map<string, string>();
+  const reserved = new Set<string>();
+  const relevant = requests.filter((wr) => wr.SiteId === order.SiteId && wr.ScheduleId && ids.has(wr.ScheduleId) && wr.DueDate && wr.Percentage !== 27)
+    .sort((a, b) => a.DueDate!.localeCompare(b.DueDate!) || a.WR_ID.localeCompare(b.WR_ID));
+  for (const wr of relevant) {
+    const schedule = oldCycle.group.find((item) => item.ScheduleId === wr.ScheduleId)!;
+    const previous = [...(schedule.scheduleChangeLog ?? [])].reverse().flatMap((entry) => entry.preservedCycles ?? []).find((item) => item.wrId === wr.WR_ID);
+    const priorDate = previous?.dueDate ?? wr.DueDate!.slice(0, 10);
+    if (priorDate < currentCycle && isUnstarted(wr)) continue;
+    let visit = firstVisitOnOrAfter(oldCycle, priorDate);
+    let occurrence = pmVisit(newCycle, visit);
+    if (action === "move" && isUnstarted(wr)) {
+      if (occurrence.dueDate < effective) visit = firstVisitOnOrAfter(newCycle, effective);
+      const limit = visit + newCycle.visits * (relevant.length + 1);
+      while (visit < limit) {
+        occurrence = pmVisit(newCycle, visit);
+        if (occurrence.winner.ScheduleId === wr.ScheduleId && !reserved.has(occurrence.dueDate)) break;
+        visit++;
       }
+      if (visit === limit) throw new Error(`No unique winning visit available for PMS #${wr.ScheduleId}.`);
+      moved.set(wr.WR_ID, occurrence.dueDate);
     }
-    const preservedCycles = requests.filter((wr) => wr.SiteId === item.SiteId && wr.ScheduleId === item.ScheduleId &&
-      wr.DueDate && cycleDue(wr, item) >= currentCycle)
-      .map((wr) => ({ wrId: wr.WR_ID, dueDate: shiftDays(cycleDue(wr, item), delta) }));
-    return { ...changed, NextDueDate: nextDue, defaultAnchorDate: item.defaultAnchorDate ? shiftDays(item.defaultAnchorDate, delta) : undefined, UpdatedAt: now,
-      scheduleChangeLog: [...(item.scheduleChangeLog ?? []), { changedAt: now, changedBy: actor, oldAnchor: item.anchorDate!, newAnchor: anchor, effectiveFrom: newDate, openWrAction: action, preservedCycles }] };
+    reserved.add(occurrence.dueDate);
+    const winner = occurrence.winner.ScheduleId;
+    mappings.set(winner, [...(mappings.get(winner) ?? []), { wrId: wr.WR_ID, dueDate: occurrence.dueDate }]);
+  }
+  const updatedSchedules = changed.map((item) => {
+    if (item.SiteId !== order.SiteId || !ids.has(item.ScheduleId)) return item;
+    let next = getNextUnsuppressedOccurrence(item, changed, effective);
+    while (next && reserved.has(next.date)) next = getNextUnsuppressedOccurrence(item, changed, shiftDays(next.date, 1));
+    return { ...item, NextDueDate: next?.date ?? item.NextDueDate,
+      scheduleChangeLog: [...(item.scheduleChangeLog ?? []), { changedAt: now, changedBy: actor,
+        oldAnchor: oldCycle.cycleDate, newAnchor: newDate, oldPeakSlotIndex: oldCycle.peakSlotIndex, newPeakSlotIndex: peak,
+        effectiveFrom: effective, openWrAction: action, preservedCycles: mappings.get(item.ScheduleId) ?? [] }] };
   });
   const workRequests = requests.map((wr) => {
-    const schedule = affected.find((item) => item.ScheduleId === wr.ScheduleId);
-    if (action !== "move" || wr.SiteId !== order.SiteId || !schedule || !wr.DueDate || cycleDue(wr, schedule) < currentCycle || !isUnstarted(wr)) return wr;
-    const due = shiftDays(cycleDue(wr, schedule), delta);
-    const offset = Math.round((Date.parse(due) - Date.parse(wr.DueDate.slice(0, 10))) / 86400000);
+    const due = moved.get(wr.WR_ID);
+    if (!due || wr.SiteId !== order.SiteId) return wr;
+    const offset = Math.round((Date.parse(due) - Date.parse(wr.DueDate!.slice(0, 10))) / 86400000);
     const shift = (date: string | undefined) => date ? shiftDays(date.slice(0, 10), offset) : date;
-    const shiftSlot = (date: string) => `${shiftDays(date.slice(0, 10), offset)}${date.slice(10)}`;
+    const slotDate = (date: string) => `${shiftDays(date.slice(0, 10), offset)}${date.slice(10)}`;
     return { ...wr, DueDate: due, StartDate: shift(wr.StartDate), StartDate_DateToPerform: shift(wr.StartDate_DateToPerform), MarginDate: shift(wr.MarginDate),
       PM_CycleKey: `${createPMCycleKey(wr.ScheduleId!, due)}::${wr.EquipmentCodes[0] ?? "location"}`,
       CraftpersonAssignments: wr.CraftpersonAssignments?.map((slot) => slot.autoScheduledFromPmsId ?
-        { ...slot, assignedStartDateTime: shiftSlot(slot.assignedStartDateTime), assignedEndDateTime: shiftSlot(slot.assignedEndDateTime) } : slot),
+        { ...slot, assignedStartDateTime: slotDate(slot.assignedStartDateTime), assignedEndDateTime: slotDate(slot.assignedEndDateTime) } : slot),
       UpdatedAt: now, updatedAt: now,
       Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: actor, actorName: actor, actorRole: "Scheduler", createdAt: now,
-        text: `[Schedule Shifted] PMS #${wr.ScheduleId}: ${wr.DueDate.slice(0, 10)} → ${due}; anchor shifted ${delta} days by ${actor}.` }] };
+        text: `[Schedule Shifted] PMS #${wr.ScheduleId}: cycle position changed by ${actor}; peak visit #${peak}.` }] };
   });
   return { schedules: updatedSchedules, workRequests };
 }

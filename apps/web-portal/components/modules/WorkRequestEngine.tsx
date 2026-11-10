@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react";
 import { AlertCircle, Plus, MoreVertical, ChevronDown } from "lucide-react";
 import type { BaseWorkRequest, WR_Type } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
 
 interface WorkRequestEngineProps {
@@ -180,10 +181,10 @@ export function WorkRequestEngine({
                   {wr.EquipmentCodes?.join(", ") || "—"}
                 </td>
                 <td className="px-6 py-4 text-sm">
-                  {wr.DueDate ? new Date(wr.DueDate).toLocaleDateString() : "—"}
+                  {wr.DueDate ? formatDateDDMMYYYY(wr.DueDate) : "—"}
                 </td>
                 <td className="px-6 py-4 text-sm">
-                  {wr.MarginDate ? new Date(wr.MarginDate).toLocaleDateString() : "—"}
+                  {wr.MarginDate ? formatDateDDMMYYYY(wr.MarginDate) : "—"}
                 </td>
                 <td className="px-6 py-4 text-sm">
                   <span

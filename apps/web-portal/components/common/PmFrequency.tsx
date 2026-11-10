@@ -5,6 +5,7 @@ const colors: Record<string, [string, string]> = {
   "01D": ["#f1f5f9", "#334155"], "01W": ["#e0f2fe", "#0369a1"], "02W": ["#cffafe", "#155e75"],
   "01M": ["#dbeafe", "#1d4ed8"], "03M": ["#dbeafe", "#1e40af"], "06M": ["#ede9fe", "#6d28d9"],
   "01Y": ["#fef3c7", "#92400e"], "02Y": ["#ffedd5", "#9a3412"], "05Y": ["#ffe4e6", "#9f1239"],
+  "10Y": ["#fce7f3", "#831843"],
 };
 export function FrequencyPill({ code, inherited = false }: { code?: string; inherited?: boolean }) {
   if (!code) return null;

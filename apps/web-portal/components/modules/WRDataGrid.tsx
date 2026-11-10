@@ -16,6 +16,8 @@ import { useQAActions } from "@/lib/use-qa-actions";
 import { WRSignals } from "./WRSignals";
 import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import type { SignalTab } from "@/lib/wr-signals";
+import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 
 type Column = "id" | "description" | "status" | "percentage" | "signals" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes" | "qa";
 const columns: { key: Column; label: string }[] = [
@@ -74,6 +76,8 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "qa": return wr.WR_Type === "LJ" ? "—" : wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? "⚠ QA REWORK REQUIRED" : wr.QA_AuditStatus ?? "None";
     }
   };
+  const displayValue = (wr: BaseWorkRequest, key: Column) =>
+    key === "due" ? formatDateDDMMYYYY(wr.DueDate) : key === "margin" ? formatDateDDMMYYYY(wr.MarginDate) : key === "created" ? formatDateDDMMYYYY(wr.CreatedDate) : value(wr, key);
   const savedConfig = useTableColumns(`work-requests-${requestType}`, columns.map(({ key, label }) => ({ id: key, label, value: (wr: BaseWorkRequest) => key === "cost" ? wr.EstimatedCostEur : key === "percentage" ? wr.Percentage : value(wr, key) })));
   const visibleColumns = savedConfig.visible.filter((column) => !["id", "percentage", "signals"].includes(column.id));
   const signalColumn = savedConfig.ordered.find((column) => column.id === "signals")!;
@@ -130,7 +134,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
   };
   const row = (wr: BaseWorkRequest) => <tr key={wr.WR_ID} className={`border-t hover:bg-slate-50 ${disputeMode === "highlight" ? (disputeMap.get(wr.WR_ID)?.length ? "border-l-4 border-l-rose-600 bg-rose-50 ring-1 ring-rose-300" : "opacity-40") : ""}`} onDoubleClick={() => onOpen(wr)}>
     <td className="p-2" title={`Select ${wr.WR_ID}`} onDoubleClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${wr.WR_ID}`} checked={selected.includes(wr.WR_ID)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, wr.WR_ID] : current.filter((id) => id !== wr.WR_ID))} /></td>
-    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : value(wr, key)}><div className={key === "signals" ? "" : "truncate"}>{key === "signals" ? <WRSignals wr={wr} onOpen={onOpen} /> : key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{value(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{value(wr, key)}</span> : value(wr, key) || "—"}</div></td>; })}
+    {config.visible.map(({ id }) => { const key = id as Column; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : displayValue(wr, key)}><div className={key === "signals" ? "" : "truncate"}>{key === "signals" ? <WRSignals wr={wr} onOpen={onOpen} /> : key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{displayValue(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{displayValue(wr, key)}</span> : displayValue(wr, key) || "—"}</div></td>; })}
     <td className="p-2" title="Open / Edit" onDoubleClick={(event) => event.stopPropagation()}><button className="block max-w-full truncate text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
   return <div className="space-y-2">
     <div className="flex flex-wrap items-center gap-2"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{signalFilters}<div className="ml-auto">{config.menu}</div></div>
@@ -152,8 +156,8 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
         return { ...wr, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, ProblemLocation: `${room.bl_id} / ${room.LevelName} / ${room.RoomCode}`,
           EquipmentCodes: wr.EquipmentCodes.filter((code) => data.equipment.some((item) => item.SiteId === activeSiteId && item.EquipmentCode === code && item.bl_id === room.bl_id && item.LevelName === room.LevelName && item.RoomCode === room.RoomCode)) };
       }, `Bulk location changed to ${bulkRoom}`)}>Apply room</button>
-      <input aria-label="Bulk due date" type="date" value={bulkDue} onChange={(e) => setBulkDue(e.target.value)} />
-      <button disabled={!bulkDue} onClick={() => apply((wr) => ({ ...wr, DueDate: bulkDue }), `Bulk due date changed to ${bulkDue}`)}>Apply date</button>
+      <DateInputDDMMYYYY aria-label="Bulk due date" value={bulkDue} onValueChange={setBulkDue} />
+      <button disabled={!bulkDue} onClick={() => apply((wr) => ({ ...wr, DueDate: bulkDue }), `Bulk due date changed to ${formatDateDDMMYYYY(bulkDue)}`)}>Apply date</button>
       <button className="text-red-700" onClick={remove}>Bulk Delete</button>
     </div>}
     <div className="overflow-auto rounded border bg-white"><table className="table-fixed text-left text-xs" style={{ width: config.width("__select") + config.width("__action") + config.visible.reduce((sum, column) => sum + config.width(column.id), 0) }}><colgroup><col style={{width: config.width("__select")}} />{config.visible.map((column) => <col key={column.id} style={{width: config.width(column.id)}} />)}<col style={{width: config.width("__action")}} /></colgroup><thead className="bg-slate-50"><tr>

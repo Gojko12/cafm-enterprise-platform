@@ -1,9 +1,16 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 
 export type TableColumn<T> = { id: string; label: string; value: (row: T) => string | number | undefined; render?: (row: T) => React.ReactNode; renderFilter?: () => React.ReactNode; wrap?: boolean };
 type Settings = { order: string[]; hidden: string[]; widths?: Record<string, number> };
+const displayValue = (value: string | number | undefined) => {
+  if (typeof value !== "string") return value ?? "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDateDDMMYYYY(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return formatDateTimeDDMMYYYY(value);
+  return value || "—";
+};
 
 export function ResizeHandle({ label, onResize, width }: { label: string; width: number; onResize: (width: number) => void }) {
   const cleanup = useRef<(() => void) | null>(null);
@@ -108,7 +115,7 @@ export function OverviewTable<T>({ preferenceKey, columns, rows, rowKey, onRow, 
     String(column.value(item) ?? "").toLowerCase().includes((filters[column.id] ?? "").trim().toLowerCase()))));
   const renderRow = (item: T) => <tr key={rowKey(item)} className={`border-t hover:bg-slate-50 ${rowClassName?.(item) ?? ""}`} tabIndex={onRow ? 0 : undefined}
     onClick={() => onRow?.(item)} onKeyDown={(event) => { if (onRow && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onRow(item); } }}>
-    {config.visible.map((column) => <td key={column.id} className="p-2" title={String(column.value(item) ?? "")}><div className={column.wrap ? "max-h-28 overflow-y-auto whitespace-normal" : "block max-w-full truncate"}>{column.render ? column.render(item) : column.value(item) ?? "—"}</div></td>)}</tr>;
+    {config.visible.map((column) => <td key={column.id} className="p-2" title={column.render ? String(column.value(item) ?? "") : String(displayValue(column.value(item)))}><div className={column.wrap ? "max-h-28 overflow-y-auto whitespace-normal" : "block max-w-full truncate"}>{column.render ? column.render(item) : displayValue(column.value(item))}</div></td>)}</tr>;
   const groups = groupBy ? [...new Set([...groupBy.order, ...filtered.map(groupBy.getKey)])].filter((key) => filtered.some((item) => groupBy.getKey(item) === key)) : [];
   return <div className="space-y-2"><div className="flex justify-end">{config.menu}</div><div className={viewportClassName ?? "overflow-auto rounded border"}>
     <table className="table-fixed text-left text-xs" style={{ width: config.visible.reduce((sum, column) => sum + config.width(column.id), 0) }}><colgroup>{config.visible.map((column) => <col key={column.id} style={{ width: config.width(column.id) }} />)}</colgroup><thead className={viewportClassName ? "sticky top-0 z-20 bg-slate-100" : "bg-slate-100"}><tr>{config.visible.map((column) => <th key={column.id} className="relative p-2" title={column.label}>

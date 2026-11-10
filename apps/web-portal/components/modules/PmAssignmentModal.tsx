@@ -6,6 +6,7 @@ import type { PM_ChecklistStandard, PM_Schedule, PMTargetType } from "@cafm/shar
 import type { PMPlanTarget } from "@/lib/pm-plan-targets";
 import { sharedFamilyAnchor } from "@/lib/pm-orders";
 import { FrequencyPill } from "@/components/common/PmFrequency";
+import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 
 export type PMAssignment = { blueprintIds: string[]; targetIds: string[]; anchor: string };
 const button = "rounded-lg border bg-white px-2 py-1.5 text-sm disabled:opacity-40";
@@ -58,7 +59,7 @@ export function PmAssignmentModal({ initial, blueprints, targets, schedules, bus
           <div className="min-h-32 flex-1 space-y-2 overflow-auto">{filteredTargets.map((target) => <label key={target.id} className="flex items-start gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={draft.targetIds.includes(target.id)} onChange={(e) => setDraft({ ...draft, targetIds: e.target.checked ? [...draft.targetIds, target.id] : draft.targetIds.filter((id) => id !== target.id) })} /><span>{target.label}<small className="block text-slate-500">{[target.bl_id, target.LevelName, target.RoomCode].filter(Boolean).join(" / ")}</small></span></label>)}</div>
         </section>
       </div>
-      <footer className="flex shrink-0 flex-wrap items-center gap-3 rounded-b-2xl border-t bg-slate-50 p-4"><label className="text-sm">Anchor Date <input type="date" className={input} required disabled={!!locked} value={locked ?? draft.anchor} onChange={(e) => setDraft({ ...draft, anchor: e.target.value })} /></label>{locked && <small>Existing family anchor locked</small>}
+      <footer className="flex shrink-0 flex-wrap items-center gap-3 rounded-b-2xl border-t bg-slate-50 p-4"><label className="text-sm">Cycle Date (Visit #1) <DateInputDDMMYYYY className={input} required disabled={!!locked} value={locked ?? draft.anchor} onChange={(e) => setDraft({ ...draft, anchor: e.target.value })} /></label>{locked && <small>Existing family cycle date locked</small>}
         <strong className="text-sm">Creating {count} PMS orders</strong><button className={`${button} ml-auto`} disabled={busy} onClick={onClose}>Cancel</button><button className={`${button} border-blue-600 text-blue-800`} disabled={busy || !count || !draft.anchor} onClick={() => onCreate(draft)}>Create PMS Orders</button>
       </footer>
     </div>

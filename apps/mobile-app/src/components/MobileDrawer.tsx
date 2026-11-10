@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { SiteId, UserAccessProfile } from "@cafm/shared-schema";
 import type { SyncStatus } from "../lib/offline-engine";
 import { notify } from "../lib/toast";
@@ -105,7 +106,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
               <span className={syncing ? "inline-block animate-spin" : ""}>{"\u21bb"}</span> Sync Now
             </button>
           </div>
-          <p className="text-xs text-slate-500">{lastSync ? `Last synced ${lastSync.toLocaleTimeString()}` : "Not synced yet"}</p>
+          <p className="text-xs text-slate-500">{lastSync ? `Last synced ${formatDateTimeDDMMYYYY(lastSync)}` : "Not synced yet"}</p>
           <label className="flex items-center justify-between text-xs text-slate-700">
             Simulate Offline
             <input type="checkbox" checked={isSimulatedOffline} onChange={(event) => onToggleOffline(event.target.checked)} className="h-4 w-4" />

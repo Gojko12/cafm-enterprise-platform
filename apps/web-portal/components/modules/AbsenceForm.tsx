@@ -5,6 +5,7 @@ import type { CraftpersonAbsence } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
 import { validateAbsence } from "../../lib/absence-validator";
 import { wallMinutes } from "../../lib/dispatch";
+import { DateInputDDMMYYYY } from "../common/DateInputDDMMYYYY";
 
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
 
@@ -31,8 +32,8 @@ export function AbsenceForm({ people, initial, existing, site, date, onClose, on
   }}><h2 className="font-bold">{existing ? "Edit absence" : "Add absence / vacation"}</h2>{error && <p role="alert" className="text-red-700">{error}</p>}
     <label className="block">Craftsperson <select className="block w-full border p-1" value={person} onChange={(e) => setPerson(e.target.value)}><option value="">Select</option>{people.map((item) => <option value={item.id} key={item.id}>{item.Name} {item.LastName} · {item.Trade}</option>)}</select></label>
     <label className="block">Type <select className="block w-full border p-1" value={type} onChange={(e) => setType(e.target.value as CraftpersonAbsence["absenceType"])}>{["Vacation", "SickLeave", "Training", "PublicHoliday", "OtherAbsence"].map((item) => <option key={item}>{item}</option>)}</select></label>
-    <label className="block">From <input required type="date" className="block w-full border p-1" value={start} onChange={(e) => setStart(e.target.value)} /></label>
-    <label className="block">To <input required type="date" className="block w-full border p-1" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+    <label className="block">From <DateInputDDMMYYYY required className="block w-full" value={start} onValueChange={setStart} /></label>
+    <label className="block">To <DateInputDDMMYYYY required className="block w-full" value={end} onValueChange={setEnd} /></label>
     <label><input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} /> Full day</label>
     {!full && <div className="flex gap-2"><label>Start time <input required type="time" className="block border p-1" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></label><label>End time <input required type="time" className="block border p-1" value={endTime} onChange={(e) => setEndTime(e.target.value)} /></label></div>}
     <label className="block">Notes <textarea className="block w-full border p-1" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>

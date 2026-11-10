@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { loadEquipmentDetails, type EquipmentDetailPack } from "../lib/equipment-details";
 
 type Tab = "Specs" | "Docs" | "Floor Plan" | "BIM";
@@ -151,7 +152,7 @@ export const EquipmentDetailsSheet: React.FC<{ siteId: string; equipmentCode: st
                   <p>Score: <b>{specs.sophia.conditionScore ?? "\u2014"}</b>{specs.sophia.urgency ? ` \u00b7 ${specs.sophia.urgency}` : ""}</p>
                   {specs.sophia.checkpoint && <p>Checkpoint: {specs.sophia.checkpoint}</p>}
                   {specs.sophia.summary && <p className="text-slate-600">{specs.sophia.summary}</p>}
-                  {specs.sophia.lastInspectedAt && <p className="text-slate-500">Last inspected {specs.sophia.lastInspectedAt.slice(0, 10)}</p>}
+                  {specs.sophia.lastInspectedAt && <p className="text-slate-500">Last inspected {formatDateTimeDDMMYYYY(specs.sophia.lastInspectedAt)}</p>}
                 </div>
               )}
             </div>

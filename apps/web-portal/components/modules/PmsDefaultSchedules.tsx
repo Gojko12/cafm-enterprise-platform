@@ -10,6 +10,7 @@ import { RECURRENCE_PATTERNS, WEEKDAY_LABELS, applyPmsAutoSchedule, frequencyLab
 import { reconcileOpenPMs } from "@/lib/pm-suppression";
 import { createPmOrder } from "@/lib/pm-orders";
 import { FrequencyPill } from "../common/PmFrequency";
+import { DateInputDDMMYYYY } from "../common/DateInputDDMMYYYY";
 
 type Pattern = (typeof RECURRENCE_PATTERNS)[number];
 const input = "rounded border bg-white px-1 py-0.5 text-xs";
@@ -134,7 +135,7 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
                 })}
                 {(pattern === "Monthly" || pattern === "Quarterly") && <label>Day <input type="number" min={1} max={28} className={`${input} w-14`} disabled={!canEdit} value={pms.defaultDayOfMonth ?? 1} onChange={(e) => patch(pms.ScheduleId, { defaultDayOfMonth: Math.min(28, Math.max(1, Number(e.target.value) || 1)) })} /></label>}
               </div>
-              <label className="flex items-center gap-1">Next Scheduled Date <input type="date" className={input} disabled={!canEdit} value={pms.defaultAnchorDate ?? ""} onChange={(e) => e.target.value && patch(pms.ScheduleId, { defaultAnchorDate: e.target.value })} /></label>
+              <label className="flex items-center gap-1">Next Scheduled Date <DateInputDDMMYYYY className={input} disabled={!canEdit} value={pms.defaultAnchorDate ?? ""} onValueChange={(value) => value && patch(pms.ScheduleId, { defaultAnchorDate: value })} aria-label="Next scheduled date" /></label>
               <p className="text-slate-600">{frequencyLabel(pms)}{next ? ` · next occurrence ${next}` : ""}</p>
             </fieldset>
             <fieldset className="space-y-1"><legend className="font-semibold">3. Default Scheduled Time Window</legend>

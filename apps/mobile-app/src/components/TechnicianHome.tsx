@@ -1,7 +1,7 @@
 import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { FrequencyPill } from "../../../web-portal/components/common/PmFrequency";
-import { BaseWorkRequest, pmTargetLabel } from "@cafm/shared-schema";
+import { BaseWorkRequest, formatDateDDMMYYYY, pmTargetLabel } from "@cafm/shared-schema";
 import type { LocationFreeze } from "@cafm/shared-schema";
 import { formatFreezePeriodWindow, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
 import { WRPreviewCard } from "./WRPreviewCard";
@@ -94,9 +94,9 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
     if (date === currentDate) return "📅 Scheduled for Today";
     if (date && date > currentDate) {
       const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
-      return date === localDateTime(tomorrow).slice(0, 10) ? "⏭ Tomorrow" : `⏭ ${date}`;
+      return date === localDateTime(tomorrow).slice(0, 10) ? "⏭ Tomorrow" : `⏭ ${formatDateDDMMYYYY(date)}`;
     }
-    return date ? `📅 Scheduled ${date}` : "📂 Unscheduled / Flexible Assigned WRs";
+    return date ? `📅 Scheduled ${formatDateDDMMYYYY(date)}` : "📂 Unscheduled / Flexible Assigned WRs";
   };
   const groups = new Map<string, BaseWorkRequest[]>();
   const sorted = [...displayWRs].sort((a, b) => (scheduledSlot(a, technician)?.assignedStartDateTime ?? dateOf(a) ?? "9999").localeCompare(scheduledSlot(b, technician)?.assignedStartDateTime ?? dateOf(b) ?? "9999"));

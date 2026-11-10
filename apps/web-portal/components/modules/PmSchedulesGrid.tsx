@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { pmTargetLabel, pmTargetType } from "@cafm/shared-schema";
+import { pmTargetLabel, pmTargetType, formatDateDDMMYYYY, getNextUnsuppressedOccurrence } from "@cafm/shared-schema";
 import type { PM_ChecklistStandard, PM_Schedule } from "@cafm/shared-schema";
 import type { DemoData } from "@/lib/cafm-data";
 
 const columns = [
   ["id", "PMS #"], ["scope", "Target Scope"], ["target", "Equipment / Location"], ["building", "Building"],
   ["floor", "Floor"], ["room", "Room"], ["code", "Blueprint Code"], ["title", "Blueprint Title"],
-  ["family", "Family / Mode"], ["trade", "Trade"], ["frequency", "Locked Freq"], ["anchor", "Anchor Date"],
+  ["family", "Family / Mode"], ["trade", "Trade"], ["frequency", "Locked Freq"], ["anchor", "Cycle Date (Visit #1)"],
   ["due", "Next Due"], ["technician", "Default Tech"],
 ] as const;
 type Column = typeof columns[number][0];
@@ -59,13 +59,17 @@ export function PmSchedulesGrid({ orders, blueprints, data, selected, onSelect, 
       case "family": return bp?.blueprintMode === "standalone" ? "Standalone" : `${bp?.familyId} · ${bp?.familyName}`;
       case "trade": return bp?.TradeName ?? "";
       case "frequency": return bp?.frequencyCode ?? "";
-      case "anchor": return order.anchorDate ?? "";
-      case "due": return order.NextDueDate;
+      case "anchor": return formatDateDDMMYYYY(order.cycleDate ?? order.anchorDate);
+      case "due": return formatDateDDMMYYYY(getNextUnsuppressedOccurrence(order, orders, new Date().toISOString().slice(0, 10))?.date);
       case "technician": return order.defaultTechnicianNames?.join(", ") ?? "";
     }
   };
   const rows = orders.filter((order) => ids.every((id) => !filters[id] || value(order, id).toLowerCase().includes(filters[id]!.trim().toLowerCase())))
-    .sort((a, b) => (sort.desc ? -1 : 1) * value(a, sort.id).localeCompare(value(b, sort.id), undefined, { numeric: true }) || a.ScheduleId.localeCompare(b.ScheduleId));
+    .sort((a, b) => {
+      const sortValue = (order: PM_Schedule) => sort.id === "anchor" ? order.cycleDate ?? order.anchorDate ?? "" :
+        sort.id === "due" ? getNextUnsuppressedOccurrence(order, orders, new Date().toISOString().slice(0, 10))?.date ?? "" : value(order, sort.id);
+      return (sort.desc ? -1 : 1) * sortValue(a).localeCompare(sortValue(b), undefined, { numeric: true }) || a.ScheduleId.localeCompare(b.ScheduleId);
+    });
   const visible = prefs.order.filter((id) => !prefs.hidden.includes(id));
   return <section className="space-y-3 rounded-xl border bg-white p-4">
     <div className="flex flex-wrap items-start gap-2"><strong>{rows.length} / {orders.length} PMS orders</strong>

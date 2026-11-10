@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { pmTargetLabel } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY, formatDateRangeDDMMYYYY, pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest, LocationFreeze } from "@cafm/shared-schema";
 import { addDays, calendarDate } from "../../../web-portal/lib/dispatch";
 import { isOverdue } from "../../../web-portal/lib/field-updates";
@@ -69,7 +69,7 @@ export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, 
 
   const move = (direction: -1 | 1) => setCursor(density === "week" ? addDays(cursor, direction * 7) : shiftMonth(cursor, direction));
   const goToday = () => { setCursor(today); setSelected(today); };
-  const title = density === "week" ? `${days[0]} – ${days[6]}` : `${MONTHS[Number(cursor.slice(5, 7)) - 1]} ${cursor.slice(0, 4)}`;
+  const title = density === "week" ? formatDateRangeDDMMYYYY(days[0], days[6]) : `${MONTHS[Number(cursor.slice(5, 7)) - 1]} ${cursor.slice(0, 4)}`;
   const seg = (active: boolean) => `px-2 py-1 text-xs font-semibold ${active ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`;
 
   const agenda = (byDay.get(selected) ?? []).slice().sort((a, b) => {
@@ -118,7 +118,7 @@ export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, 
         const hasLate = items.some(late);
         const outside = density === "month" && day.slice(0, 7) !== cursor.slice(0, 7);
         const frozen = frozenDay(day);
-        return <button key={day} type="button" aria-label={`${day}, ${items.length} work requests${frozen ? ", freeze period" : ""}`} aria-pressed={selected === day} onClick={() => setSelected(day)}
+        return <button key={day} type="button" aria-label={`${formatDateDDMMYYYY(day)}, ${items.length} work requests${frozen ? ", freeze period" : ""}`} aria-pressed={selected === day} onClick={() => setSelected(day)}
           className={`flex ${density === "week" ? "h-20" : "h-14"} flex-col items-center gap-0.5 p-1 ${frozen ? "bg-sky-50" : "bg-white"} ${outside ? "opacity-40" : ""} ${selected === day ? "ring-2 ring-inset ring-blue-600" : ""}`}>
           <span className={`text-xs ${day === today ? "rounded-full bg-blue-600 px-1.5 font-bold text-white" : "font-medium"}`}>{Number(day.slice(8, 10))}{frozen ? "❄" : ""}</span>
           {items.length > 0 && <span className="rounded-full bg-slate-800 px-1.5 text-[10px] font-semibold text-white">{items.length}</span>}
@@ -128,7 +128,7 @@ export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, 
     </div>
     <p className="flex flex-wrap gap-2 text-[10px] text-slate-500"><span>● PM</span><span>● FJ</span><span>● LJ</span><span>● Overdue</span><span>❄ Freeze Period</span></p>
     <section>
-      <h3 className="mb-1 text-sm font-bold">{selected === today ? "Today" : selected} · {agenda.length} WR{agenda.length === 1 ? "" : "s"}{frozenDay(selected) ? " · ❄ Freeze Period" : ""}</h3>
+      <h3 className="mb-1 text-sm font-bold">{formatDateDDMMYYYY(selected)}{selected === today ? " (Today)" : ""} · {agenda.length} WR{agenda.length === 1 ? "" : "s"}{frozenDay(selected) ? " · ❄ Freeze Period" : ""}</h3>
       {agenda.length === 0 ? <p className="rounded-lg bg-slate-50 p-3 text-center text-xs text-slate-500">No work requests on this day for the selected date type.</p> : agenda.map(row)}
     </section>
     <details open={trayOpen} onToggle={(event) => setTrayOpen((event.currentTarget as HTMLDetailsElement).open)} className="rounded-lg border border-slate-200 bg-white p-2">

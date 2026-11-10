@@ -6,7 +6,7 @@ import type { PM_ChecklistStandard, PMFrequencyCode, PM_Schedule } from "@cafm/s
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import type { DemoData } from "@/lib/cafm-data";
-import { createTargetPmOrder, nextBlueprintCode, nextFamilyId, validateBlueprintFamilies } from "@/lib/pm-orders";
+import { createTargetPmOrder, nextBlueprintCode, nextFamilyId, validateBlueprintFamilies, rephasePmAssignments } from "@/lib/pm-orders";
 import { reconcileOpenPMs, resolveBlueprintSchedule } from "@/lib/pm-suppression";
 import { shiftPmSchedule } from "@/lib/pm-schedule-shift";
 import { pmPlanTargets } from "@/lib/pm-plan-targets";
@@ -58,6 +58,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
     finally { setBusy(false); }
   };
   const persist = async (next: DemoData, message: string) => {
+    next = { ...next, schedules: rephasePmAssignments(data.schedules, next.schedules) };
     validateBlueprintFamilies(next.blueprints);
     await commitSnapshot(data, next, { optimistic: true }); setNotice(message);
   };
@@ -100,12 +101,12 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
     if (!canAssign) throw new Error("Assignment permission required.");
     await persist({ ...data, schedules: data.schedules.map((item) => item.ScheduleId === order.ScheduleId && item.SiteId === site ? { ...item, IsActive: false, UpdatedAt: new Date().toISOString() } : item) }, `PMS #${order.ScheduleId} deactivated; historical WR links retained.`);
   });
-  const shift = async (order: PM_Schedule, cycle: string, date: string, action: "move" | "keep") => {
+  const shift = async (order: PM_Schedule, cycle: string, date: string, action: "move" | "keep", peak: number) => {
     setBusy(true); setError("");
     try {
       if (!permissions?.canDefinePMSchedule) throw new Error("Schedule definition permission required.");
-      const result = shiftPmSchedule(data.schedules, data.blueprints, data.workRequests, order, cycle, date, action, actor, new Date().toISOString());
-      await persist({ ...data, ...result }, "Schedule shifted forward from the cutover. Annual phase and started/completed WRs retained.");
+      const result = shiftPmSchedule(data.schedules, data.blueprints, data.workRequests, order, cycle, date, action, actor, new Date().toISOString(), peak);
+      await persist({ ...data, ...result }, "Cycle date and lockstep peak position saved. Started/completed WRs retained.");
     } catch (problem) { setError(problem instanceof Error ? problem.message : "Could not shift schedule."); throw problem; }
     finally { setBusy(false); }
   };

@@ -2,6 +2,7 @@
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useEffect, useState } from "react";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { getUnfavourableStepCount } from "@/lib/wr-signals";
 import { WRChecklistReview } from "./WRChecklistReview";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
@@ -330,7 +331,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
       ...gates.filter((gate) => gate.Status === "Approved").map((gate) => cell(`${gate.GateType} approval`,
         `${gate.ApprovedBy ?? "Unknown"} · ${gate.ApprovedAt ?? "Date not recorded"}`)),
       ...(workRequest.Activity ?? []).filter((entry) => entry.kind === "log" && /approved|sign|completed|archived/i.test(entry.text))
-        .map((entry) => cell("Stage signature / approval", `${entry.text} · ${entry.createdAt}`)),
+        .map((entry) => cell("Stage signature / approval", `${entry.text} · ${formatDateTimeDDMMYYYY(entry.createdAt)}`)),
     ].join("");
     printWindow.document.write(`<!doctype html><html><head><title>Yellow Page ${escapeHtml(workRequest.WR_ID)}</title><style>
       body{font:14px Arial,sans-serif;color:#111;padding:32px}h1{text-align:center;background:#fef3c7;padding:18px;border:2px solid #111}
@@ -404,7 +405,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
               }} onBlur={(e) => {
                 if (Number(e.currentTarget.value) < 750) window.alert("Long Job estimated cost must be at least 750 EUR.");
               }} className="w-36 rounded border px-2 py-1" /> EUR</label>)}{field("Actual Cost", `${workRequest.ActualCostEur ?? 0} EUR`)}
-            {field("Created Date", workRequest.CreatedDate)}{field("Due Date", workRequest.DueDate)}{field("Margin Date", workRequest.MarginDate)}
+            {field("Created Date", formatDateDDMMYYYY(workRequest.CreatedDate))}{field("Due Date", formatDateDDMMYYYY(workRequest.DueDate))}{field("Margin Date", formatDateDDMMYYYY(workRequest.MarginDate))}
             {field("Originating FJ WR ID", workRequest.OriginatingFJ_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingFJ_WR_ID!)}>{workRequest.OriginatingFJ_WR_ID}</button> : "—")}
             {field("Parent PM WR ID", workRequest.ParentPM_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.ParentPM_WR_ID!)}>{workRequest.ParentPM_WR_ID}</button> : "—")}
             {workRequest.OriginatingWR_ID && field("Originating QA WR ID", <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingWR_ID!)}>{workRequest.OriginatingWR_ID}</button>)}
@@ -507,10 +508,10 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
             <label className="ml-auto flex items-center gap-2 text-sm"><span className="sr-only">Write a comment</span><input placeholder="Write a comment..." value={message} onChange={(e) => setMessage(e.target.value)} className="rounded border px-2 py-1" /></label><button onClick={post} disabled={!message.trim()} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-50">Post</button>
           </div>
           {newestFirst((workRequest.Activity ?? []).filter((entry) => historyFilter === "all" || entry.kind === historyFilter), (entry) => entry.createdAt).map((entry) => <article key={entry.id} className="border-b pb-2 text-sm">
-            <div className="text-xs text-slate-500">{entry.actorName} ({entry.actorRole}) · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
+            <div className="text-xs text-slate-500">{entry.actorName} ({entry.actorRole}) · {formatDateTimeDDMMYYYY(entry.createdAt)} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
             {editing === entry.id ? <><textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="mt-2 w-full rounded border p-2" /><button onClick={() => saveEdit(entry.id)} className="text-blue-700">Save</button></> : <p>{entry.text}</p>}
             {entry.kind === "comment" && entry.actorId === actorId && editing !== entry.id && <button onClick={() => { setEditing(entry.id); setDraft(entry.text); }} className="text-blue-700">Edit</button>}
-            {!!entry.editHistory?.length && <details><summary>Prior versions</summary>{newestFirst(entry.editHistory, (version) => version.timestamp).map((version, index) => <p key={`${entry.id}-${index}`} className="border-l pl-2 text-slate-600">{new Date(version.timestamp).toLocaleString()} — {version.text}</p>)}</details>}
+            {!!entry.editHistory?.length && <details><summary>Prior versions</summary>{newestFirst(entry.editHistory, (version) => version.timestamp).map((version, index) => <p key={`${entry.id}-${index}`} className="border-l pl-2 text-slate-600">{formatDateTimeDDMMYYYY(version.timestamp)} — {version.text}</p>)}</details>}
           </article>)}
         </div>}
       </ResizableHistory>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { SiteId } from "@cafm/shared-schema";
 import { clearEquipmentDetailCache, EQ_DETAIL_MAX_ITEMS, getEquipmentCacheCount } from "../lib/equipment-details";
 
@@ -101,7 +102,7 @@ export function ProfileSettings(props: ProfileSettingsProps) {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 text-sm font-medium text-slate-900"><span className={`h-2 w-2 rounded-full ${props.offline ? "bg-amber-500" : "bg-emerald-500"}`} />{props.offline ? "Offline" : "Online"}{props.pendingCount > 0 && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900">{props.pendingCount} queued</span>}</p>
-          <p className="text-xs text-slate-500">{props.lastSync ? `Last synced ${props.lastSync.toLocaleTimeString()}` : "Not synced yet"}</p>
+          <p className="text-xs text-slate-500">{props.lastSync ? `Last synced ${formatDateTimeDDMMYYYY(props.lastSync)}` : "Not synced yet"}</p>
         </div>
         <button type="button" disabled={syncing} onClick={sync} className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{syncing ? "Syncing…" : "↻ Sync Now"}</button>
       </div>

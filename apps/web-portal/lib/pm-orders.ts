@@ -1,8 +1,24 @@
-import { compileBlueprintChecklist, nextPmsOrderNumber, PM_ChecklistStandardSchema, PM_ScheduleSchema, pmTargetKey, pmTargetType } from "@cafm/shared-schema";
+import { compileBlueprintChecklist, nextPmsOrderNumber, PM_ChecklistStandardSchema, PM_ScheduleSchema, pmTargetKey, pmTargetType, getPmCycle, addCycleInterval } from "@cafm/shared-schema";
 import type { Equipment, PMTarget, PM_ChecklistStandard, PM_Schedule, SuppressedPmOccurrence, BlueprintAuditEntry } from "@cafm/shared-schema";
 import { frequencyOf, nextTickOnOrAfter, resolveBlueprintSchedule, shiftDays } from "./pm-suppression";
 
 export { nextPmsOrderNumber };
+export function rephasePmAssignments(previous: PM_Schedule[], next: PM_Schedule[]): PM_Schedule[] {
+  return next.map((order) => {
+    if (!order.IsActive) return order;
+    const before = previous.find((item) => item.IsActive && item.SiteId === order.SiteId && pmTargetKey(item) === pmTargetKey(order) &&
+      (order.suppressionMode === "independent" ? item.ScheduleId === order.ScheduleId : item.suppressionGroupKey === order.suppressionGroupKey));
+    if (!before?.peakSlotIndex) return order;
+    const oldCycle = getPmCycle(before, previous);
+    const draft = next.map((item) => ({ ...item, peakSlotIndex: undefined, annualSlotIndex: undefined, peakYearIndex: undefined }));
+    const newCycle = getPmCycle(draft.find((item) => item.ScheduleId === order.ScheduleId && item.SiteId === order.SiteId)!, draft);
+    if (oldCycle.unit !== newCycle.unit) throw new Error("Changing a family between calendar and fixed-day frequencies requires a separate family.");
+    if (oldCycle.interval === newCycle.interval && oldCycle.length === newCycle.length) return order;
+    const projected = Math.round((oldCycle.peakSlotIndex - 1) * oldCycle.interval / newCycle.interval);
+    const peakSlotIndex = projected % newCycle.visits + 1;
+    return { ...order, peakSlotIndex, annualSlotIndex: undefined, peakYearIndex: undefined };
+  });
+}
 export function validateBlueprintFamilies(blueprints: PM_ChecklistStandard[]) {
   for (const blueprint of blueprints.filter((item) => item.IsActive)) compileBlueprintChecklist(blueprint.ChecklistCode, blueprints.filter((item) => item.SiteId === blueprint.SiteId));
 }
@@ -26,10 +42,12 @@ export function createTargetPmOrder(schedules: PM_Schedule[], blueprints: PM_Che
     EquipmentCodes: type === "equipment" ? [target.equipmentCode ?? target.EquipmentCode!] : [],
     bl_id: target.bl_id, LevelName: target.levelName ?? target.LevelName, RoomCode: target.roomCode ?? target.RoomCode,
     levelName: target.levelName ?? target.LevelName, roomCode: target.roomCode ?? target.RoomCode,
-    Frequency: "Monthly", FrequencyInterval: 1, anchorDate: date, NextDueDate: date, LeadTimeDays: 14, MarginWindowDays: 7,
+    Frequency: "Monthly", FrequencyInterval: 1, anchorDate: date, cycleDate: date, NextDueDate: date, LeadTimeDays: 14, MarginWindowDays: 7,
     Title: blueprint.Title, CreatedBy: actor, CreatedAt: new Date().toISOString(), IsActive: true,
   }, blueprints);
-  return { ...base, NextDueDate: nextTickOnOrAfter(base, shiftDays(date, 1)) };
+  const peer = schedules.find((item) => item.IsActive && item.SiteId === base.SiteId && pmTargetKey(item) === key && base.suppressionGroupKey && item.suppressionGroupKey === base.suppressionGroupKey);
+  const configured = { ...base, peakSlotIndex: peer?.peakSlotIndex };
+  return { ...configured, NextDueDate: nextTickOnOrAfter(configured, date, [...schedules, configured]) };
 }
 export function nextBlueprintCode(blueprints: PM_ChecklistStandard[], frequency: string, high = 0): string {
   const next = Math.max(high, 0, ...blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))) + 1;
@@ -47,8 +65,8 @@ export function changeFamilyAnchor(schedules: PM_Schedule[], blueprints: PM_Chec
     const sibling = blueprints.find((bp) => bp.ChecklistCode === item.ChecklistCode && (!bp.SiteId || bp.SiteId === item.SiteId));
     if (item.SiteId !== schedule.SiteId || pmTargetKey(item) !== pmTargetKey(schedule) ||
       (blueprint.blueprintMode === "standalone" ? item.ScheduleId !== schedule.ScheduleId : sibling?.blueprintMode !== "family_ladder" || sibling.familyId !== blueprint.familyId)) return item;
-    const updated = resolveBlueprintSchedule({ ...item, anchorDate: anchor }, blueprints);
-    return { ...updated, NextDueDate: nextTickOnOrAfter(updated, shiftDays(anchor, 1)), UpdatedAt: new Date().toISOString() };
+    const updated = resolveBlueprintSchedule({ ...item, anchorDate: anchor, cycleDate: anchor }, blueprints);
+    return { ...updated, NextDueDate: nextTickOnOrAfter(updated, anchor), UpdatedAt: new Date().toISOString() };
   });
 }
 
@@ -63,7 +81,7 @@ function renameBlueprints<T extends PmState>(state: T, occupied = new Set<string
   const blueprints = state.blueprints.map((bp) => {
     let code = bp.ChecklistCode;
     if (/^CB-\d{4}-/.test(code) && !code.endsWith(`-${bp.frequencyCode}`)) throw new Error(`Blueprint ${code} does not match its locked frequency.`);
-    if (!/^CB-(?!0000)\d{4}-(01D|01W|02W|01M|03M|06M|01Y|02Y|05Y)$/.test(code) || occupied.has(code.slice(0, 7))) {
+    if (!/^CB-(?!0000)\d{4}-(01D|01W|02W|01M|03M|06M|01Y|02Y|05Y|10Y)$/.test(code) || occupied.has(code.slice(0, 7))) {
       if (++high > 9999) throw new Error("Blueprint number range exhausted during migration.");
       code = `CB-${String(high).padStart(4, "0")}-${bp.frequencyCode}`;
     }
@@ -111,7 +129,22 @@ export function migratePmState<T extends PmState>(state: T): T {
       }
       return order;
     });
-    return renameBlueprints({ ...state, blueprints, schedules });
+    const normalized = schedules.map((order) => {
+      if (!order.IsActive) return PM_ScheduleSchema.parse(order);
+      const cycle = getPmCycle(order, schedules);
+      const date = order.cycleDate ?? addCycleInterval(cycle.cycleDate, cycle.interval, cycle.unit);
+      const peer = cycle.group.find((item) => item.cycleDate);
+      const cycleDate = peer?.cycleDate ?? date;
+      const peak = peer?.peakSlotIndex ?? cycle.peakSlotIndex;
+      if (order.cycleDate && order.cycleDate !== cycleDate) throw new Error("Family PMS rows must share one Cycle Date.");
+      if (order.peakSlotIndex !== undefined && order.peakSlotIndex !== peak) throw new Error("Family PMS rows must share one peak position.");
+      const perYear = Math.max(1, cycle.visitsPerYear);
+      return PM_ScheduleSchema.parse({ ...order, anchorDate: cycleDate, sharedAnchorDate: cycleDate, cycleDate, peakSlotIndex: peak,
+        annualSlotIndex: cycle.unit === "months" ? (peak - 1) % perYear + 1 : undefined,
+        peakYearIndex: cycle.unit === "months" ? Math.floor((peak - 1) / perYear) + 1 : undefined });
+    });
+    normalized.filter((order) => order.IsActive).forEach((order) => getPmCycle(order, normalized));
+    return renameBlueprints({ ...state, blueprints, schedules: normalized });
   }
   const blueprints: PM_ChecklistStandard[] = [];
   const blueprintMap = new Map<string, string>();
@@ -168,7 +201,9 @@ export function migratePmState<T extends PmState>(state: T): T {
       const anchor = sharedFamilyAnchor(schedules, blueprints, equipment || pmTargetKey(old), blueprint) ?? old.anchorDate ?? old.sharedAnchorDate ?? old.NextDueDate.slice(0, 10);
       const duplicate = old.IsActive && schedules.some((item) => item.IsActive && item.SiteId === old.SiteId && item.ChecklistCode === blueprintId && item.EquipmentCodes.includes(equipment));
       if (duplicate) notes.push(`Legacy duplicate PMS ${old.ScheduleId} retained as inactive PMS #${id}; existing WR history is preserved.`);
-      schedules.push(resolveBlueprintSchedule({ ...old, ScheduleId: id, ChecklistCode: blueprintId, EquipmentCodes: equipment ? [equipment] : [], anchorDate: anchor, IsActive: duplicate ? false : old.IsActive }, blueprints));
+      schedules.push(resolveBlueprintSchedule({ ...old, ScheduleId: id, ChecklistCode: blueprintId, EquipmentCodes: equipment ? [equipment] : [],
+        anchorDate: anchor, cycleDate: old.cycleDate ?? (!old.anchorDate && !old.sharedAnchorDate ? anchor : undefined),
+        IsActive: duplicate ? false : old.IsActive }, blueprints));
       ids.push(id);
     }
     idMap.set(key(old.SiteId, old.ScheduleId), ids);

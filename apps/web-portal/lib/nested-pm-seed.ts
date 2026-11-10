@@ -19,7 +19,7 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
     { key: "CHILLER-MECH", name: "Chiller Routine Mechanical", equipment: "Chiller", codes: ["01M", "03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
     { key: "BOILER-MECH", name: "Heating Boiler Servicing", equipment: "Heating Boiler", codes: ["03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
     { key: "AHU", name: "Cleanroom AHU Servicing", equipment: "Cleanroom AHU", codes: ["03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
-    { key: "GENERATOR-ELEC", name: "Diesel Generator Servicing", equipment: "Diesel Generator", codes: ["01M", "06M", "01Y"], trade: "Electrical", copies: 2 },
+    { key: "GENERATOR-ELEC", name: "Diesel Generator Servicing", equipment: "Diesel Generator", codes: ["01M", "06M", "01Y", "10Y"], trade: "Electrical", copies: 2 },
   ];
   for (const site of sites) {
     const people = data.craftspeople.filter((item) => item.SiteId === site);
@@ -51,10 +51,11 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
       }
       const base = `${site}-BP-${family.key}`;
       const blueprintFamily = { id: `FAM-${String(families.indexOf(family) + 1).padStart(3, "0")}`, name: family.name };
-      const procedures = family.codes.map((code) => makeBlueprint(`${base}-${code}`, `${family.name} · ${code}`, code, family.trade,
+      const procedures = family.codes.map((code) => makeBlueprint(`${base}-${code}`, code === "10Y" ? "10-Year Major Overhaul" : `${family.name} · ${code}`, code, family.trade,
         code === "01M" ? ["Check operating indications and alarms"] :
           code === "03M" ? [family.key === "AHU" ? "Inspect air filter condition & pressure drop" : "Inspect service filter condition & pressure", "Inspect guards and access", "Inspect connections for leakage", "Verify operating temperatures"] :
             code === "06M" ? ["Inspect and lubricate bearings", "Inspect and clean heat exchanger surfaces"] :
+              code === "10Y" ? ["Overhaul engine and replace life-limited components", "Inspect alternator insulation and rebuild excitation assembly", "Perform certified load-bank and protection acceptance testing"] :
               ["Replace bag, panel or service filters with new set", "Inspect drive train and verify alignment", "Verify annual control and safety interlocks"],
         blueprintFamily, code === "01Y" && family.codes.includes("03M") ? `${base}-03M-1` : undefined));
       for (const [assetIndex, asset] of assets.entries()) {

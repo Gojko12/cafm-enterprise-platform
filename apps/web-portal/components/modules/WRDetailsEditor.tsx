@@ -8,6 +8,7 @@ import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
+import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 
 export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest }) {
   const { data, setData } = useCafmStore();
@@ -79,8 +80,8 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
         <label>Trade<select value={trade} onChange={(e) => setTrade(e.target.value)} className="block w-full rounded border p-1"><option value="">None</option>{trade && !CLASSICAL_TRADES.some((item) => item === trade) && <option>{trade}</option>}{CLASSICAL_TRADES.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label>Estimated cost EUR<input type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} className="block w-full rounded border p-1" /></label>
         <label>Cost type<select value={costType} onChange={(e) => setCostType(e.target.value)} className="block w-full rounded border p-1"><option value="">None</option><option>Fixed</option><option>Ceiling</option></select></label>
-        <label>Due date<input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="block w-full rounded border p-1" /></label>
-        <label>Margin date<input type="date" value={margin} onChange={(e) => setMargin(e.target.value)} className="block w-full rounded border p-1" /></label>
+        <label>Due date<DateInputDDMMYYYY value={due} onValueChange={setDue} className="block w-full" aria-label="Due date" /></label>
+        <label>Margin date<DateInputDDMMYYYY value={margin} onValueChange={setMargin} className="block w-full" aria-label="Margin date" /></label>
       </div>
       <label>Assigned craftspeople<select multiple value={craft} onChange={(e) => setCraft(Array.from(e.target.selectedOptions, (option) => option.value))} className="block w-full rounded border p-1">
         {data.craftspeople.filter((item) => item.SiteId === site).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}

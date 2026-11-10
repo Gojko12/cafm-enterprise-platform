@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Building, Equipment, Floor, Room } from "@cafm/shared-schema";
 import { extractPctKey, FilterCriteria, WorkTypeCode } from "@/lib/store";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
+import { DateInputDDMMYYYY } from "./DateInputDDMMYYYY";
 
 interface AdvancedFilterPanelProps {
   buildings: Building[];
@@ -171,8 +172,8 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <input type="date" aria-label="Scheduled from" value={currentFilters.scheduledDateFrom || ""} onChange={(e) => set({ scheduledDateFrom: e.target.value || undefined })} className={dateInput} />
-                  <input type="date" aria-label="Scheduled to" value={currentFilters.scheduledDateTo || ""} onChange={(e) => set({ scheduledDateTo: e.target.value || undefined })} className={dateInput} />
+                  <DateInputDDMMYYYY aria-label="Scheduled from" value={currentFilters.scheduledDateFrom || ""} onValueChange={(value) => set({ scheduledDateFrom: value || undefined })} className={dateInput} />
+                  <DateInputDDMMYYYY aria-label="Scheduled to" value={currentFilters.scheduledDateTo || ""} onValueChange={(value) => set({ scheduledDateTo: value || undefined })} className={dateInput} />
                 </div>
               </div>
 
@@ -184,8 +185,8 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
                     ))}
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
-                    <input type="date" aria-label={`${otherTab} from`} value={currentFilters[fromKey] || ""} onChange={(e) => set({ [fromKey]: e.target.value || undefined })} className={dateInput} />
-                    <input type="date" aria-label={`${otherTab} to`} value={currentFilters[toKey] || ""} onChange={(e) => set({ [toKey]: e.target.value || undefined })} className={dateInput} />
+                    <DateInputDDMMYYYY aria-label={`${otherTab} from`} value={currentFilters[fromKey] || ""} onValueChange={(value) => set({ [fromKey]: value || undefined })} className={dateInput} />
+                    <DateInputDDMMYYYY aria-label={`${otherTab} to`} value={currentFilters[toKey] || ""} onValueChange={(value) => set({ [toKey]: value || undefined })} className={dateInput} />
                   </div>
                 </div>
               )}

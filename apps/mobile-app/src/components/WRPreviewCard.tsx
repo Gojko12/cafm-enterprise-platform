@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { BaseWorkRequest, pmTargetLabel } from "@cafm/shared-schema";
-import { formatDistanceToNow, format } from "date-fns";
+import { BaseWorkRequest, formatDateDDMMYYYY, pmTargetLabel } from "@cafm/shared-schema";
 
 interface WRPreviewCardProps {
   wr: BaseWorkRequest;
@@ -44,8 +43,7 @@ export const WRPreviewCard: React.FC<WRPreviewCardProps> = ({ wr, onClick }) => 
 
   const formatDateShort = (dateStr?: string) => {
     if (!dateStr) return "";
-    const date = new Date(dateStr);
-    return format(date, "MMM d");
+    return formatDateDDMMYYYY(dateStr);
   };
 
   return (

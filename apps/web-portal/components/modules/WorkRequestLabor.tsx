@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -103,7 +104,7 @@ export function WorkRequestLabor({ wr, people, absences, freezes, update, onClos
     { id: "start", label: "Planned Start", value: (row: typeof rows[number]) => row.interval?.assignedStartDateTime },
     { id: "end", label: "Planned End", value: (row: typeof rows[number]) => row.interval?.assignedEndDateTime },
     { id: "hours", label: "Planned Duration (h)", value: (row: typeof rows[number]) => row.interval ? (wallMinutes(row.interval.assignedEndDateTime) - wallMinutes(row.interval.assignedStartDateTime)) / 60 : undefined },
-    { id: "recorded", label: "Stopwatch Recorded Time", value: (row: typeof rows[number]) => row.recorded, render: (row: typeof rows[number]) => <details><summary className="cursor-pointer">{formatMinutes(row.recorded)} · {row.sessions.length} session(s)</summary>{row.sessions.map((session) => <p key={session.id} className="whitespace-nowrap text-xs">{session.startedAt} – {session.endedAt ?? "Running"} · {session.durationMinutes} min</p>)}</details> },
+    { id: "recorded", label: "Stopwatch Recorded Time", value: (row: typeof rows[number]) => row.recorded, render: (row: typeof rows[number]) => <details><summary className="cursor-pointer">{formatMinutes(row.recorded)} · {row.sessions.length} session(s)</summary>{row.sessions.map((session) => <p key={session.id} className="whitespace-nowrap text-xs">{formatDateTimeDDMMYYYY(session.startedAt)} – {session.endedAt ? formatDateTimeDDMMYYYY(session.endedAt) : "Running"} · {session.durationMinutes} min</p>)}</details> },
     { id: "opinion", label: "Technician Opinion Time", value: (row: typeof rows[number]) => row.opinion, render: (row: typeof rows[number]) => row.opinion === undefined ? "—" : formatMinutes(row.opinion) },
     { id: "override", label: "Team Leader Override Time (min)", value: (row: typeof rows[number]) => row.override, render: (row: typeof rows[number]) => <OverrideInput value={row.override} disabled={!canOverride} onSave={(value) => setOverride(row, value)} /> },
     { id: "rate", label: "Hourly Rate EUR/h", value: (row: typeof rows[number]) => row.rate, render: (row: typeof rows[number]) => <RateInput value={row.rate} onSave={(value) => setRate(row, value)} /> },

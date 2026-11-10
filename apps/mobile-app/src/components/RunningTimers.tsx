@@ -1,4 +1,5 @@
 import React from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
 import { laborFor } from "./MobileExecutionTools";
 
@@ -32,7 +33,7 @@ export function TimerCard({ timer, equipment, now, open, compact = false }: {
     <div className="flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /><strong className="font-mono">{timerClock(session.startedAt, now)}</strong><span className="text-xs text-emerald-300">+ {prior}m prior</span></div>
     <p className="font-semibold">{wr.WR_ID} <span className="rounded bg-blue-600 px-1 text-xs">{wr.WR_Type}</span> · {wr.Description}</p>
     <p className="text-xs text-slate-200">{wr.bl_id} / {wr.RoomCode ?? "—"} · {equipmentLabel}</p>
-    <p className="text-xs text-slate-200">Checklist: {progress(wr)} steps · Started {new Date(session.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+    <p className="text-xs text-slate-200">Checklist: {progress(wr)} steps · Started {formatDateTimeDDMMYYYY(session.startedAt)}</p>
   </button>;
 }
 
@@ -46,6 +47,6 @@ export function TimersPage({ timers, requests, technician, equipment, now, open 
     {timers.map((timer) => <TimerCard key={timer.session.id} timer={timer} equipment={equipment} now={now} open={open} />)}
     <h2 className="font-bold">Completed today</h2>
     {!completed.length && <p className="text-sm text-slate-500">No completed sessions today.</p>}
-    {completed.map(({ wr, session }) => <button key={session.id} className="block w-full rounded border bg-white p-3 text-left" onClick={() => open(wr.WR_ID)}><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p className="text-sm">{session.durationMinutes} min · Finished {new Date(session.endedAt!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p></button>)}
+    {completed.map(({ wr, session }) => <button key={session.id} className="block w-full rounded border bg-white p-3 text-left" onClick={() => open(wr.WR_ID)}><strong>{wr.WR_ID} · {wr.WR_Type}</strong><p>{wr.Description}</p><p className="text-sm">{session.durationMinutes} min · Finished {formatDateTimeDDMMYYYY(session.endedAt!)}</p></button>)}
   </div>;
 }

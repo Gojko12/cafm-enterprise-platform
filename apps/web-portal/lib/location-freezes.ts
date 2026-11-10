@@ -1,4 +1,5 @@
 import type { BaseWorkRequest, LocationFreeze } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY, formatDateRangeDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { addDays } from "./dispatch";
 
 export function freezeLocations(freeze: LocationFreeze) {
@@ -43,24 +44,15 @@ function parseLocalDateTime(value: string) {
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] ?? 0), Number(match[5] ?? 0));
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const dayStamp = (value: Date) => value.getFullYear() * 10000 + value.getMonth() * 100 + value.getDate();
-const clock = (value: Date) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
-const calendar = (value: Date) => `${value.getDate()} ${MONTHS[value.getMonth()]} ${value.getFullYear()}`;
-
-export function formatHumanDateTime(value: string | undefined, now: Date = new Date()) {
+export function formatHumanDateTime(value: string | undefined, _now: Date = new Date()) {
   if (!value) return "";
-  const date = parseLocalDateTime(value);
-  if (!date) return value;
-  const label = dayStamp(date) === dayStamp(now) ? "Today" : calendar(date);
-  return /T\d{2}:\d{2}|\s\d{2}:\d{2}/.test(value) ? `${label}, ${clock(date)}` : label;
+  return /^(\d{4})-(\d{2})-(\d{2})$/.test(value) ? formatDateDDMMYYYY(value) : formatDateTimeDDMMYYYY(value);
 }
 
-export function formatFreezePeriodWindow(startIso: string, endIso: string, now: Date = new Date()) {
+export function formatFreezePeriodWindow(startIso: string, endIso: string, _now: Date = new Date()) {
   const start = parseLocalDateTime(startIso), end = parseLocalDateTime(endIso);
-  if (!start || !end) return [startIso, endIso].filter(Boolean).join(" \u2013 ");
-  if (dayStamp(start) === dayStamp(end)) return `${dayStamp(start) === dayStamp(now) ? "Today" : calendar(start)}, ${clock(start)} \u2013 ${clock(end)}`;
-  return `${formatHumanDateTime(startIso, now)} \u2013 ${formatHumanDateTime(endIso, now)}`;
+  if (!start || !end) return "Invalid date range";
+  return formatDateRangeDDMMYYYY(startIso, endIso);
 }
 
 export function getWorkRequestFreezes(wr: BaseWorkRequest, freezes: LocationFreeze[], now: string) {

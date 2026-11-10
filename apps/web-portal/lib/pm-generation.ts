@@ -29,9 +29,9 @@ function addDays(date: string, days: number): string {
   return result.toISOString().slice(0, 10);
 }
 
-function nextDue(schedule: PM_Schedule, due: string): string {
+function nextDue(schedule: PM_Schedule, due: string, schedules: PM_Schedule[]): string {
   if (schedule.frequencyCode || schedule.sharedAnchorDate) {
-    return nextTickOnOrAfter(schedule, shiftDays(due, 1));
+    return nextTickOnOrAfter(schedule, shiftDays(due, 1), schedules);
   }
   if (schedule.Frequency === "Daily") return addDays(due, schedule.FrequencyInterval);
   if (schedule.Frequency === "Weekly") return addDays(due, schedule.FrequencyInterval * 7);
@@ -71,20 +71,20 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
   const eligible = new Set<string>();
   const maxWindow = Math.max(0, ...included.map(collisionWindow));
   const bounds = selected.map((schedule) => input.mode === "horizon" ? addDays(horizon, schedule.LeadTimeDays) :
-    schedule.sharedAnchorDate ? nextTickOnOrAfter(schedule, schedule.NextDueDate) : schedule.NextDueDate);
+    schedule.sharedAnchorDate ? nextTickOnOrAfter(schedule, schedule.NextDueDate, included) : schedule.NextDueDate);
   const end = addDays(bounds.sort().at(-1) ?? horizon, maxWindow);
   for (const schedule of included) {
     if (schedule.Frequency === "Meter-based") continue;
     let due = schedule.NextDueDate;
     if (schedule.effectiveFromDate && due < schedule.effectiveFromDate) due = schedule.effectiveFromDate;
-    if (schedule.sharedAnchorDate) due = nextTickOnOrAfter(schedule, due);
+    if (schedule.sharedAnchorDate) due = nextTickOnOrAfter(schedule, due, included);
     const dates: string[] = [];
     for (let count = 0; due <= end; count++) {
       if (count > 1000) throw new Error(`Schedule ${schedule.ScheduleId} has too many overdue cycles.`);
       dates.push(due);
       if (selected.includes(schedule) && (input.mode === "horizon" ? addDays(due, -schedule.LeadTimeDays) <= horizon : dates.length === 1)) eligible.add(`${schedule.ScheduleId}:${due}`);
       for (const equipmentCode of schedule.EquipmentCodes.length ? schedule.EquipmentCodes : [pmTargetKey(schedule)]) planned.push({ schedule, equipmentCode, dueDate: due });
-      due = nextDue(schedule, due);
+      due = nextDue(schedule, due, included);
     }
     dueDates.set(schedule.ScheduleId, dates);
   }
@@ -101,14 +101,22 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
   const canCover = (wr: BaseWorkRequest, occurrence: PmOccurrence) => wr.Percentage !== 27 && !wr.suppressedByWrId &&
     (isUnstarted(wr) || compileChecklist(occurrence.schedule, occurrence.equipmentCode, input.schedules, input.blueprints)
       .every((step) => wr.ChecklistSteps?.some((existing) => existing.StepId === step.StepId)));
-  for (const schedule of included) {
-    const preservedCycles = new Map((schedule.scheduleChangeLog ?? []).flatMap((change) => change.preservedCycles ?? []).map((cycle) => [cycle.wrId, cycle]));
-    for (const preserved of preservedCycles.values()) {
-      const wr = requests.find((item) => item.SiteId === schedule.SiteId && item.WR_ID === preserved.wrId);
-      if (wr) existingByKey.set(occurrenceKey({ schedule, equipmentCode: schedule.EquipmentCodes[0] ?? pmTargetKey(schedule), dueDate: preserved.dueDate }), wr);
+  const retained = new Map<string, { schedule: PM_Schedule; dueDate: string; wrId: string }>();
+  included.flatMap((schedule) => (schedule.scheduleChangeLog ?? []).flatMap((change) =>
+    (change.preservedCycles ?? []).map((cycle) => ({ ...cycle, schedule, changedAt: change.changedAt }))))
+    .sort((a, b) => a.changedAt.localeCompare(b.changedAt)).forEach((cycle) => retained.set(`${cycle.schedule.SiteId}:${cycle.wrId}`, cycle));
+  const consumed = new Set<string>();
+  for (const cycle of retained.values()) {
+    const wr = requests.find((item) => item.SiteId === cycle.schedule.SiteId && item.WR_ID === cycle.wrId && item.Percentage !== 27);
+    if (!wr) continue;
+    for (const schedule of included.filter((item) => item.ScheduleId === cycle.schedule.ScheduleId || sameLadder(item, cycle.schedule, pmTargetKey(cycle.schedule)))) {
+      const key = occurrenceKey({ schedule, equipmentCode: schedule.EquipmentCodes[0] ?? pmTargetKey(schedule), dueDate: cycle.dueDate });
+      existingByKey.set(key, wr);
+      consumed.add(key);
     }
   }
   const candidatePlan = planOccurrences(planned.filter((item) => {
+    if (consumed.has(occurrenceKey(item))) return false;
     const existing = existingByKey.get(occurrenceKey(item));
     return !existing || canCover(existing, item);
   }));
@@ -214,7 +222,7 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
         generated++;
       }
     }
-    return lastProcessed ? { ...schedule, NextDueDate: nextDue(schedule, lastProcessed), UpdatedAt: input.now.toISOString() } : schedule;
+    return lastProcessed ? { ...schedule, NextDueDate: nextDue(schedule, lastProcessed, input.schedules), UpdatedAt: input.now.toISOString() } : schedule;
   });
   const addedLogs = plan.suppressed.flatMap(({ occurrence, coveredBy }) => {
     const id = coveredIds.get(occurrenceKey(coveredBy));

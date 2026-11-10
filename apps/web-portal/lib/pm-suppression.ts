@@ -1,14 +1,15 @@
-import { PM_FREQUENCY_RANKS, compileBlueprintChecklist, pmTargetKey, pmTargetType } from "@cafm/shared-schema";
+import { PM_FREQUENCY_RANKS, compileBlueprintChecklist, pmTargetKey, pmTargetType, getPmCycle, pmVisit, firstVisitOnOrAfter, addCycleInterval } from "@cafm/shared-schema";
+export { getNextUnsuppressedOccurrence, forecastPmCycle, getPmCycle } from "@cafm/shared-schema";
 export { compileBlueprintChecklist } from "@cafm/shared-schema";
 import type { BaseWorkRequest, PMFrequencyCode, PM_ChecklistStandard, PM_Schedule, PM_ScheduleStep, SuppressedPmOccurrence } from "@cafm/shared-schema";
 
 export const FREQUENCY_LABELS: Record<PMFrequencyCode, string> = {
   "01D": "Daily", "01W": "Weekly", "02W": "Fortnightly", "01M": "Monthly", "03M": "Quarterly",
-  "06M": "Semi-Annual", "01Y": "Annual", "02Y": "Biennial", "05Y": "Five-Year",
+  "06M": "Semi-Annual", "01Y": "Annual", "02Y": "Biennial", "05Y": "Five-Year", "10Y": "10-Year",
 };
 export const orderedFrequencies = (codes: string[]) => [...new Set(codes)].sort((a, b) =>
   (PM_FREQUENCY_RANKS[a as PMFrequencyCode] ?? 0) - (PM_FREQUENCY_RANKS[b as PMFrequencyCode] ?? 0) || a.localeCompare(b));
-const MONTHS: Partial<Record<PMFrequencyCode, number>> = { "01M": 1, "03M": 3, "06M": 6, "01Y": 12, "02Y": 24, "05Y": 60 };
+const MONTHS: Partial<Record<PMFrequencyCode, number>> = { "01M": 1, "03M": 3, "06M": 6, "01Y": 12, "02Y": 24, "05Y": 60, "10Y": 120 };
 const DAY_MS = 86400000;
 export const shiftDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
 export function shiftMonths(date: string, months: number): string {
@@ -27,11 +28,10 @@ export function frequencyOf(schedule: PM_Schedule): PMFrequencyCode | undefined 
     schedule.Frequency === "Weekly" ? n === 1 ? "01W" : n === 2 ? "02W" : undefined :
     schedule.Frequency === "Monthly" ? n === 1 ? "01M" : n === 3 ? "03M" : n === 6 ? "06M" : undefined :
     schedule.Frequency === "Quarterly" && n === 1 ? "03M" :
-    schedule.Frequency === "Yearly" ? n === 1 ? "01Y" : n === 2 ? "02Y" : n === 5 ? "05Y" : undefined : undefined;
+    schedule.Frequency === "Yearly" ? n === 1 ? "01Y" : n === 2 ? "02Y" : n === 5 ? "05Y" : n === 10 ? "10Y" : undefined : undefined;
 }
 export function collisionWindow(schedule: PM_Schedule): number {
-  const code = frequencyOf(schedule);
-  return code && PM_FREQUENCY_RANKS[code] >= 5 ? 14 : code === "01M" ? 5 : code === "01D" ? 0 : 2;
+  return 0;
 }
 export function resolveBlueprintSchedule(schedule: PM_Schedule, blueprints: PM_ChecklistStandard[]): PM_Schedule {
   schedule = { ...schedule, EquipmentCodes: schedule.EquipmentCodes.length ? schedule.EquipmentCodes : schedule.equipmentCode && (!schedule.targetType || schedule.targetType === "equipment") ? [schedule.equipmentCode] : [] };
@@ -40,16 +40,16 @@ export function resolveBlueprintSchedule(schedule: PM_Schedule, blueprints: PM_C
   const code = blueprint.frequencyCode;
   const months = MONTHS[code];
   const type = pmTargetType(schedule);
-  return { ...schedule, targetType: type, targetKey: pmTargetKey(schedule),
+  return { ...schedule, anchorDate: schedule.cycleDate ?? schedule.anchorDate, targetType: type, targetKey: pmTargetKey(schedule),
     equipmentCode: type === "equipment" ? schedule.EquipmentCodes[0] : undefined,
     levelName: schedule.levelName ?? schedule.LevelName, roomCode: schedule.roomCode ?? schedule.RoomCode,
     LevelName: schedule.levelName ?? schedule.LevelName, RoomCode: schedule.roomCode ?? schedule.RoomCode,
-    frequencyCode: code, Frequency: months ? code === "01Y" || code === "02Y" || code === "05Y" ? "Yearly" : "Monthly" : code === "01D" ? "Daily" : "Weekly",
+    frequencyCode: code, Frequency: months ? months >= 12 ? "Yearly" : "Monthly" : code === "01D" ? "Daily" : "Weekly",
     FrequencyInterval: months ? months >= 12 ? months / 12 : months : code === "02W" ? 2 : 1,
     suppressionMode: blueprint.blueprintMode === "standalone" ? "independent" : "suppress_and_inherit",
     suppressionGroupKey: blueprint.blueprintMode === "family_ladder" ? blueprint.familyId : undefined,
     suppressionGroupName: blueprint.blueprintMode === "family_ladder" ? blueprint.familyName : blueprint.Title,
-    sharedAnchorDate: schedule.anchorDate ?? schedule.sharedAnchorDate ?? schedule.NextDueDate, collisionWindowDays: undefined,
+    sharedAnchorDate: schedule.cycleDate ?? schedule.anchorDate ?? schedule.sharedAnchorDate ?? schedule.NextDueDate, collisionWindowDays: undefined,
   };
 }
 export function sameLadder(a: PM_Schedule, b: PM_Schedule, equipment: string): boolean {
@@ -94,33 +94,21 @@ export function compileChecklist(target: PM_Schedule, equipment: string, schedul
   return steps.filter((step) => !omitted.has(step.StepId)).map((step, index) => ({ ...step, SortOrder: index + 1 }));
 }
 
-/** Anchor is cycle zero; first maintenance is one full interval after it. */
-export function tickDates(schedule: PM_Schedule, from: string, to: string): string[] {
-  const code = frequencyOf(schedule);
-  if (!code) throw new Error(`Schedule ${schedule.ScheduleId} needs a supported frequency code.`);
-  const anchor = schedule.sharedAnchorDate ?? schedule.NextDueDate;
-  const anchored = !!schedule.sharedAnchorDate;
+export function tickDates(schedule: PM_Schedule, from: string, to: string, schedules: PM_Schedule[] = [schedule]): string[] {
+  const cycle = getPmCycle(schedule, schedules);
   const result: string[] = [];
-  const months = MONTHS[code];
-  let n = anchored ? 1 : 0;
-  if (months) {
-    const diff = (Number(from.slice(0, 4)) - Number(anchor.slice(0, 4))) * 12 + Number(from.slice(5, 7)) - Number(anchor.slice(5, 7));
-    n = Math.max(n, Math.floor(diff / months) - 1);
-  } else {
-    const interval = code === "01D" ? 1 : code === "01W" ? 7 : 14;
-    n = Math.max(n, Math.floor((Date.parse(from) - Date.parse(anchor)) / DAY_MS / interval) - 1);
-  }
+  let n = firstVisitOnOrAfter(cycle, from);
   for (let count = 0; count < 10000; count++, n++) {
-    const date = months ? shiftMonths(anchor, n * months) : shiftDays(anchor, n * (code === "01D" ? 1 : code === "01W" ? 7 : 14));
-    if (date > to) return result;
-    if (date >= from) result.push(date);
+    const visit = pmVisit(cycle, n);
+    if (visit.dueDate > to) return result;
+    if ([visit.winner, ...visit.suppressed].some((item) => item.ScheduleId === schedule.ScheduleId)) result.push(visit.dueDate);
   }
   throw new Error("PM preview exceeded 10,000 occurrences. Narrow the date range.");
 }
-export function nextTickOnOrAfter(schedule: PM_Schedule, date: string): string {
-  const months = MONTHS[frequencyOf(schedule)!];
-  const end = months ? shiftMonths(date, months + 1) : shiftDays(date, 15);
-  const next = tickDates(schedule, date, end)[0];
+export function nextTickOnOrAfter(schedule: PM_Schedule, date: string, schedules: PM_Schedule[] = [schedule]): string {
+  const cycle = getPmCycle(schedule, schedules);
+  const end = addCycleInterval(date, cycle.length + cycle.interval, cycle.unit);
+  const next = tickDates(schedule, date, end, schedules)[0];
   if (!next) throw new Error(`No next cycle found for ${schedule.ScheduleId}.`);
   return next;
 }
@@ -148,11 +136,10 @@ export const occurrenceKey = (item: PmOccurrence) => `${item.schedule.SiteId}:${
 export function previewCycles(schedules: PM_Schedule[], equipmentCode: string, from: string, months: number) {
   const to = shiftMonths(from, months);
   const active = schedules.filter((item) => item.IsActive && (item.EquipmentCodes.includes(equipmentCode) || pmTargetKey(item) === equipmentCode));
-  const padding = Math.max(0, ...active.map(collisionWindow));
-  const occurrences = active.flatMap((schedule) => tickDates(schedule, shiftDays(from, 1 - padding), shiftDays(to, padding))
+  const occurrences = active.flatMap((schedule) => tickDates(schedule, from, shiftDays(to, -1), active)
     .map((dueDate) => ({ schedule, equipmentCode, dueDate })));
   const plan = planOccurrences(occurrences);
-  const inRange = (item: PmOccurrence) => item.dueDate > from && item.dueDate <= to;
+  const inRange = (item: PmOccurrence) => item.dueDate >= from && item.dueDate < to;
   const winners = plan.winners.filter((item) => inRange(item) || plan.suppressed.some((entry) => inRange(entry.occurrence) && occurrenceKey(entry.coveredBy) === occurrenceKey(item)));
   const keys = new Set(winners.map(occurrenceKey));
   return { winners, suppressed: plan.suppressed.filter((entry) => keys.has(occurrenceKey(entry.coveredBy)) && inRange(entry.occurrence)) };

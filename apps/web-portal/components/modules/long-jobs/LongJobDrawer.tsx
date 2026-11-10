@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { X, ArrowUp } from "lucide-react";
 import { BaseWorkRequest, CLASSICAL_TRADES, LJRole, WR_Type, LJ_TRANSITION_MATRIX } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -654,7 +655,7 @@ export function LongJobDrawer({
                     {workRequest.Percentage >= 78 && workRequest.Percentage < 94 && <p className="text-sm">Use the acceptance gate actions below to advance this stage.</p>}
                     {workRequest.Percentage === 100 && !workRequest.ArchivedAt && <button type="button" className="bg-gray-700 text-white rounded px-3 py-2"
                       onClick={() => updateWorkRequest(100, { ArchivedAt: new Date().toISOString(), WorkRequestStatus: "Closed" }, "Long Job archived")}>Archive completed Long Job</button>}
-                    {workRequest.ArchivedAt && <p>Archived at {new Date(workRequest.ArchivedAt).toLocaleString()}.</p>}
+                    {workRequest.ArchivedAt && <p>Archived at {formatDateTimeDDMMYYYY(workRequest.ArchivedAt)}.</p>}
                     {transitionEntry && transitionEntry.allowedActions.length === 0 && workRequest.Percentage !== 100 && <p>No further stage transitions.</p>}
                   </div>
                 </div>

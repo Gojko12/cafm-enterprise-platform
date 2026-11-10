@@ -3,6 +3,7 @@ import { FrequencyPill, PmScope } from "../common/PmFrequency";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { getChecklistFinding, getChecklistSteps, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import {
   BaseWorkRequest,
@@ -625,15 +626,15 @@ export function PMWorkRequestPopup({
               <>
                 {renderField("WR ID", workRequest.WR_ID)}
                 {renderField("Work request status", workRequest.WorkRequestStatus)}
-                {renderField("Start date (Date To Perform)", workRequest.StartDate)}
+                {renderField("Start date (Date To Perform)", formatDateDDMMYYYY(workRequest.StartDate))}
                 {renderField("Start date (TBD)", workRequest.StartDateTBD)}
-                {renderField("created date", workRequest.CreatedDate)}
+                {renderField("created date", formatDateDDMMYYYY(workRequest.CreatedDate))}
               </>,
               <>
                 {renderField("ESA Work Type", workRequest.ESAWorkType)}
                 {renderField("Work request substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}
-                {renderField("Due date", workRequest.DueDate)}
-                {renderField("Margin date", workRequest.MarginDate)}
+                {renderField("Due date", formatDateDDMMYYYY(workRequest.DueDate))}
+                {renderField("Margin date", formatDateDDMMYYYY(workRequest.MarginDate))}
                 {renderField("Trade name", workRequest.TradeName)}
                 {renderField("Expected hours", workRequest.ExpectedHours)}
               </>,
@@ -838,8 +839,8 @@ export function PMWorkRequestPopup({
                 ).map((job) => <tr key={job.WR_ID} className="border-t">
                   <td className="p-3">{job.WR_ID}</td><td className="p-3">{job.Description}</td>
                   <td className="p-3">{job.WorkRequestStatus} · {job.WorkRequestSubstatus}</td><td className="p-3">{job.Percentage}%</td>
-                  <td className="p-3">{job.originatingChecklistStepLabel ?? job.originatingChecklistStepId ?? "—"}</td><td className="p-3">{job.DueDate ?? "—"}</td>
-                  <td className="p-3">{job.StartDate ?? "—"}</td>
+                  <td className="p-3">{job.originatingChecklistStepLabel ?? job.originatingChecklistStepId ?? "—"}</td><td className="p-3">{job.DueDate ? formatDateDDMMYYYY(job.DueDate) : "—"}</td>
+                  <td className="p-3">{job.StartDate ? formatDateDDMMYYYY(job.StartDate) : "—"}</td>
                   <td className="space-x-2 p-3">
                     <button type="button" onClick={() => onNavigate(job.WR_ID)} className="text-blue-700 underline">Open FJ →</button>
                     {job.WR_Type === "FJ" && !job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onEscalateToLJ(job)} className="text-orange-700 underline">Escalate to LJ</button>}
@@ -860,7 +861,7 @@ export function PMWorkRequestPopup({
               <table className="w-full min-w-[700px] text-left text-sm">
                 <thead className="bg-slate-50"><tr><th className="p-3">Timestamp</th><th className="p-3">Performed by</th><th className="p-3">Action</th><th className="p-3">Step reference</th><th className="p-3">Details</th></tr></thead>
                 <tbody>{auditRows.map((entry) => <tr key={entry.id} className="border-t">
-                  <td className="p-3">{new Date(entry.timestamp).toLocaleString()}</td><td className="p-3">{entry.performedBy}</td>
+                  <td className="p-3">{formatDateTimeDDMMYYYY(entry.timestamp)}</td><td className="p-3">{entry.performedBy}</td>
                   <td className="p-3">{entry.actionType}</td><td className="p-3">{entry.stepReference || "—"}</td><td className="p-3">{entry.details}</td>
                 </tr>)}
                 {!auditRows.length && <tr><td colSpan={5} className="p-5 text-center text-slate-500">No audit records.</td></tr>}</tbody>
@@ -949,7 +950,7 @@ export function PMWorkRequestPopup({
               <div className="flex gap-2"><input aria-label="Write a comment" placeholder="Write a comment..." value={message} onChange={(event) => setMessage(event.target.value)} className="min-w-0 flex-1 rounded border p-1" /><button type="button" disabled={!message.trim()} onClick={addComment} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-50">Post</button></div>
               <div className="space-y-2">
                 {visibleHistory.map((entry) => <article key={entry.id} className="rounded border p-2 text-xs">
-                  <div className="text-slate-500">{entry.actorName} ({entry.actorRole}) · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
+                  <div className="text-slate-500">{entry.actorName} ({entry.actorRole}) · {formatDateTimeDDMMYYYY(entry.createdAt)} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
                   {editingComment === entry.id
                     ? <div className="mt-2 space-y-2">
                       <textarea aria-label="Edit history comment" value={commentDraft}
@@ -963,7 +964,7 @@ export function PMWorkRequestPopup({
                   {(entry.editHistory?.length ?? 0) > 0 && <details className="mt-1">
                     <summary className="cursor-pointer text-slate-600">(Edited) Previous Versions</summary>
                     {newestFirst(entry.editHistory ?? [], (version) => version.timestamp).map((version, index) => <div key={`${entry.id}-${index}`} className="mt-1 border-t pt-1">
-                      <span className="text-slate-500">{new Date(version.timestamp).toLocaleString()}</span>
+                      <span className="text-slate-500">{formatDateTimeDDMMYYYY(version.timestamp)}</span>
                       <p className="whitespace-pre-wrap">{version.text}</p>
                     </div>)}
                   </details>}
@@ -1001,7 +1002,7 @@ export function PMWorkRequestPopup({
                     (entry.stepReference ?? "").toLowerCase().includes(historyFilters.stepReference.toLowerCase()) &&
                     entry.details.toLowerCase().includes(historyFilters.details.toLowerCase()),
                   ).map((entry) => <tr key={entry.id} className="border-t">
-                    <td className="p-2">{new Date(entry.timestamp).toLocaleString()}</td><td className="p-2">{entry.performedBy}</td>
+                    <td className="p-2">{formatDateTimeDDMMYYYY(entry.timestamp)}</td><td className="p-2">{entry.performedBy}</td>
                     <td className="p-2">{entry.actionType}</td><td className="p-2">{entry.stepReference ?? "—"}</td><td className="p-2">{entry.details}</td>
                   </tr>)}</tbody>
                 </table>

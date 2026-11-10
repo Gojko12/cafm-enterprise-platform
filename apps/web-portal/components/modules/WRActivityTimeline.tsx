@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -93,7 +94,7 @@ export function WRActivityTimeline({ workRequest, actingRole }: { workRequest: B
     <div className="space-y-3">
       {newestFirst((workRequest.Activity ?? []).filter((entry) => filter === "all" || entry.kind === filter), (entry) => entry.createdAt).map((entry) =>
         <article key={entry.id} className="border rounded p-3 text-sm">
-          <div className="text-gray-600">{entry.actorName} ({entry.actorRole}) · {new Date(entry.createdAt).toLocaleString()} · {entry.kind === "log" ? "Automatic log" : "Comment"}</div>
+          <div className="text-gray-600">{entry.actorName} ({entry.actorRole}) · {formatDateTimeDDMMYYYY(entry.createdAt)} · {entry.kind === "log" ? "Automatic log" : "Comment"}</div>
           {editing === entry.id ? <div className="space-y-2">
             <textarea aria-label="Edit comment" value={draft} onChange={(event) => setDraft(event.target.value)} className="w-full border rounded p-2" />
             <button type="button" onClick={() => saveEdit(entry.id)} className="text-blue-700">Save</button>{" "}
@@ -104,7 +105,7 @@ export function WRActivityTimeline({ workRequest, actingRole }: { workRequest: B
           {(entry.editHistory?.length ?? 0) > 0 && <details>
             <summary>(Edited - View History)</summary>
             {newestFirst(entry.editHistory ?? [], (version) => version.timestamp).map((version, index) => <div key={index} className="border-t mt-2 pt-2">
-              <span className="text-gray-500">{new Date(version.timestamp).toLocaleString()}</span>
+              <span className="text-gray-500">{formatDateTimeDDMMYYYY(version.timestamp)}</span>
               <p className="whitespace-pre-wrap">{version.text}</p>
             </div>)}
           </details>}

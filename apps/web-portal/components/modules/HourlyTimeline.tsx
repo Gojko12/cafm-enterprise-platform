@@ -2,6 +2,7 @@
 import { FrequencyPill } from "../common/PmFrequency";
 
 import React, { useEffect, useRef, useState } from "react";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { CLASSICAL_TRADES, pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest, CraftpersonAbsence, LocationFreeze } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
@@ -95,7 +96,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
   };
   return <div className="min-w-0 flex-1 overflow-auto rounded border bg-white">
     <table className="border-separate border-spacing-0 text-xs"><thead className="sticky top-0 z-30 bg-white"><tr><th rowSpan={2} className="sticky left-0 z-20 min-w-48 border-r bg-white p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900">Craftsperson</th>{weeks.map((week, index) => <th key={`${week.label}-${index}`} colSpan={week.count} className="border-l">{week.label}</th>)}</tr><tr>
-      {dates.map((day) => <th key={day} className="border-l" style={{ minWidth: width }}><div>{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][new Date(`${day}T00:00:00Z`).getUTCDay()]} {day.slice(8)}</div><div className="flex font-normal">{Array.from({ length: lastHour - firstHour }, (_, i) => <span key={i} style={{ width: HOUR_WIDTH }} className="shrink-0 border-l">{String(firstHour + i).padStart(2, "0")}</span>)}</div></th>)}</tr>
+      {dates.map((day) => <th key={day} className="border-l" style={{ minWidth: width }}><div>{formatDateDDMMYYYY(day)}</div><div className="flex font-normal">{Array.from({ length: lastHour - firstHour }, (_, i) => <span key={i} style={{ width: HOUR_WIDTH }} className="shrink-0 border-l">{String(firstHour + i).padStart(2, "0")}</span>)}</div></th>)}</tr>
       {(visibleFreezes.length ? visibleFreezes : [null]).map((freeze, index) => <tr key={freeze?.id ?? "empty"} className="h-7 bg-white">
         <th className="sticky left-0 z-20 border-r bg-white px-2 text-left">{index === 0 ? "❄ Location Freezes" : ""}</th>
         {dates.map((day) => {

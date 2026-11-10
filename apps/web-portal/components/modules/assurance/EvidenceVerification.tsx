@@ -1,4 +1,5 @@
 "use client";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import React, { useState } from "react";
 import type { DemoData } from "@/lib/cafm-store";
 import type { AuditFinding } from "@/lib/audit-assurance-types";
@@ -43,6 +44,6 @@ export function EvidenceVerification({ data, actor, authorized, busy, save }: Pr
       <label className="block">Reviewer / verifier notes (required)<textarea className={input} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
       {f.assuranceState === "WorkCompleted_AwaitingEvidence" && <div className="flex gap-2"><button disabled={!authorized || busy} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => void act("accept")}>Accept evidence</button><button disabled={!authorized || busy} className="rounded bg-amber-700 p-2 text-white disabled:opacity-50" onClick={() => void act("reject")}>Reject evidence</button></div>}
       {f.assuranceState === "EvidenceAccepted_AwaitingVerification" && <div><label>Verification method<select className={input} value={method} onChange={(e) => setMethod(e.target.value as typeof method)}><option value="InternalReviewer">Internal Technical Reviewer</option><option value="AuditCompany_SOCOTEC">External Audit Company Sign-Off</option><option value="NextInspection">Next Annual Inspection Follow-Up</option><option value="ControlledLowRiskRule">Controlled Low-Risk Rule</option></select></label><p className="text-sm">The verifier must confirm external sign-off or next inspection has actually occurred. Low-risk verification requires accepted before and after photos and measurements.</p><button disabled={!authorized || busy} className="mt-2 rounded bg-blue-700 p-2 text-white disabled:opacity-50" onClick={() => void act("verify")}>Verify and close finding</button></div>}
-      {f.assuranceState === "FindingVerified_Closed" && <p>Verified by {f.verification.verifiedBy} · {f.verification.verifiedAt} · {f.verification.method}</p>}</>}
+      {f.assuranceState === "FindingVerified_Closed" && <p>Verified by {f.verification.verifiedBy} · {formatDateTimeDDMMYYYY(f.verification.verifiedAt)} · {f.verification.method}</p>}</>}
   </section>;
 }

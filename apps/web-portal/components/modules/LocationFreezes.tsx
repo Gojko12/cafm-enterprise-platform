@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { LocationFreezeSchema } from "@cafm/shared-schema";
 import type { LocationFreeze } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
+import { DateTimeInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { formatHumanDateTime, freezeLocations } from "@/lib/location-freezes";
@@ -88,7 +89,7 @@ function FreezeEditor({ item, onClose }: { item?: LocationFreeze; onClose: () =>
     <label className="block">Title<input required className="block w-full border p-1" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
     <label className="block">Description<textarea required className="block w-full border p-1" value={description} onChange={(e) => setDescription(e.target.value)} /></label>
     <label className="block">Responsible person<input required className="block w-full border p-1" value={responsible} onChange={(e) => setResponsible(e.target.value)} /></label>
-    <div className="flex gap-3"><label>Start<input required type="datetime-local" className="block border p-1" value={start} onChange={(e) => setStart(e.target.value)} /></label><label>End<input required type="datetime-local" className="block border p-1" value={end} onChange={(e) => setEnd(e.target.value)} /></label></div>
+    <div className="flex gap-3"><label>Start<DateTimeInputDDMMYYYY required className="block border p-1" value={start} onChange={(event) => setStart(event.target.value)} aria-label="Freeze start date and time" /></label><label>End<DateTimeInputDDMMYYYY required className="block border p-1" value={end} onChange={(event) => setEnd(event.target.value)} aria-label="Freeze end date and time" /></label></div>
     {(["PM", "FJ", "LJ"] as const).map((type) => <label key={type} className="block"><input type="checkbox" checked={allow[type]} onChange={(e) => setAllow({ ...allow, [type]: e.target.checked })} /> Allow {type} without issues</label>)}
     <button disabled={!permissions?.canManageLocationFreezes} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save</button> <button type="button" className="rounded border px-3 py-1" onClick={onClose}>Cancel</button>
   </form>{picker && (() => {

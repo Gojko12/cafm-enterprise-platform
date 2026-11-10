@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { SiteIdSchema } from "./locations.js";
 
-export const PM_FREQUENCY_RANKS = { "01D": 1, "01W": 2, "02W": 3, "01M": 4, "03M": 5, "06M": 6, "01Y": 7, "02Y": 8, "05Y": 9 } as const;
-export const PMFrequencyCodeSchema = z.enum(["01D", "01W", "02W", "01M", "03M", "06M", "01Y", "02Y", "05Y"]);
+export const PM_FREQUENCY_RANKS = { "01D": 1, "01W": 2, "02W": 3, "01M": 4, "03M": 5, "06M": 6, "01Y": 7, "02Y": 8, "05Y": 9, "10Y": 10 } as const;
+export const PMFrequencyCodeSchema = z.enum(["01D", "01W", "02W", "01M", "03M", "06M", "01Y", "02Y", "05Y", "10Y"]);
 export type PMFrequencyCode = z.infer<typeof PMFrequencyCodeSchema>;
 export const PMSuppressionFields = {
   frequencyCode: PMFrequencyCodeSchema.optional(),
@@ -156,10 +156,15 @@ export const PM_LegacyScheduleSchema = z
     scheduleChangeLog: z.array(z.object({
       changedAt: z.iso.datetime(), changedBy: z.string().min(1),
       oldAnchor: z.iso.date(), newAnchor: z.iso.date(), effectiveFrom: z.iso.date(),
+      oldPeakSlotIndex: z.number().int().positive().optional(), newPeakSlotIndex: z.number().int().positive().optional(),
       openWrAction: z.enum(["move", "keep"]),
       preservedCycles: z.array(z.object({ wrId: z.string().min(1), dueDate: z.iso.date() })).optional(),
     })).optional(),
     anchorDate: z.iso.date().optional(),
+    cycleDate: z.iso.date().optional(),
+    peakSlotIndex: z.number().int().positive().optional(),
+    annualSlotIndex: z.number().int().positive().optional(),
+    peakYearIndex: z.number().int().positive().optional(),
     ...PMSuppressionFields,
     ChecklistCode: z.string().min(1),
     SiteId: SiteIdSchema,
@@ -229,7 +234,7 @@ export const PM_ScheduleSchema = PM_LegacyScheduleSchema.superRefine((schedule, 
       (type === "floor" || type === "room") && !(schedule.levelName ?? schedule.LevelName) ||
       type === "room" && !(schedule.roomCode ?? schedule.RoomCode))
     context.addIssue({ code: "custom", path: ["targetType"], message: "A PMS must identify exactly one equipment, building, floor or room with its parent location." });
-  if (!schedule.anchorDate) context.addIssue({ code: "custom", path: ["anchorDate"], message: "An equipment anchor date is required." });
+  if (!schedule.cycleDate && !schedule.anchorDate) context.addIssue({ code: "custom", path: ["cycleDate"], message: "A Cycle Date (Visit #1) is required." });
 });
 
 export const PM_WorkRequestStepSchema = z

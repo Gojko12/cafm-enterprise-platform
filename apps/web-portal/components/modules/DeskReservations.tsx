@@ -7,6 +7,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { getSampleData } from "@/lib/utils/sampleData";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
+import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 
 export function DeskReservations() {
   const { useSampleData } = useApp();
@@ -103,22 +104,12 @@ export function DeskReservations() {
 
         <div className="flex flex-col gap-2">
           <label className="text-sm font-medium text-gray-700">Start Date</label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <DateInputDDMMYYYY value={startDate} onValueChange={setStartDate} className="px-3 py-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Start date" />
         </div>
 
         <div className="flex flex-col gap-2">
           <label className="text-sm font-medium text-gray-700">End Date</label>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <DateInputDDMMYYYY value={endDate} onValueChange={setEndDate} className="px-3 py-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="End date" />
         </div>
 
         <div className="flex flex-col gap-2 justify-end">

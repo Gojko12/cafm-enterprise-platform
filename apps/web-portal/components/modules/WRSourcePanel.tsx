@@ -12,6 +12,8 @@ import { MultiSelectFilter } from "../common/MultiSelectFilter";
 import { startRequestDrag } from "../../lib/drag-preview";
 import { ResizeHandle } from "../common/TableColumns";
 import { DisputeViewFilter } from "../common/DisputeViewFilter";
+import { DateInputDDMMYYYY } from "../common/DateInputDDMMYYYY";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import type { DisputeViewMode, WRDispute } from "../../lib/disputes";
 
 type Person = DemoData["craftspeople"][number];
@@ -95,7 +97,13 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
     (!from || !!wr.DueDate && wr.DueDate.slice(0, 10) >= from) && (!to || !!wr.DueDate && wr.DueDate.slice(0, 10) <= to) &&
     Object.values(values(wr)).some((value) => value.toLowerCase().includes(search.toLowerCase())))
     .sort((a, b) => values(a)[sort].localeCompare(values(b)[sort], undefined, { numeric: true }) * (descending ? -1 : 1));
-  const cell = (wr: BaseWorkRequest, field: Field) => field === "id" ? <>{wr.WR_ID} <FrequencyPill code={wr.pmFrequency} /> {!!wr.absorbedFrequencies?.length && <span className="text-xs">+{wr.absorbedFrequencies.join(",")}</span>}</> : field === "trade" ? <span className={`rounded border px-1 ${tradeColor(wr.TradeName)}`}>{values(wr)[field] || "—"}</span> : values(wr)[field] || "—";
+  const cell = (wr: BaseWorkRequest, field: Field) => {
+    if (field === "id") return <>{wr.WR_ID} <FrequencyPill code={wr.pmFrequency} /> {!!wr.absorbedFrequencies?.length && <span className="text-xs">+{wr.absorbedFrequencies.join(",")}</span>}</>;
+    if (field === "trade") return <span className={`rounded border px-1 ${tradeColor(wr.TradeName)}`}>{values(wr)[field] || "—"}</span>;
+    if (field === "due") return formatDateDDMMYYYY(wr.DueDate) || "—";
+    if (field === "margin") return formatDateDDMMYYYY(wr.MarginDate) || "—";
+    return values(wr)[field] || "—";
+  };
   const toggle = <T,>(set: React.Dispatch<React.SetStateAction<T[]>>, value: T, checked: boolean) => set((old) => checked ? [...old, value] : old.filter((item) => item !== value));
   return <aside className={`order-2 shrink-0 rounded border bg-white p-2 ${expanded ? "w-96 min-w-[20rem] max-w-[70vw] resize-x overflow-auto" : "w-12"}`}>
     <button className={button} onClick={() => setExpanded(!expanded)}>{expanded ? "▶ Pool" : "◀"}</button>
@@ -112,7 +120,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
         <MultiSelectFilter label="Pool Trades" value={trades} onChange={setTrades} options={CLASSICAL_TRADES.map((trade) => ({ value: trade, label: trade, className: `rounded border px-1 ${tradeColor(trade)}` }))} />
         <MultiSelectFilter label="Pool Buildings" value={buildingsFilter} onChange={setBuildingsFilter} options={buildings.map((item) => ({ value: item.bl_id, label: `${item.bl_id} · ${item.Name}` }))} />
         <input aria-label="Filter location" className="w-full border p-1" placeholder="Building, floor or room" value={location} onChange={(event) => setLocation(event.target.value)} />
-        <label>Due From <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label> <label>To <input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+        <label>Due From <DateInputDDMMYYYY value={from} onValueChange={setFrom} aria-label="Due from" /></label> <label>To <DateInputDDMMYYYY value={to} onValueChange={setTo} aria-label="Due to" /></label>
         {from && to && from > to && <p role="alert" className="text-red-700">Due date range is invalid.</p>}
         <div role="group" aria-label="Schedule filter" className="flex flex-wrap">{([["unscheduled", "Unscheduled"], ["all", "Scheduled & Unscheduled"], ["scheduled", "Scheduled"]] as const).map(([value, label]) => <button key={value} type="button" className={button} aria-pressed={scheduleFilter === value} onClick={() => setScheduleFilter(value)}>{label}</button>)}</div>
       </details>

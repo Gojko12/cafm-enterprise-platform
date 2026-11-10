@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -11,7 +12,7 @@ export function QAReportsArchive() {
   const { data } = useCafmStore();
   const { activeSiteId } = useSiteContext();
   const reports = (data.qaAuditReports ?? []).filter((report) => report.siteId === activeSiteId).slice().reverse();
-  return <section className="rounded border bg-white p-3"><h3 className="font-bold">Committed QA Reports Archive &amp; Team Leader Notifications</h3>{reports.map((report) => <details className="my-2 rounded border p-2" key={report.id}><summary>{new Date(report.createdAt).toLocaleString()} · {report.inspector} · {report.passedCount} passed / {report.failedCount} failed</summary><p>Addressed to: {report.recipients.join(", ")}</p><p>{report.executiveSummary}</p>{report.items.map((item) => <p key={item.wrId}>{item.wrId} · {item.verdict} · {item.issueDescription} {item.followUpWrId && `· Follow-up ${item.followUpWrId}`}</p>)}</details>)}{!reports.length && <p>No committed reports.</p>}</section>;
+  return <section className="rounded border bg-white p-3"><h3 className="font-bold">Committed QA Reports Archive &amp; Team Leader Notifications</h3>{reports.map((report) => <details className="my-2 rounded border p-2" key={report.id}><summary>{formatDateTimeDDMMYYYY(report.createdAt)} · {report.inspector} · {report.passedCount} passed / {report.failedCount} failed</summary><p>Addressed to: {report.recipients.join(", ")}</p><p>{report.executiveSummary}</p>{report.items.map((item) => <p key={item.wrId}>{item.wrId} · {item.verdict} · {item.issueDescription} {item.followUpWrId && `· Follow-up ${item.followUpWrId}`}</p>)}</details>)}{!reports.length && <p>No committed reports.</p>}</section>;
 }
 
 export function QABatchReview({ staged, onEdit, onQueue }: { staged: BaseWorkRequest[]; onEdit: (id: string) => void; onQueue: () => void }) {
@@ -72,7 +73,7 @@ export function QABatchReview({ staged, onEdit, onQueue }: { staged: BaseWorkReq
       <select value={person} onChange={(e) => setPerson(e.target.value)}><option value="">+ Add Person from Site Directory</option>{directory.map((name) => <option key={name}>{name}</option>)}</select><button onClick={() => { add(person); setPerson(""); }}>Add person</button>{" "}
       <input className="border p-1" placeholder="Custom recipient / email" value={custom} onChange={(e) => setCustom(e.target.value)} /><button onClick={() => { add(custom); setCustom(""); }}>+ Add Custom Recipient / Email</button>
     </div>
-    <div className="space-y-2 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4"><h3 className="text-lg font-bold">Step 3: Report Preview &amp; Final Commit</h3><p>{new Date().toLocaleDateString()} · Inspector {activePerson} · {staged.length} inspected, {passed} passed, {failed} failed</p>{groups((wr) => [wr.TradeName || "Unspecified"]).map((group) => <p key={group.key}>{group.key}: {group.passes} passed · {group.failures} failed</p>)}{staged.filter((wr) => wr.qaStagedVerdict?.verdict === "Fail").map((wr) => <p key={wr.WR_ID}>⚠ {wr.WR_ID} · {wr.TradeName} · {wr.bl_id}: {wr.qaStagedVerdict?.issueDescription}</p>)}
+    <div className="space-y-2 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4"><h3 className="text-lg font-bold">Step 3: Report Preview &amp; Final Commit</h3><p>{formatDateDDMMYYYY(new Date())} · Inspector {activePerson} · {staged.length} inspected, {passed} passed, {failed} failed</p>{groups((wr) => [wr.TradeName || "Unspecified"]).map((group) => <p key={group.key}>{group.key}: {group.passes} passed · {group.failures} failed</p>)}{staged.filter((wr) => wr.qaStagedVerdict?.verdict === "Fail").map((wr) => <p key={wr.WR_ID}>⚠ {wr.WR_ID} · {wr.TradeName} · {wr.bl_id}: {wr.qaStagedVerdict?.issueDescription}</p>)}
       <label className="block">Executive Note / Instructions for Team Leaders<textarea className="block w-full rounded border p-2" value={summary} onChange={(e) => setSummary(e.target.value)} /></label>
       <p className="text-xs text-slate-600">Reports are stored in the portal and shown in-app to matching site-directory recipients. Custom emails are recorded only; no email or external notification is sent.</p>
     <button className="rounded bg-emerald-700 px-5 py-3 font-bold text-white disabled:opacity-50" disabled={busy || !staged.length || !recipients.length || !isAuthorizedInspector} onClick={() => void run(() => actions.commitStagedBatch(staged.map((wr) => wr.WR_ID), recipients, summary), "Findings committed and in-app report saved.")}>🚀 Commit Findings &amp; Send Report to Team Leaders</button></div>
