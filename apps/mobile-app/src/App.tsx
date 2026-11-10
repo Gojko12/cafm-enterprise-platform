@@ -30,8 +30,10 @@ import { applyFilters, useFilterStore } from "./lib/store";
 import { classifyEquipmentWRs } from "./lib/equipment-wrs";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
-import { readWrViewMode, WR_VIEW_MODE_KEY } from "./components/TechnicianHome";
-import type { WorkType, Agenda } from "./components/TechnicianHome";
+import { readWrViewMode, WR_VIEW_MODE_KEY, readWrLayout, WR_LAYOUT_KEY } from "./components/TechnicianHome";
+import type { WrLayout } from "./components/TechnicianHome";
+import type { Agenda } from "./components/TechnicianHome";
+import type { WorkTypeCode } from "./lib/store";
 import { ProfileSettings } from "./components/ProfileSettings";
 import { ExecutionHub } from "./components/ExecutionHub";
 import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
@@ -127,10 +129,11 @@ export default function App() {
   const [resetSignal, setResetSignal] = useState(0);
   const [pctOpen, setPctOpen] = useState(false);
   const [wrViewMode, setWrViewMode] = useState<"card" | "compact">(readWrViewMode);
+  const [wrLayout, setWrLayout] = useState<WrLayout>(readWrLayout);
+  const changeLayout = (next: WrLayout) => { setWrLayout(next); try { localStorage.setItem(WR_LAYOUT_KEY, next); } catch { /* storage unavailable */ } };
   const [lastSyncAt, setLastSyncAt] = useState<Date>();
   const [agenda, setAgenda] = useState<Agenda>("agenda");
   const substatusInitSite = useRef<string | null>(null);
-  const [workType, setWorkType] = useState<WorkType>("All");
   const [homeTab, setHomeTab] = useState<"my-wrs" | "unassigned">("my-wrs");
   const [menuOpen, setMenuOpen] = useState(false);
   const siteDefaultPercents = (() => {
@@ -142,7 +145,7 @@ export default function App() {
   const defaultKey = siteDefaultPercents.join(",");
   // Options are scoped to the selected work type, My/Unassigned scope, and the location/trade filters.
   const percentCounts = new Map<number, number>();
-  const optionPool = applyFilters((homeTab === "my-wrs" ? myWRs : unassignedWRs).filter((wr) => workType === "All" || wr.WR_Type === workType), { ...appliedFilters, selectedSubstatuses: [] });
+  const optionPool = applyFilters(homeTab === "my-wrs" ? myWRs : unassignedWRs, { ...appliedFilters, selectedSubstatuses: [] });
   for (const wr of optionPool) { const value = Number(wr.Percentage); if (Number.isFinite(value)) percentCounts.set(value, (percentCounts.get(value) ?? 0) + 1); }
   const substatusOptions = [...percentCounts.entries()].sort(([a], [b]) => a - b).map(([value, count]) => ({ value, count }));
   const existingPercents = substatusOptions.map((option) => option.value);
@@ -156,13 +159,17 @@ export default function App() {
     useFilterStore.getState().setFilter("selectedSubstatuses", defaults);
     setAppliedFilters((current) => ({ ...current, selectedSubstatuses: defaults }));
   }, [loadedSite, activeSiteId, siteWRs.length, defaultKey]);
+  const workTypes: WorkTypeCode[] = appliedFilters.workTypes ?? [];
+  const setWorkTypes = (types: WorkTypeCode[]) => {
+    useFilterStore.getState().setFilter("workTypes", types);
+    setAppliedFilters((current) => ({ ...current, workTypes: types }));
+  };
   const handleResetFilters = () => {
     const defaults = defaultKey ? defaultKey.split(",").map(Number) : [];
-    const base: FilterCriteria = { showOnlyWithChecklist: false, selectedEquipmentCodes: new Set(), selectedSubstatuses: defaults };
+    const base: FilterCriteria = { workTypes: [], selectedEquipmentCodes: new Set(), selectedSubstatuses: defaults };
     useFilterStore.setState({ filters: base });
     setAppliedFilters(base);
     setPctOpen(false);
-    setWorkType("All");
     setAgenda("agenda");
     setResetSignal((value) => value + 1);
   };
@@ -531,7 +538,7 @@ export default function App() {
 
   // Render based on current view
   const renderContent = () => {
-    if (currentView === "settings") return <ProfileSettings technicianName={technicianName} technicianId={currentTechnicianId} technicians={technicians} siteId={activeSiteId} role={access?.primaryRole ?? "Technician"} vpaTrades={vpaTrades} onSiteChange={changeSite} onTechnicianChange={changeTechnician} viewMode={wrViewMode} onViewModeChange={(mode) => { setWrViewMode(mode); try { localStorage.setItem(WR_VIEW_MODE_KEY, mode); } catch { /* storage unavailable */ } }} phoneFrame={phoneFrame} onPhoneFrameChange={setPhoneFrame} offline={offlineNow} simulatedOffline={isSimulatedOffline} onToggleOffline={handleToggleOfflineMode} pendingCount={pendingCount} lastSync={lastSyncAt} onSync={handleSyncNow} submittedUpdates={siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} onShare={() => setShareOpen(true)} apiBase={apiBase} onApiBaseChange={setApiBase} onSaveApiBase={saveApiBase} settingsError={settingsError} version={MOBILE_APP_VERSION} />;
+    if (currentView === "settings") return <ProfileSettings technicianName={technicianName} technicianId={currentTechnicianId} technicians={technicians} siteId={activeSiteId} role={access?.primaryRole ?? "Technician"} vpaTrades={vpaTrades} onSiteChange={changeSite} onTechnicianChange={changeTechnician} viewMode={wrLayout === "calendar" ? "calendar" : wrViewMode} onViewModeChange={(mode) => { if (mode === "calendar") { changeLayout("calendar"); return; } changeLayout("list"); setWrViewMode(mode); try { localStorage.setItem(WR_VIEW_MODE_KEY, mode); } catch { /* storage unavailable */ } }} phoneFrame={phoneFrame} onPhoneFrameChange={setPhoneFrame} offline={offlineNow} simulatedOffline={isSimulatedOffline} onToggleOffline={handleToggleOfflineMode} pendingCount={pendingCount} lastSync={lastSyncAt} onSync={handleSyncNow} submittedUpdates={siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} onShare={() => setShareOpen(true)} apiBase={apiBase} onApiBaseChange={setApiBase} onSaveApiBase={saveApiBase} settingsError={settingsError} version={MOBILE_APP_VERSION} />;
     switch (currentView) {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
@@ -630,17 +637,15 @@ export default function App() {
               onResetFilters={handleResetFilters}
               substatusOptions={substatusOptions}
               defaultSubstatuses={defaultSubstatuses}
-              workType={workType}
-              onWorkTypeChange={setWorkType}
+              workTypes={workTypes}
+              onWorkTypesChange={setWorkTypes}
               schedule={agenda}
               onScheduleChange={setAgenda}
             />}
               resetSignal={resetSignal}
               menuButton={menuButton}
-              type={workType}
               agenda={agenda}
               onAgendaChange={setAgenda}
-              onTypeChange={setWorkType}
               onTabChange={setHomeTab}
               myWRs={applyFilters(myWRs, effectiveFilters)}
               unassignedWRs={applyFilters(unassignedWRs, effectiveFilters)}
@@ -649,6 +654,10 @@ export default function App() {
               onReport={setFieldWR}
               technician={currentTechnicianId}
               now={now}
+              freezes={freezes}
+              viewMode={wrViewMode}
+              layout={wrLayout}
+              onLayoutChange={changeLayout}
             />
           </div>
         );

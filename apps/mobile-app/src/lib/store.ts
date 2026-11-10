@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
 
+export type WorkTypeCode = "PM" | "FJ" | "LJ";
+
 export interface FilterCriteria {
   bl_id?: string;
   levelName?: string;
@@ -8,9 +10,9 @@ export interface FilterCriteria {
   wrId?: string;
   trade?: string;
   selectedSubstatuses?: number[];
-  showOnlyWithChecklist?: boolean;
-  assignedDateFrom?: string;
-  assignedDateTo?: string;
+  workTypes?: WorkTypeCode[];
+  scheduledDateFrom?: string;
+  scheduledDateTo?: string;
   startDateFrom?: string;
   startDateTo?: string;
   dueDateFrom?: string;
@@ -76,7 +78,9 @@ export const useFilterStore = create<FilterStore>((set, get) => ({
     if (filters.roomCode) count++;
     if (filters.wrId) count++;
     if (filters.trade) count++;
-    if (filters.showOnlyWithChecklist) count++;
+    if (filters.workTypes?.length && filters.workTypes.length < 3) count++;
+    if (filters.scheduledDateFrom || filters.scheduledDateTo) count++;
+    if (filters.startDateFrom || filters.startDateTo) count++;
     if (filters.dueDateFrom) count++;
     if (filters.dueDateTo) count++;
     if (filters.marginDateFrom) count++;
@@ -124,11 +128,21 @@ export const useMobileStore = create<MobileStore>((set) => ({
   setCurrentTechnician: (id) => set({ currentTechnicianId: id }),
 }));
 
+/** The four distinct WR dates; the scheduled date is strictly the Team Leader / PMS execution slot. */
+export const scheduledSlotStartOf = (wr: BaseWorkRequest) => wr.CraftpersonAssignments?.[0]?.assignedStartDateTime;
+export const scheduledDateOf = (wr: BaseWorkRequest) => scheduledSlotStartOf(wr)?.slice(0, 10);
+export const startDateOf = (wr: BaseWorkRequest) => (wr.StartDate_DateToPerform || wr.StartDate)?.slice(0, 10);
+
 /**
  * Apply filter criteria to work requests
  */
 export function applyFilters(wrs: BaseWorkRequest[], filters: FilterCriteria): BaseWorkRequest[] {
   let result = wrs;
+
+  if (filters.workTypes?.length && filters.workTypes.length < 3) {
+    const types = new Set<string>(filters.workTypes);
+    result = result.filter((wr) => types.has(wr.WR_Type));
+  }
 
   if (filters.selectedSubstatuses?.length) {
     const allowed = new Set(filters.selectedSubstatuses);
@@ -161,27 +175,17 @@ export function applyFilters(wrs: BaseWorkRequest[], filters: FilterCriteria): B
     if (!day) return false;
     return (!from || day >= from) && (!to || day <= to);
   };
-  const assignedOf = (wr: BaseWorkRequest) => wr.CraftpersonAssignments?.[0]?.assignedStartDateTime || wr.StartDate || wr.CreatedDate;
-  if (filters.assignedDateFrom || filters.assignedDateTo) {
-    result = result.filter((wr) => inRange(assignedOf(wr), filters.assignedDateFrom, filters.assignedDateTo));
+  if (filters.scheduledDateFrom || filters.scheduledDateTo) {
+    result = result.filter((wr) => inRange(scheduledDateOf(wr), filters.scheduledDateFrom, filters.scheduledDateTo));
   }
   if (filters.startDateFrom || filters.startDateTo) {
-    result = result.filter((wr) => inRange(wr.CraftpersonAssignments?.[0]?.assignedStartDateTime || wr.StartDate_DateToPerform || wr.StartDate, filters.startDateFrom, filters.startDateTo));
+    result = result.filter((wr) => inRange(startDateOf(wr), filters.startDateFrom, filters.startDateTo));
   }
-  if (filters.dueDateFrom) {
-    result = result.filter((wr) => !wr.DueDate || wr.DueDate >= filters.dueDateFrom!);
+  if (filters.dueDateFrom || filters.dueDateTo) {
+    result = result.filter((wr) => inRange(wr.DueDate, filters.dueDateFrom, filters.dueDateTo));
   }
-
-  if (filters.dueDateTo) {
-    result = result.filter((wr) => !wr.DueDate || wr.DueDate <= filters.dueDateTo!);
-  }
-
-  if (filters.marginDateFrom) {
-    result = result.filter((wr) => !wr.MarginDate || wr.MarginDate >= filters.marginDateFrom!);
-  }
-
-  if (filters.marginDateTo) {
-    result = result.filter((wr) => !wr.MarginDate || wr.MarginDate <= filters.marginDateTo!);
+  if (filters.marginDateFrom || filters.marginDateTo) {
+    result = result.filter((wr) => inRange(wr.MarginDate, filters.marginDateFrom, filters.marginDateTo));
   }
 
   if (filters.selectedEquipmentCodes && filters.selectedEquipmentCodes.size > 0) {

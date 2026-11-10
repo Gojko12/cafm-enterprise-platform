@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { SiteId } from "@cafm/shared-schema";
 import { clearEquipmentDetailCache, EQ_DETAIL_MAX_ITEMS, getEquipmentCacheCount } from "../lib/equipment-details";
 
-type ViewMode = "card" | "compact";
+type ViewMode = "card" | "compact" | "calendar";
 
 interface ProfileSettingsProps {
   technicianName: string;
@@ -87,6 +87,7 @@ export function ProfileSettings(props: ProfileSettingsProps) {
       <div role="group" aria-label="WR Overview Layout" className="flex gap-0.5 rounded-xl bg-slate-100 p-0.5">
         {modeButton("card", "Card View", "M4 5h16v6H4z M4 14h16v5H4z")}
         {modeButton("compact", "Compact View", "M4 6h16 M4 10h16 M4 14h16 M4 18h16")}
+        {modeButton("calendar", "Calendar", "M5 5h14v15H5z M5 10h14 M9 3v4 M15 3v4")}
       </div>
       {wide && <div className="mt-3 flex items-center justify-between text-sm text-slate-800"><span>Desktop layout</span>
         <div role="group" aria-label="Desktop layout" className="flex gap-0.5 rounded-xl bg-slate-100 p-0.5">

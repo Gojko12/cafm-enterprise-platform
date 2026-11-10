@@ -16,6 +16,7 @@ import { MultiSelectFilter } from "@/components/common/MultiSelectFilter";
 import { tradeColor } from "@/lib/trade-colors";
 import { revealAssignment } from "@/lib/calendar-locator";
 import { LocationFreezes } from "@/components/modules/LocationFreezes";
+import { PmsDefaultSchedules } from "@/components/modules/PmsDefaultSchedules";
 import { WRSourcePanel } from "@/components/modules/WRSourcePanel";
 import { AssignmentLocatorDialog } from "@/components/modules/AssignmentLocatorDialog";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
@@ -53,7 +54,7 @@ function SchedulerContent() {
   const [quickAssign, setQuickAssign] = useState<string | null>(null);
   const [quickPerson, setQuickPerson] = useState("");
   const [quickDate, setQuickDate] = useState(date);
-  const [tab, setTab] = useState<"dispatch" | "availability" | "freezes">("dispatch");
+  const [tab, setTab] = useState<"dispatch" | "availability" | "freezes" | "pms">("dispatch");
   const [disputeMode, setDisputeMode] = useState<DisputeViewMode>("all");
   const disputeMap = useMemo(() => mapWRDisputes(data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes), [data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes]);
   const [firstHour, setFirstHour] = useState(6);
@@ -77,7 +78,7 @@ function SchedulerContent() {
   }, []);
   useEffect(() => {
     const value = searchParams.get("tab");
-    setTab(value === "freezes" || value === "availability" ? value : "dispatch");
+    setTab(value === "freezes" || value === "availability" || value === "pms" ? value : "dispatch");
   }, [searchParams]);
   useEffect(() => { setSelectedPeople(null); setBuildings(null); setSpotlight(null); setShowChoices(null); setIsolateWrId(null); }, [activeSiteId]);
   useEffect(() => {
@@ -236,7 +237,7 @@ function SchedulerContent() {
   };
   return <div className="space-y-2 p-3 text-xs">
     {!permissions?.canScheduleCraftperson && <p role="status" className="rounded bg-amber-100 p-2">Scheduling is read-only. Ask a site administrator for permission.</p>}
-    <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button></div>
+    <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button><button className={button} aria-pressed={tab === "pms"} onClick={() => changeTab("pms")}>🔁 PMS Default Schedules &amp; Auto-Assign</button></div>
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
@@ -275,6 +276,7 @@ function SchedulerContent() {
       <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
+    {tab === "pms" && <PmsDefaultSchedules key={activeSiteId} onNotice={setNotice} />}
     {tab === "availability" && <CraftpersonShiftWorkspace key={activeSiteId} onNavigateToDisputeInCalendar={navigateDispute} />}
     {showChoices && (() => { const wr = siteRequests.find((item) => item.WR_ID === showChoices); return wr ? <AssignmentLocatorDialog request={wr} people={people} onSelect={(id) => locate(wr, id)} onClose={() => setShowChoices(null)} /> : null; })()}
     {quickAssign && <div role="dialog" aria-modal="true" aria-label="Assign work request" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><form className="space-y-2 rounded bg-white p-5" onSubmit={(event) => { event.preventDefault(); assign({ id: quickAssign, person: quickPerson, date: quickDate }); }}><h2 className="font-bold">Assign {quickAssign}</h2><select required className="block border p-1" value={quickPerson} onChange={(event) => setQuickPerson(event.target.value)}><option value="">Select craftsperson</option>{people.map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}</select><input required type="date" className="block border p-1" value={quickDate} onChange={(event) => setQuickDate(event.target.value)} /><button className={button}>Assign</button> <button type="button" className={button} onClick={() => setQuickAssign(null)}>Cancel</button></form></div>}

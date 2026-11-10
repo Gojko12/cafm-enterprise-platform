@@ -228,6 +228,7 @@ export const BaseWorkRequestSchema = z.object({
     name: z.string().optional(),
     lastName: z.string().optional(),
     hourlyRate: z.number().nonnegative().optional(),
+    autoScheduledFromPmsId: z.string().min(1).optional(),
     ...LaborTimeFields,
   }).refine((entry) => entry.assignedStartDateTime < entry.assignedEndDateTime, { path: ["assignedEndDateTime"], message: "End must be after start." })).optional(),
   AssignedUserIds: z.array(z.string().min(1)).default([]),

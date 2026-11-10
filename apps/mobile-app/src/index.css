@@ -224,7 +224,7 @@ body,
 }
 
 /* Input Styling */
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 textarea,
 select {
   font-size: 16px; /* Prevents auto-zoom on iOS */
@@ -233,6 +233,22 @@ select {
   appearance: none;
   border-radius: 6px;
   transition: all var(--transition-fast);
+}
+
+input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  accent-color: #2563eb;
+  width: 1.125rem;
+  height: 1.125rem;
+  cursor: pointer;
+}
+
+input[type="radio"] {
+  appearance: auto;
+  -webkit-appearance: radio;
+  accent-color: #2563eb;
+  cursor: pointer;
 }
 
 input:focus,

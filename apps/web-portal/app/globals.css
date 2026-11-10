@@ -6,6 +6,22 @@ html {
   scroll-behavior: smooth;
 }
 
+input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  accent-color: #2563eb;
+  width: 1.125rem;
+  height: 1.125rem;
+  cursor: pointer;
+}
+
+input[type="radio"] {
+  appearance: auto;
+  -webkit-appearance: radio;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
 body {
   @apply bg-gray-50 text-gray-900;
 }

@@ -31,10 +31,10 @@ export function FreezeAckPanel({ freezes, onConfirm, onBack, confirmLabel, backL
       <p className="text-xs">Freeze window: {formatFreezePeriodWindow(item.startDateTime, item.endDateTime)}</p>
     </div>)}
     <div className="space-y-2">
-      {FREEZE_ACK_STATEMENTS.map((text, index) => <label key={text} className="flex items-start gap-2.5 text-sm text-slate-800">
-        <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-sky-700" checked={checked[index]} onChange={(event) => setChecked((current) => current.map((value, i) => i === index ? event.target.checked : value))} />
+      {FREEZE_ACK_STATEMENTS.map((text, index) => <button key={text} type="button" role="checkbox" aria-checked={checked[index]} onClick={() => setChecked((current) => current.map((value, i) => i === index ? !value : value))} className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm text-slate-800 ${checked[index] ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
+        <span className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border-2 ${checked[index] ? "border-blue-600 bg-blue-600 text-white" : "border-slate-400 bg-white"}`}>{checked[index] && <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}</span>
         <span>{text}</span>
-      </label>)}
+      </button>)}
     </div>
     <div className="flex flex-col gap-2">
       <button type="button" disabled={!complete || busy} onClick={onConfirm} className="rounded-xl bg-sky-700 p-3 font-semibold text-white disabled:opacity-40">{confirmLabel}</button>

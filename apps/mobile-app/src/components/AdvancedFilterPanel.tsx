@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Building, Equipment, Floor, Room } from "@cafm/shared-schema";
-import { FilterCriteria } from "@/lib/store";
+import { FilterCriteria, WorkTypeCode } from "@/lib/store";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
 
 interface AdvancedFilterPanelProps {
@@ -15,8 +15,8 @@ interface AdvancedFilterPanelProps {
   onResetFilters: () => void;
   substatusOptions: { value: number; count: number }[];
   defaultSubstatuses: number[];
-  workType: "All" | "PM" | "FJ" | "LJ";
-  onWorkTypeChange: (type: "All" | "PM" | "FJ" | "LJ") => void;
+  workTypes: WorkTypeCode[];
+  onWorkTypesChange: (types: WorkTypeCode[]) => void;
   schedule: "agenda" | "overdue" | "today" | "upcoming" | "all";
   onScheduleChange: (value: "agenda" | "overdue" | "today" | "upcoming" | "all") => void;
   resultCount: number;
@@ -34,8 +34,8 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   onResetFilters,
   substatusOptions,
   defaultSubstatuses,
-  workType,
-  onWorkTypeChange,
+  workTypes,
+  onWorkTypesChange,
   schedule,
   onScheduleChange,
   resultCount,
@@ -72,12 +72,17 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   const selectedPercents = currentFilters.selectedSubstatuses ?? [];
   const isDefaultSubstatus = selectedPercents.length === defaultSubstatuses.length && defaultSubstatuses.every((value) => selectedPercents.includes(value));
   const togglePercent = (value: number) => set({ selectedSubstatuses: selectedPercents.includes(value) ? selectedPercents.filter((item) => item !== value) : [...selectedPercents, value].sort((a, b) => a - b) });
-  const activeCount = Object.entries(currentFilters).filter(([key, value]) => key === "selectedSubstatuses" ? !isDefaultSubstatus : (value instanceof Set ? value.size > 0 : Boolean(value))).length + (workType !== "All" ? 1 : 0) + (schedule === "overdue" || schedule === "today" ? 1 : 0);
-  const otherCount = [currentFilters.startDateFrom, currentFilters.startDateTo, currentFilters.marginDateFrom, currentFilters.marginDateTo, currentFilters.dueDateFrom, currentFilters.dueDateTo].filter(Boolean).length;
+  const activeCount = Object.entries(currentFilters).filter(([key, value]) => key === "selectedSubstatuses" ? !isDefaultSubstatus : key === "workTypes" ? false : (value instanceof Set ? value.size > 0 : Boolean(value))).length + (workTypes.length > 0 && workTypes.length < 3 ? 1 : 0) + (schedule === "overdue" || schedule === "today" ? 1 : 0);
+  const otherCount = [currentFilters.startDateFrom, currentFilters.startDateTo, currentFilters.dueDateFrom, currentFilters.dueDateTo, currentFilters.marginDateFrom, currentFilters.marginDateTo].filter(Boolean).length;
+  const toggleWorkType = (type: WorkTypeCode) => {
+    const next = workTypes.includes(type) ? workTypes.filter((item) => item !== type) : [...workTypes, type];
+    onWorkTypesChange(next.length >= 3 ? [] : next);
+  };
+  const allTypes = workTypes.length === 0 || workTypes.length === 3;
   const otherFields = {
     start: ["startDateFrom", "startDateTo"],
-    margin: ["marginDateFrom", "marginDateTo"],
     due: ["dueDateFrom", "dueDateTo"],
+    margin: ["marginDateFrom", "marginDateTo"],
   } as const;
   const [fromKey, toKey] = otherFields[otherTab];
   const dateInput = "w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs";
@@ -132,7 +137,8 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
               <div>
                 <span className={labelClass}>Work Type</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {(["All", "PM", "FJ", "LJ"] as const).map((item) => <button key={item} type="button" aria-pressed={workType === item} onClick={() => onWorkTypeChange(item)} className={`rounded-full border px-2.5 py-1 text-xs font-medium ${workType === item ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{item}</button>)}
+                  <button type="button" aria-pressed={allTypes} onClick={() => onWorkTypesChange([])} className={`rounded-full border px-2.5 py-1 text-xs font-medium ${allTypes ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>All</button>
+                  {(["PM", "FJ", "LJ"] as const).map((item) => { const on = workTypes.includes(item); return <button key={item} type="button" aria-pressed={on} onClick={() => toggleWorkType(item)} className={`rounded-full border px-2.5 py-1 text-xs font-medium ${on ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{item}</button>; })}
                 </div>
               </div>
 
@@ -160,22 +166,22 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
 
               <div>
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className={labelClass + " mb-0"}>Assigned Date</span>
+                  <span className={labelClass + " mb-0"}>Scheduled Date</span>
                   <button type="button" aria-expanded={otherOpen} onClick={() => setOtherOpen(!otherOpen)} className="flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                    + Other Dates (Start, Margin, Due) ▾
+                    + Other Dates (Start, Due, Margin) ▾
                     {otherCount > 0 && <span className="rounded-full bg-blue-600 px-1.5 text-[10px] text-white">{otherCount}</span>}
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <input type="date" aria-label="Assigned from" value={currentFilters.assignedDateFrom || ""} onChange={(e) => set({ assignedDateFrom: e.target.value || undefined })} className={dateInput} />
-                  <input type="date" aria-label="Assigned to" value={currentFilters.assignedDateTo || ""} onChange={(e) => set({ assignedDateTo: e.target.value || undefined })} className={dateInput} />
+                  <input type="date" aria-label="Scheduled from" value={currentFilters.scheduledDateFrom || ""} onChange={(e) => set({ scheduledDateFrom: e.target.value || undefined })} className={dateInput} />
+                  <input type="date" aria-label="Scheduled to" value={currentFilters.scheduledDateTo || ""} onChange={(e) => set({ scheduledDateTo: e.target.value || undefined })} className={dateInput} />
                 </div>
               </div>
 
               {otherOpen && (
                 <div className="space-y-1.5 rounded-xl bg-slate-50 p-2">
                   <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-200 p-0.5">
-                    {(["start", "margin", "due"] as const).map((tab) => (
+                    {(["start", "due", "margin"] as const).map((tab) => (
                       <button key={tab} type="button" onClick={() => setOtherTab(tab)} className={`rounded-md py-1 text-xs font-medium capitalize ${otherTab === tab ? "bg-white shadow-sm" : "text-slate-600"}`}>{tab} Date</button>
                     ))}
                   </div>
@@ -185,11 +191,6 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
                   </div>
                 </div>
               )}
-
-              <label className="flex items-center gap-2 text-xs text-slate-700">
-                <input type="checkbox" checked={currentFilters.showOnlyWithChecklist || false} onChange={(e) => set({ showOnlyWithChecklist: e.target.checked })} className="h-4 w-4" />
-                Show only with checklist
-              </label>
             </div>
 
             <div className="flex gap-2 border-t bg-white px-3.5 py-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))]">

@@ -1,4 +1,6 @@
 import { createPMCycleKey, getInitialIssuedStatus } from "@cafm/shared-schema";
+import { applyAllPmsAutoSchedules } from "./pms-auto-schedule";
+import type { Craftsperson } from "./pms-auto-schedule";
 import type { BaseWorkRequest, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId } from "@cafm/shared-schema";
 
 type Actor = { id: string; name: string; role: string };
@@ -13,6 +15,7 @@ type GenerationInput = {
   horizonDays: number;
   now: Date;
   actor: Actor;
+  craftspeople?: Craftsperson[];
 };
 
 function addDays(date: string, days: number): string {
@@ -117,5 +120,9 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
     }
     return cycles ? { ...schedule, NextDueDate: due, UpdatedAt: input.now.toISOString() } : schedule;
   });
-  return { schedules, workRequests: requests, generated, skipped };
+  const created = new Set(requests.slice(input.workRequests.length).map((wr) => wr.WR_ID));
+  const scheduled = input.craftspeople && created.size
+    ? applyAllPmsAutoSchedules(requests, schedules.filter((item) => item.SiteId === input.siteId), input.craftspeople, { onlyIds: created, from: today })
+    : requests;
+  return { schedules, workRequests: scheduled, generated, skipped };
 }

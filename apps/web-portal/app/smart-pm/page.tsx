@@ -187,7 +187,7 @@ export default function SmartPMPage() {
     try {
       const result = generatePMWorkRequests({ schedules: data.schedules, blueprints: data.blueprints,
         equipment: data.equipment, workRequests: data.workRequests, siteId: activeSiteId, mode: generatorMode,
-        selectedIds: selectedScheduleIds, horizonDays, now: new Date(),
+        selectedIds: selectedScheduleIds, horizonDays, now: new Date(), craftspeople: data.craftspeople,
         actor: { id: currentUser?.UserId ?? "current-user", name: currentUser?.DisplayName ?? "Current user", role: currentRole } });
       setData((current) => ({ ...current, schedules: result.schedules, workRequests: result.workRequests }));
       alert(`Generated ${result.generated} work request(s); skipped ${result.skipped} duplicate cycle(s). Meter-based schedules are excluded from horizon generation.`);

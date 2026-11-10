@@ -119,5 +119,32 @@ export function expandSeededWorkRequests(seeded: Seeded, sites: SiteId[]): Seede
       workRequests.push(wr);
     });
   });
-  return { ...seeded, workRequests };
+  const schedules = seeded.schedules.map((item) => ({ ...item }));
+  sites.forEach((site) => {
+    const crafts = seeded.craftspeople.filter((item) => item.SiteId === site);
+    const siteSchedules = schedules.filter((item) => item.SiteId === site);
+    const rules: Array<Partial<(typeof schedules)[number]> & { techs: number[] }> = [
+      { Title: "Daily Morning Plant Tour", defaultRecurrencePattern: "Daily", defaultWeekdays: [1, 2, 3, 4, 5], defaultStartTime: "07:30", defaultDurationHours: 1.5, techs: [0] },
+      { Title: "Weekly Mechanical/Electrical Maintenance", defaultRecurrencePattern: "Weekly", defaultWeekdays: [1, 3], defaultStartTime: "08:00", defaultDurationHours: 2, techs: [0, 1] },
+      { Title: "Weekly Chiller & AHU Inspection", defaultRecurrencePattern: "Weekly", defaultWeekdays: [4], defaultStartTime: "13:00", defaultDurationHours: 2, techs: [2] },
+      { Title: "Biweekly Backup Generator Check", defaultRecurrencePattern: "Biweekly", defaultWeekdays: [2], defaultStartTime: "09:00", defaultDurationHours: 1.5, techs: [0] },
+      { Title: "Monthly Boiler Safety Check", defaultRecurrencePattern: "Monthly", defaultDayOfMonth: 5, defaultStartTime: "10:00", defaultDurationHours: 2, techs: [3] },
+    ];
+    rules.forEach(({ techs, ...rule }, index) => {
+      const target = siteSchedules[index];
+      if (!target) return;
+      const people = techs.map((i) => crafts[i % Math.max(crafts.length, 1)]).filter(Boolean);
+      Object.assign(target, rule, {
+        autoScheduleEnabled: true, defaultAnchorDate: today,
+        defaultTechnicianIds: people.map((item) => item.id), defaultTechnicianNames: people.map((item) => `${item.Name} ${item.LastName}`),
+      });
+    });
+  });
+  const ruleById = new Map(schedules.filter((item) => item.autoScheduleEnabled).map((item) => [item.ScheduleId, item]));
+  const tagged = workRequests.map((wr) => {
+    const rule = (wr as { ScheduleId?: string }).ScheduleId ? ruleById.get((wr as { ScheduleId?: string }).ScheduleId!) : undefined;
+    if (!rule || wr.WR_Type !== "PM" || wr.Percentage !== 50 || !wr.CraftpersonAssignments?.length) return wr;
+    return { ...wr, CraftpersonAssignments: wr.CraftpersonAssignments.map((entry) => rule.defaultTechnicianIds?.includes(entry.craftpersonId) ? { ...entry, autoScheduledFromPmsId: rule.ScheduleId } : entry) };
+  });
+  return { ...seeded, schedules, workRequests: tagged };
 }

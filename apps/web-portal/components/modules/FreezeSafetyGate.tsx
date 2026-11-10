@@ -27,10 +27,10 @@ export function FreezeSafetyGate({ freezes, onUnlock, onBack, unlockLabel = "Unl
         <p>Freeze window: {formatFreezePeriodWindow(item.startDateTime, item.endDateTime)}</p>
       </div>)}
       <div className="space-y-2">
-        {FREEZE_ACK_STATEMENTS.map((text, index) => <label key={text} className="flex items-start gap-2 text-sm">
-          <input type="checkbox" className="mt-1" checked={checked[index]} onChange={(event) => setChecked((current) => current.map((value, i) => i === index ? event.target.checked : value))} />
+        {FREEZE_ACK_STATEMENTS.map((text, index) => <button key={text} type="button" role="checkbox" aria-checked={checked[index]} onClick={() => setChecked((current) => current.map((value, i) => i === index ? !value : value))} className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm ${checked[index] ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
+          <span className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border-2 ${checked[index] ? "border-blue-600 bg-blue-600 text-white" : "border-slate-400 bg-white"}`}>{checked[index] && <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}</span>
           <span>{text}</span>
-        </label>)}
+        </button>)}
       </div>
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onBack} className="rounded border px-4 py-2">{backLabel}</button>

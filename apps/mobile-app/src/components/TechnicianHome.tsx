@@ -7,6 +7,7 @@ import { WRPreviewCard } from "./WRPreviewCard";
 import { isOverdue, localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
 import { wallMinutes } from "../../../web-portal/lib/dispatch";
 import { formatPlannedRange, formatShortDateTime } from "../lib/human-time";
+import { TechnicianCalendarView } from "./TechnicianCalendarView";
 
 interface TechnicianHomeProps {
   myWRs: BaseWorkRequest[];
@@ -19,17 +20,21 @@ interface TechnicianHomeProps {
   filterControl?: React.ReactNode;
   resetSignal?: number;
   menuButton?: React.ReactNode;
-  type?: WorkType;
-  onTypeChange?: (type: WorkType) => void;
   onTabChange?: (tab: "my-wrs" | "unassigned") => void;
   agenda?: Agenda;
   onAgendaChange?: (agenda: Agenda) => void;
   freezes?: LocationFreeze[];
   viewMode?: "card" | "compact";
+  layout?: WrLayout;
+  onLayoutChange?: (layout: WrLayout) => void;
 }
 
 export type Agenda = "agenda" | "overdue" | "today" | "upcoming" | "all";
-export type WorkType = "All" | "PM" | "FJ" | "LJ";
+export type WrLayout = "list" | "calendar";
+export const WR_LAYOUT_KEY = "cafm_mobile_wr_layout";
+export function readWrLayout(): WrLayout {
+  try { return localStorage.getItem(WR_LAYOUT_KEY) === "calendar" ? "calendar" : "list"; } catch { return "list"; }
+}
 export const WR_VIEW_MODE_KEY = "cafm_mobile_wr_view_mode";
 export function readWrViewMode(): "card" | "compact" {
   try { return localStorage.getItem(WR_VIEW_MODE_KEY) === "compact" ? "compact" : "card"; } catch { return "card"; }
@@ -46,25 +51,22 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   filterControl,
   resetSignal = 0,
   menuButton,
-  type: typeProp,
-  onTypeChange,
   onTabChange,
   agenda: agendaProp,
   onAgendaChange,
   freezes = [],
   viewMode = "card",
+  layout = "list",
+  onLayoutChange,
 }) => {
   const [activeTab, setActiveTabState] = useState<"my-wrs" | "unassigned">("my-wrs");
-  const [typeState, setTypeState] = useState<WorkType>("All");
-  const type = typeProp ?? typeState;
-  const setType = (next: WorkType) => { setTypeState(next); onTypeChange?.(next); };
   const setActiveTab = (next: "my-wrs" | "unassigned") => { setActiveTabState(next); onTabChange?.(next); };
   const [showClaimToast, setShowClaimToast] = useState(false);
   const [claimMessage, setClaimMessage] = useState("");
   const [agendaState, setAgendaState] = useState<Agenda>("agenda");
   const agenda = agendaProp ?? agendaState;
   const setAgenda = (next: Agenda) => { setAgendaState(next); onAgendaChange?.(next); };
-  useEffect(() => { if (resetSignal) { setAgenda("agenda"); setType("All"); } }, [resetSignal]);
+  useEffect(() => { if (resetSignal) { setAgenda("agenda"); } }, [resetSignal]);
 
   const handleClaimWR = async (wrId: string) => {
     if (onClaimWR) {
@@ -77,7 +79,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   };
 
   const currentDate = localDateTime(new Date(now)).slice(0, 10);
-  const typedFor = (list: BaseWorkRequest[]) => list.filter((wr) => type === "All" || wr.WR_Type === type);
+  const typedFor = (list: BaseWorkRequest[]) => list;
   const typed = typedFor(activeTab === "my-wrs" ? myWRs : unassignedWRs);
   const dateOf = (wr: BaseWorkRequest) => scheduledSlot(wr, technician)?.assignedStartDateTime.slice(0, 10) ?? wr.StartDate_DateToPerform;
   const overdue = (wr: BaseWorkRequest) => isOverdue(wr, new Date(now), technician);
@@ -114,6 +116,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
         <span className={`${pill} bg-slate-800 text-white`}>{wr.WR_Type}</span>
         <span className={`${pill} bg-blue-100 text-blue-800`}>{wr.Percentage}%</span>
         <span className="shrink-0 text-xs font-bold">{wr.WR_ID}</span>
+        {wr.CraftpersonAssignments?.some((item) => item.autoScheduledFromPmsId) && <span className={`${pill} bg-violet-100 text-violet-800`}>🔁 Auto-PMS</span>}
         <span className="min-w-0 flex-1 truncate text-xs text-slate-700">{wr.Description}</span>
         {activeTab === "unassigned" && onClaimWR
           ? <button type="button" aria-label={`Claim ${wr.WR_ID}`} onClick={(event) => { event.stopPropagation(); void handleClaimWR(wr.WR_ID || ""); }} className="shrink-0 rounded-lg bg-green-600 px-2 py-0.5 text-[11px] font-bold text-white">Claim</button>
@@ -153,14 +156,22 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
           >
             Unassigned ({unassignedCount})
           </button>
-          <div className="ml-auto">{filterControl}</div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <div role="group" aria-label="WR layout" className="flex overflow-hidden rounded-lg border border-slate-300">
+              <button type="button" aria-label="List view" aria-pressed={layout === "list"} title="List" onClick={() => onLayoutChange?.("list")} className={`px-2 py-1.5 text-xs font-semibold ${layout === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`}>☰</button>
+              <button type="button" aria-label="Calendar view" aria-pressed={layout === "calendar"} title="Calendar" onClick={() => onLayoutChange?.("calendar")} className={`px-2 py-1.5 text-xs font-semibold ${layout === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-700"}`}>📅</button>
+            </div>
+            {filterControl}
+          </div>
         </div>
       </div>
 
 
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-20">
-        {isEmptyState ? (
+        {layout === "calendar" ? (
+          <TechnicianCalendarView wrs={activeTab === "my-wrs" ? myWRs : unassignedWRs} technician={technician} now={now} freezes={freezes} onOpenWR={onOpenWR} />
+        ) : isEmptyState ? (
           <div className="flex h-64 items-center justify-center">
             {scheduleBlockedUnassigned ? (
               <div className="space-y-3 px-4 text-center">
@@ -188,6 +199,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
               <div key={wr.WR_ID} className={`relative ${activeTab === "my-wrs" && overdue(wr) ? "mb-3 rounded-lg border-2 border-rose-500 bg-rose-50" : ""}`}>
                 {activeTab === "my-wrs" && overdue(wr) && <div className="rounded-t border-2 border-rose-500 bg-rose-50 p-2 text-sm text-rose-900"><strong>⏰ SHOULD BE DONE BY {formatShortDateTime(scheduledSlot(wr, technician)?.assignedEndDateTime ?? wr.StartDate_DateToPerform)} — Still Open ({wr.Percentage}%)</strong><button className="ml-2 underline" onClick={() => onReport(wr.WR_ID)}>🚩 Explain Delay / Push to Team Leader</button></div>}
                 {activeTab === "my-wrs" && !overdue(wr) && dateOf(wr) && (() => { const slot = scheduledSlot(wr, technician); const today = dateOf(wr) === currentDate; const inTodaySection = today && agenda !== "all"; const range = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime, new Date(now)) : dateOf(wr); const prefix = today ? (inTodaySection ? "\ud83d\udd50 " : "\ud83d\udd50 Planned Today: ") : "\ud83d\udd50 Can start early anytime: "; return <div className="rounded-t bg-blue-50 p-2 text-sm text-blue-900">{prefix}{range}</div>; })()}
+                {wr.CraftpersonAssignments?.some((item) => item.autoScheduledFromPmsId) && <div className="rounded-t bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-800">🔁 Auto-PMS · scheduled automatically by its PMS rule</div>}
                 <WRPreviewCard
                   wr={wr}
                   onClick={() => onOpenWR?.(wr.WR_ID || "")}
