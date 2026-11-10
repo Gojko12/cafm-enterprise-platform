@@ -1,4 +1,4 @@
-import { createPMCycleKey, getInitialIssuedStatus } from "@cafm/shared-schema";
+import { createPMCycleKey, getInitialIssuedStatus, pmTargetKey } from "@cafm/shared-schema";
 import { applyAllPmsAutoSchedules } from "./pms-auto-schedule";
 import type { Craftsperson } from "./pms-auto-schedule";
 import type { BaseWorkRequest, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId } from "@cafm/shared-schema";
@@ -65,7 +65,7 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
   const selected = input.schedules.filter((item) => item.SiteId === input.siteId && item.IsActive &&
     (input.mode === "horizon" || input.selectedIds.includes(item.ScheduleId)));
   const included = input.schedules.filter((item) => item.SiteId === input.siteId && item.IsActive &&
-    (selected.includes(item) || selected.some((other) => other.EquipmentCodes.some((code) => sameLadder(item, other, code)))));
+    (selected.includes(item) || selected.some((other) => sameLadder(item, other, pmTargetKey(other)))));
   const planned: PmOccurrence[] = [];
   const dueDates = new Map<string, string[]>();
   const eligible = new Set<string>();
@@ -76,13 +76,14 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
   for (const schedule of included) {
     if (schedule.Frequency === "Meter-based") continue;
     let due = schedule.NextDueDate;
+    if (schedule.effectiveFromDate && due < schedule.effectiveFromDate) due = schedule.effectiveFromDate;
     if (schedule.sharedAnchorDate) due = nextTickOnOrAfter(schedule, due);
     const dates: string[] = [];
     for (let count = 0; due <= end; count++) {
       if (count > 1000) throw new Error(`Schedule ${schedule.ScheduleId} has too many overdue cycles.`);
       dates.push(due);
       if (selected.includes(schedule) && (input.mode === "horizon" ? addDays(due, -schedule.LeadTimeDays) <= horizon : dates.length === 1)) eligible.add(`${schedule.ScheduleId}:${due}`);
-      for (const equipmentCode of schedule.EquipmentCodes) planned.push({ schedule, equipmentCode, dueDate: due });
+      for (const equipmentCode of schedule.EquipmentCodes.length ? schedule.EquipmentCodes : [pmTargetKey(schedule)]) planned.push({ schedule, equipmentCode, dueDate: due });
       due = nextDue(schedule, due);
     }
     dueDates.set(schedule.ScheduleId, dates);
@@ -91,8 +92,8 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
   const earliest = shiftDays([...dueDates.values()].flat().sort()[0] ?? today, -maxWindow);
   for (const wr of requests) {
     const schedule = included.find((item) => item.ScheduleId === wr.ScheduleId && item.SiteId === wr.SiteId);
-    if (wr.WR_Type !== "PM" || !schedule || !wr.DueDate || wr.EquipmentCodes.length !== 1) continue;
-    const occurrence = { schedule, equipmentCode: wr.EquipmentCodes[0], dueDate: wr.DueDate.slice(0, 10) };
+    if (wr.WR_Type !== "PM" || !schedule || !wr.DueDate || wr.EquipmentCodes.length > 1) continue;
+    const occurrence = { schedule, equipmentCode: wr.EquipmentCodes[0] ?? pmTargetKey(schedule), dueDate: wr.DueDate.slice(0, 10) };
     existingByKey.set(occurrenceKey(occurrence), wr);
     if (sameLadder(schedule, schedule, occurrence.equipmentCode) && occurrence.dueDate >= earliest && occurrence.dueDate <= end &&
         !planned.some((item) => occurrenceKey(item) === occurrenceKey(occurrence))) planned.push(occurrence);
@@ -100,6 +101,13 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
   const canCover = (wr: BaseWorkRequest, occurrence: PmOccurrence) => wr.Percentage !== 27 && !wr.suppressedByWrId &&
     (isUnstarted(wr) || compileChecklist(occurrence.schedule, occurrence.equipmentCode, input.schedules, input.blueprints)
       .every((step) => wr.ChecklistSteps?.some((existing) => existing.StepId === step.StepId)));
+  for (const schedule of included) {
+    const preservedCycles = new Map((schedule.scheduleChangeLog ?? []).flatMap((change) => change.preservedCycles ?? []).map((cycle) => [cycle.wrId, cycle]));
+    for (const preserved of preservedCycles.values()) {
+      const wr = requests.find((item) => item.SiteId === schedule.SiteId && item.WR_ID === preserved.wrId);
+      if (wr) existingByKey.set(occurrenceKey({ schedule, equipmentCode: schedule.EquipmentCodes[0] ?? pmTargetKey(schedule), dueDate: preserved.dueDate }), wr);
+    }
+  }
   const candidatePlan = planOccurrences(planned.filter((item) => {
     const existing = existingByKey.get(occurrenceKey(item));
     return !existing || canCover(existing, item);
@@ -149,8 +157,7 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
     let cycles = 0;
     let lastProcessed: string | undefined;
     for (const due of dueDates.get(schedule.ScheduleId) ?? []) {
-      const locationEligible = !schedule.EquipmentCodes.length && eligible.has(`${schedule.ScheduleId}:${due}`);
-      const processed = locationEligible || schedule.EquipmentCodes.some((equipmentCode) => {
+      const processed = (schedule.EquipmentCodes.length ? schedule.EquipmentCodes : [pmTargetKey(schedule)]).some((equipmentCode) => {
         const key = occurrenceKey({ schedule, equipmentCode, dueDate: due });
         return (eligible.has(`${schedule.ScheduleId}:${due}`) && existingByKey.has(key)) || winnerKeys.has(key) || plan.suppressed.some((entry) => occurrenceKey(entry.occurrence) === key && winnerKeys.has(occurrenceKey(entry.coveredBy)));
       });
@@ -159,12 +166,12 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
       if (++cycles > 1000) throw new Error(`Schedule ${schedule.ScheduleId} has too many overdue cycles; update its next due date.`);
       const baseCycle = createPMCycleKey(schedule.ScheduleId, due);
       for (const target of targets) {
-        const occurrence = target.code ? { schedule, equipmentCode: target.code, dueDate: due } : undefined;
-        if (occurrence && !winnerKeys.has(occurrenceKey(occurrence))) { skipped++; continue; }
+        const occurrence = { schedule, equipmentCode: target.code ?? pmTargetKey(schedule), dueDate: due };
+        if (!winnerKeys.has(occurrenceKey(occurrence))) { skipped++; continue; }
         const cycle = `${baseCycle}::${target.code ?? "location"}`;
-        const existing = requests.find((wr) => wr.SiteId === input.siteId && wr.ScheduleId === schedule.ScheduleId &&
+        const existing = existingByKey.get(occurrenceKey(occurrence)) ?? requests.find((wr) => wr.SiteId === input.siteId && wr.ScheduleId === schedule.ScheduleId &&
           (wr.PM_CycleKey === cycle || (wr.PM_CycleKey === baseCycle && (!target.code || wr.EquipmentCodes.includes(target.code))) ||
-            (target.code && wr.EquipmentCodes.includes(target.code) && wr.DueDate?.slice(0, 10) === due)));
+            ((target.code ? wr.EquipmentCodes.includes(target.code) : !wr.EquipmentCodes.length) && wr.DueDate?.slice(0, 10) === due)));
         if (existing) {
           if (occurrence && !existing.suppressedByWrId && existing.Percentage !== 27) coveredIds.set(occurrenceKey(occurrence), existing.WR_ID);
           skipped++;

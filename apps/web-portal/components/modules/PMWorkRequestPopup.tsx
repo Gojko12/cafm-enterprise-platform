@@ -796,6 +796,7 @@ export function PMWorkRequestPopup({
               const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
               return <article key={step.StepId} className="rounded border p-3">
                 <p className="font-medium">{index + 1}. {step.Title}</p>
+                {(answer?.lastCorrectedBy || step.lastCorrectedBy) && <p className="text-xs text-amber-800" title={answer?.lastCorrectedAt ?? step.lastCorrectedAt}>✎ Corrected by {answer?.lastCorrectedBy ?? step.lastCorrectedBy}</p>}
                 <p className="text-sm text-slate-600">{answer
                   ? Array.isArray(answer.value)
                     ? answer.value.join(", ")
@@ -910,7 +911,7 @@ export function PMWorkRequestPopup({
                   const originSteps = checklistSteps.filter((item) => item.originFrequency === step.originFrequency);
                   const sectionStart = originSteps[0]?.StepId === step.StepId;
                   return <React.Fragment key={step.StepId}>{sectionStart && step.originFrequency && <tr className="bg-slate-100"><th colSpan={7} className="p-3"><FrequencyPill code={step.originFrequency} /> {step.isInherited ? "Included routine checks (inherited)" : "Additional maintenance checks"} · {originSteps.length} steps</th></tr>}<tr className="border-t">
-                    <td className="p-3">{index + 1}</td><td className="p-3"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title}{step.replacesStepLabel && <p className="text-xs text-amber-800">{step.replacesStepLabel}</p>}</td>
+                    <td className="p-3">{index + 1}</td><td className="p-3"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title}{step.replacesStepLabel && <p className="text-xs text-amber-800">{step.replacesStepLabel}</p>}{(answer?.lastCorrectedBy || step.lastCorrectedBy) && <p className="text-xs text-amber-800" title={answer?.lastCorrectedAt ?? step.lastCorrectedAt}>✎ Corrected by {answer?.lastCorrectedBy ?? step.lastCorrectedBy}</p>}</td>
                     <td className="p-3">{step.Unit ? `${step.MinThreshold ?? "—"}–${step.MaxThreshold ?? "—"} ${step.Unit}` : step.Unit ?? "—"}</td>
                     <td className="p-3">{shownValue}</td><td className="p-3">{finding ? "Yes" : "No"}</td>
                     <td className="p-3">{answer?.comment ?? "—"}</td>

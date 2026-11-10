@@ -1,4 +1,4 @@
-import { PM_FREQUENCY_RANKS, compileBlueprintChecklist } from "@cafm/shared-schema";
+import { PM_FREQUENCY_RANKS, compileBlueprintChecklist, pmTargetKey, pmTargetType } from "@cafm/shared-schema";
 export { compileBlueprintChecklist } from "@cafm/shared-schema";
 import type { BaseWorkRequest, PMFrequencyCode, PM_ChecklistStandard, PM_Schedule, PM_ScheduleStep, SuppressedPmOccurrence } from "@cafm/shared-schema";
 
@@ -34,11 +34,17 @@ export function collisionWindow(schedule: PM_Schedule): number {
   return code && PM_FREQUENCY_RANKS[code] >= 5 ? 14 : code === "01M" ? 5 : code === "01D" ? 0 : 2;
 }
 export function resolveBlueprintSchedule(schedule: PM_Schedule, blueprints: PM_ChecklistStandard[]): PM_Schedule {
+  schedule = { ...schedule, EquipmentCodes: schedule.EquipmentCodes.length ? schedule.EquipmentCodes : schedule.equipmentCode && (!schedule.targetType || schedule.targetType === "equipment") ? [schedule.equipmentCode] : [] };
   const blueprint = blueprints.find((item) => item.ChecklistCode === schedule.ChecklistCode && (!item.SiteId || item.SiteId === schedule.SiteId));
   if (!blueprint?.frequencyCode || !blueprint.blueprintMode) throw new Error(`PMS #${schedule.ScheduleId} needs a configured blueprint.`);
   const code = blueprint.frequencyCode;
   const months = MONTHS[code];
-  return { ...schedule, frequencyCode: code, Frequency: months ? code === "01Y" || code === "02Y" || code === "05Y" ? "Yearly" : "Monthly" : code === "01D" ? "Daily" : "Weekly",
+  const type = pmTargetType(schedule);
+  return { ...schedule, targetType: type, targetKey: pmTargetKey(schedule),
+    equipmentCode: type === "equipment" ? schedule.EquipmentCodes[0] : undefined,
+    levelName: schedule.levelName ?? schedule.LevelName, roomCode: schedule.roomCode ?? schedule.RoomCode,
+    LevelName: schedule.levelName ?? schedule.LevelName, RoomCode: schedule.roomCode ?? schedule.RoomCode,
+    frequencyCode: code, Frequency: months ? code === "01Y" || code === "02Y" || code === "05Y" ? "Yearly" : "Monthly" : code === "01D" ? "Daily" : "Weekly",
     FrequencyInterval: months ? months >= 12 ? months / 12 : months : code === "02W" ? 2 : 1,
     suppressionMode: blueprint.blueprintMode === "standalone" ? "independent" : "suppress_and_inherit",
     suppressionGroupKey: blueprint.blueprintMode === "family_ladder" ? blueprint.familyId : undefined,
@@ -49,7 +55,7 @@ export function resolveBlueprintSchedule(schedule: PM_Schedule, blueprints: PM_C
 export function sameLadder(a: PM_Schedule, b: PM_Schedule, equipment: string): boolean {
   return a.SiteId === b.SiteId && !!a.suppressionGroupKey && a.suppressionGroupKey === b.suppressionGroupKey &&
     a.suppressionMode !== "independent" && b.suppressionMode !== "independent" &&
-    a.EquipmentCodes.includes(equipment) && b.EquipmentCodes.includes(equipment);
+    pmTargetKey(a) === pmTargetKey(b) && (pmTargetKey(a) === equipment || a.EquipmentCodes.includes(equipment));
 }
 export function ladderSchedules(target: PM_Schedule, equipment: string, schedules: PM_Schedule[]): PM_Schedule[] {
   const rank = PM_FREQUENCY_RANKS[frequencyOf(target)!];
@@ -141,7 +147,7 @@ export function planOccurrences(occurrences: PmOccurrence[]) {
 export const occurrenceKey = (item: PmOccurrence) => `${item.schedule.SiteId}:${item.schedule.ScheduleId}:${item.equipmentCode}:${item.dueDate}`;
 export function previewCycles(schedules: PM_Schedule[], equipmentCode: string, from: string, months: number) {
   const to = shiftMonths(from, months);
-  const active = schedules.filter((item) => item.IsActive && item.EquipmentCodes.includes(equipmentCode));
+  const active = schedules.filter((item) => item.IsActive && (item.EquipmentCodes.includes(equipmentCode) || pmTargetKey(item) === equipmentCode));
   const padding = Math.max(0, ...active.map(collisionWindow));
   const occurrences = active.flatMap((schedule) => tickDates(schedule, shiftDays(from, 1 - padding), shiftDays(to, padding))
     .map((dueDate) => ({ schedule, equipmentCode, dueDate })));
@@ -152,7 +158,8 @@ export function previewCycles(schedules: PM_Schedule[], equipmentCode: string, f
   return { winners, suppressed: plan.suppressed.filter((entry) => keys.has(occurrenceKey(entry.coveredBy)) && inRange(entry.occurrence)) };
 }
 export function suppressionLog(lower: PmOccurrence, higher: PmOccurrence, wrId: string, now: string): SuppressedPmOccurrence {
-  return { id: `suppressed:${occurrenceKey(lower)}`, siteId: lower.schedule.SiteId, equipmentCode: lower.equipmentCode,
+  return { id: `suppressed:${occurrenceKey(lower)}`, siteId: lower.schedule.SiteId, equipmentCode: lower.schedule.EquipmentCodes[0] ?? "",
+    targetType: pmTargetType(lower.schedule), targetKey: pmTargetKey(lower.schedule),
     suppressionGroupName: lower.schedule.suppressionGroupName ?? lower.schedule.suppressionGroupKey ?? "Maintenance",
     suppressedFrequency: frequencyOf(lower.schedule)!, dueDate: lower.dueDate, coveredByFrequency: frequencyOf(higher.schedule)!,
     coveredByWrId: wrId, createdAt: now, suppressedPmsId: lower.schedule.ScheduleId, coveredByPmsId: higher.schedule.ScheduleId };
@@ -170,12 +177,12 @@ export function isUnstarted(wr: BaseWorkRequest) {
 }
 export function withCompiledScope(wr: BaseWorkRequest, schedule: PM_Schedule, schedules: PM_Schedule[], blueprints: PM_ChecklistStandard[]): BaseWorkRequest {
   if (blueprints.some((item) => item.ChecklistCode === schedule.ChecklistCode && item.blueprintMode)) schedule = resolveBlueprintSchedule(schedule, blueprints);
-  const equipment = wr.EquipmentCodes[0];
+  const equipment = wr.EquipmentCodes[0] ?? pmTargetKey(schedule);
   const steps = compileChecklist(schedule, equipment, schedules, blueprints);
   const code = frequencyOf(schedule);
   const absorbed = schedules.filter((item) => item.IsActive && sameLadder(schedule, item, equipment) &&
     frequencyOf(item) && PM_FREQUENCY_RANKS[frequencyOf(item)!] < PM_FREQUENCY_RANKS[code!]).map((item) => frequencyOf(item)!);
-  return { ...wr, pmFrequency: code, pmsId: /^\d{5}$/.test(schedule.ScheduleId) ? schedule.ScheduleId : undefined, suppressionGroupName: schedule.suppressionGroupName,
+  return { ...wr, targetType: pmTargetType(schedule), targetKey: pmTargetKey(schedule), pmFrequency: code, pmsId: /^\d{5}$/.test(schedule.ScheduleId) ? schedule.ScheduleId : undefined, suppressionGroupName: schedule.suppressionGroupName,
     absorbedFrequencies: orderedFrequencies(absorbed),
     ChecklistSteps: steps, ChecklistInstances: steps.map((step) => ({
       ...step, StepInstanceId: `${wr.WR_ID}:${step.StepId}`, WR_ID: wr.WR_ID, ScheduleId: schedule.ScheduleId,
@@ -187,9 +194,9 @@ export function reconcileOpenPMs(workRequests: BaseWorkRequest[], schedules: PM_
   schedules = schedules.map((item) => resolveBlueprintSchedule(item, blueprints));
   const candidates = workRequests.flatMap((wr) => {
     const schedule = schedules.find((item) => item.ScheduleId === wr.ScheduleId && item.SiteId === wr.SiteId && item.IsActive);
-    return wr.WR_Type === "PM" && wr.Percentage !== 27 && !wr.suppressedByWrId && wr.DueDate && wr.EquipmentCodes.length === 1 &&
+    return wr.WR_Type === "PM" && wr.Percentage !== 27 && !wr.suppressedByWrId && wr.DueDate && wr.EquipmentCodes.length <= 1 &&
       schedule && frequencyOf(schedule) && schedule.suppressionMode !== "independent" && schedule.suppressionGroupKey
-      ? [{ wr, schedule, equipmentCode: wr.EquipmentCodes[0], dueDate: wr.DueDate.slice(0, 10) }] : [];
+      ? [{ wr, schedule, equipmentCode: wr.EquipmentCodes[0] ?? pmTargetKey(schedule), dueDate: wr.DueDate.slice(0, 10) }] : [];
   });
   const ordered = [...candidates].sort((a, b) => PM_FREQUENCY_RANKS[frequencyOf(b.schedule)!] - PM_FREQUENCY_RANKS[frequencyOf(a.schedule)!] || a.wr.WR_ID.localeCompare(b.wr.WR_ID));
   const updates = new Map<string, BaseWorkRequest>();

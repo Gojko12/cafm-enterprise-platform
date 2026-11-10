@@ -5,6 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import type { PM_ChecklistStandard, PM_ScheduleStep } from "@cafm/shared-schema";
 import { CLASSICAL_TRADES, PM_ChecklistStandardSchema, PM_FREQUENCY_RANKS } from "@cafm/shared-schema";
 import type { PMFrequencyCode } from "@cafm/shared-schema";
+import { nextBlueprintCode } from "@/lib/pm-orders";
 
 interface ChecklistBuilderProps {
   onSave?: (checklist: PM_ChecklistStandard) => void;
@@ -14,10 +15,10 @@ interface ChecklistBuilderProps {
   blueprintDefaults?: Partial<PM_ChecklistStandard>;
   availableFrequencies?: PMFrequencyCode[];
   allBlueprints?: PM_ChecklistStandard[];
+  blueprintHighWatermark?: number;
 }
 
-export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = [], frequencyCode, blueprintDefaults, availableFrequencies, allBlueprints }: ChecklistBuilderProps) {
-  const [code, setCode] = useState(initialBlueprint?.ChecklistCode || blueprintDefaults?.ChecklistCode || "");
+export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = [], frequencyCode, blueprintDefaults, availableFrequencies, allBlueprints, blueprintHighWatermark }: ChecklistBuilderProps) {
   const [title, setTitle] = useState(initialBlueprint?.Title || "");
   const [maintenanceReason, setMaintenanceReason] = useState(initialBlueprint?.MaintenanceReason || "");
   const [trade, setTrade] = useState(initialBlueprint?.TradeId || blueprintDefaults?.TradeId || "");
@@ -25,6 +26,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
   const [steps, setSteps] = useState<PM_ScheduleStep[]>(initialBlueprint?.Steps || []);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const [lockedFrequency, setLockedFrequency] = useState<PMFrequencyCode | undefined>(initialBlueprint?.frequencyCode ?? blueprintDefaults?.frequencyCode);
+  const code = initialBlueprint?.ChecklistCode ?? nextBlueprintCode(allBlueprints ?? [], lockedFrequency ?? "03M", blueprintHighWatermark);
   const familyId = initialBlueprint?.familyId ?? blueprintDefaults?.familyId;
   if (allBlueprints && familyId && lockedFrequency) inheritedSteps = allBlueprints.filter((bp) =>
     bp.IsActive && bp.blueprintMode === "family_ladder" && bp.familyId === familyId && bp.frequencyCode && PM_FREQUENCY_RANKS[bp.frequencyCode] < PM_FREQUENCY_RANKS[lockedFrequency])
@@ -123,9 +125,8 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
             <input
               type="text"
               value={code}
-              disabled={Boolean(initialBlueprint)}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="e.g., HVAC-MONTHLY-001"
+              readOnly
+              aria-label="Auto-generated Checklist Code"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

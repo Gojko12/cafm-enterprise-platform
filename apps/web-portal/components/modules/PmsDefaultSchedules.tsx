@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import type { PM_Schedule } from "@cafm/shared-schema";
+import { pmTargetLabel } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { addDays, calendarDate } from "@/lib/dispatch";
@@ -101,7 +102,7 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
         };
         return <section key={pms.ScheduleId} className={`space-y-2 rounded border p-2 ${pms.autoScheduleEnabled ? "border-blue-400 bg-blue-50/40" : "bg-white"}`}>
           <div className="flex flex-wrap items-center gap-2">
-            <strong>{pms.Title ?? `${pms.ChecklistCode} · ${pms.EquipmentCodes.join(", ")}`}</strong>
+            <strong>{pms.Title ?? pms.ChecklistCode} · {pmTargetLabel(pms)}</strong>
             <span className="rounded bg-slate-100 px-1">PMS #{pms.ScheduleId}</span><FrequencyPill code={blueprints.find((bp) => bp.ChecklistCode === pms.ChecklistCode)?.frequencyCode} />
             <span className="rounded bg-slate-100 px-1">{tradeOf(pms) || "—"}</span>
             <span className="text-slate-600">{openCount} open PM WR(s)</span>

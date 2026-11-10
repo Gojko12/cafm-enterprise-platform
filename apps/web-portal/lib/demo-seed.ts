@@ -26,6 +26,8 @@ export function scopeData(data: DemoData, site: SiteId): DemoData {
   return {
     ...data,
     sites: [site],
+    pmsOrderHighWatermark: Math.max(data.pmsOrderHighWatermark ?? 0, 0, ...data.schedules.map((order) => Number(order.ScheduleId))),
+    blueprintHighWatermark: Math.max(data.blueprintHighWatermark ?? 0, 0, ...data.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))),
     buildings: data.buildings.filter((item) => item.SiteId === site),
     floors: data.floors.filter((item) => item.SiteId === site),
     rooms: data.rooms.filter((item) => item.SiteId === site),
@@ -34,6 +36,7 @@ export function scopeData(data: DemoData, site: SiteId): DemoData {
     blueprints: data.blueprints.filter((item) => !item.SiteId || item.SiteId === site),
     schedules: data.schedules.filter((item) => item.SiteId === site),
     suppressedPmOccurrences: (data.suppressedPmOccurrences ?? []).filter((item) => item.siteId === site),
+    blueprintAuditLog: (data.blueprintAuditLog ?? []).filter((item) => item.siteId === site),
     workRequests: data.workRequests.filter((item) => item.SiteId === site).map((item) => {
       if (item.QA_AuditStatus === "SelectedForAudit") return { ...item, QA_AuditStatus: "ToBeInspected" as const };
       if (["QA_Staged_Pass", "QA_Staged_Fail"].includes(item.QA_AuditStatus ?? "") &&

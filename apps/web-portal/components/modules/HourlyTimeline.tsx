@@ -2,7 +2,7 @@
 import { FrequencyPill } from "../common/PmFrequency";
 
 import React, { useEffect, useRef, useState } from "react";
-import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest, CraftpersonAbsence, LocationFreeze } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
 import { absenceInterval, dailyCapacity, fromWallMinutes, intervalFor, wallMinutes } from "../../lib/dispatch";
@@ -149,7 +149,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 if (!interval) return null;
                 const left = Math.max(start, wallMinutes(interval.assignedStartDateTime)), right = Math.min(end, wallMinutes(interval.assignedEndDateTime));
                 const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
-                const title = `${wr.WR_ID} ${wr.Description}\n${formatFreezePeriodWindow(interval.assignedStartDateTime, interval.assignedEndDateTime)}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
+                const title = `${wr.WR_ID} ${wr.Description}\n${pmTargetLabel(wr)}\n${formatFreezePeriodWindow(interval.assignedStartDateTime, interval.assignedEndDateTime)}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
                 const editable = ![27, 78, 100].includes(wr.Percentage);
                 const highlighted = spotlight?.id === wr.WR_ID && spotlight.person === person.id && spotlight.day === day;
                 const affected = !!focusFreeze && getActiveFreezeConflictsForWR({ ...wr, AssignedCraftpersonIds: [person.id], CraftpersonAssignments: [interval], StartDate_DateToPerform: undefined }, [focusFreeze]).length > 0;

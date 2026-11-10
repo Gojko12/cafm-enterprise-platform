@@ -2,7 +2,7 @@
 import { FrequencyPill } from "../common/PmFrequency";
 
 import React, { useEffect, useState } from "react";
-import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest, LocationFreeze } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
 import { describeLocationFreeze, getCurrentLocationFreezes } from "../../lib/location-freezes";
@@ -81,7 +81,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
     id: wr.WR_ID, type: wr.WR_Type, description: wr.Description, trade: wr.TradeName ?? "",
     status: `${wr.Percentage}% ${wr.WorkRequestStatus} / ${wr.WorkRequestSubstatus}`,
     location: [wr.bl_id, wr.LevelName, wr.RoomCode].filter(Boolean).join(" / "),
-    equipment: wr.EquipmentCodes.join(", "), hours: String(wr.ExpectedHours ?? ""), due: wr.DueDate?.slice(0, 10) ?? "",
+    equipment: pmTargetLabel(wr), hours: String(wr.ExpectedHours ?? ""), due: wr.DueDate?.slice(0, 10) ?? "",
     margin: wr.MarginDate?.slice(0, 10) ?? "", urgency: String(wr.Helper_SortUrgency ?? ""),
     person: wr.AssignedCraftpersonIds.map((id) => { const p = people.find((item) => item.id === id); return p ? `${p.Name} ${p.LastName}` : id; }).join(", "),
   });

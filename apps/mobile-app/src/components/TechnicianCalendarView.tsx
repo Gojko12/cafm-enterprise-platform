@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest, LocationFreeze } from "@cafm/shared-schema";
 import { addDays, calendarDate } from "../../../web-portal/lib/dispatch";
 import { isOverdue } from "../../../web-portal/lib/field-updates";
@@ -90,7 +91,7 @@ export const TechnicianCalendarView: React.FC<Props> = ({ wrs, technician, now, 
         {basis === "scheduled" && slot && <span className="ml-auto font-medium text-slate-700">{hoursLabel(slot.assignedStartDateTime, slot.assignedEndDateTime)}</span>}
       </span>
       <span className="mt-0.5 block truncate text-xs text-slate-700">{wr.Description}</span>
-      <span className="block truncate text-[11px] text-slate-500">{[[wr.bl_id, wr.RoomCode].filter(Boolean).join(" / "), wr.EquipmentCodes?.[0], wr.TradeName].filter(Boolean).join(" · ")}</span>
+      <span className="block truncate text-[11px] text-slate-500">{[[wr.bl_id, wr.RoomCode].filter(Boolean).join(" / "), pmTargetLabel(wr), wr.TradeName].filter(Boolean).join(" · ")}</span>
     </button>;
   };
 

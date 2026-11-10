@@ -20,7 +20,7 @@ export function mergeRemoteState<T extends object>(local: T, remote: unknown): T
   const source = local as Rec;
   const server = remote as Rec;
   const next: Rec = { ...source };
-  for (const [field, key] of [["workRequests", "WR_ID"], ["auditFindings", "id"], ["auditInspections", "id"], ["suppressedPmOccurrences", "id"]] as const) {
+  for (const [field, key] of [["workRequests", "WR_ID"], ["auditFindings", "id"], ["auditInspections", "id"], ["suppressedPmOccurrences", "id"], ["blueprintAuditLog", "id"]] as const) {
     const merged = mergeList(source[field], server[field], key);
     if (merged) next[field] = merged;
   }

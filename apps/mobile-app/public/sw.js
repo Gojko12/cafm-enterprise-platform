@@ -1,5 +1,5 @@
 const BASE = new URL("./", self.location.href);
-const CACHE = `cafm-mobile-v10:${BASE.pathname}`;
+const CACHE = `cafm-mobile-v11:${BASE.pathname}`;
 const CORE = ["./", "index.html", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"].map((item) => new URL(item, BASE).href);
 const INDEX = new URL("index.html", BASE).href;
 

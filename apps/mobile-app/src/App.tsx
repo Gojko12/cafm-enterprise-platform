@@ -1,5 +1,6 @@
 import { notify } from "./lib/toast";
 import { MOBILE_APP_VERSION } from "./version";
+import { logChecklistCorrections, checklistAnswerFingerprint } from "@cafm/shared-schema";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { initOfflineEngine, OfflineEngine } from "./lib/offline-engine";
 import { getDB } from "./lib/db";
@@ -451,7 +452,8 @@ export default function App() {
     try {
     const current = await engine.getWorkRequest(selectedWR.WR_ID);
     if (!current || current.SiteId !== activeSiteId) throw new Error("Work request is no longer available on this site.");
-    const changed = change(current), now = new Date().toISOString();
+    const now = new Date().toISOString();
+    const changed = logChecklistCorrections(current, change(current), technicianName, now);
     const answersChanged = stable(current.ChecklistResults) !== stable(changed.ChecklistResults) || stable(current.todoSteps) !== stable(changed.todoSteps);
     if (answersChanged && current.Percentage >= 78 && (current.Percentage !== 78 || !access?.permissions.canCompleteWR78)) {
       throw new Error("Checklist amendments are allowed only at 78% by an authorized technician.");
@@ -566,9 +568,9 @@ export default function App() {
         if (!selectedWR) return null;
         if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} startStep={checklistStart} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
           const now = new Date().toISOString();
-          const changed = results.filter((result) => stable(result) !== stable(baseline.find((item) => item.stepId === result.stepId)));
+          const changed = results.filter((result) => checklistAnswerFingerprint(result) !== checklistAnswerFingerprint(baseline.find((item) => item.stepId === result.stepId)));
           for (const result of changed) {
-            if (stable(current.ChecklistResults?.find((item) => item.stepId === result.stepId)) !== stable(baseline.find((item) => item.stepId === result.stepId))) throw new Error(`Step ${result.stepId} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
+            if (checklistAnswerFingerprint(current.ChecklistResults?.find((item) => item.stepId === result.stepId)) !== checklistAnswerFingerprint(baseline.find((item) => item.stepId === result.stepId))) throw new Error(`Step ${result.stepId} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
           }
           return { ...current, ChecklistResults: [...(current.ChecklistResults ?? []).filter((item) => !changed.some((result) => result.stepId === item.stepId)), ...changed], ChecklistHistory: [...(current.ChecklistHistory ?? []), ...changed.map((result) => ({ id: crypto.randomUUID(), timestamp: now, performedBy: technicianName, actionType: "Mobile checklist updated", stepReference: result.stepId, details: `Answer: ${String(result.value)}; ${result.passed ? "favourable" : "unfavourable"}${result.comment ? `; ${result.comment}` : ""}` }))], StepAuditLogs: [...(current.StepAuditLogs ?? []), ...changed.flatMap((result) => { const instance = current.ChecklistInstances?.find((item) => item.StepId === result.stepId); return instance ? [{ AuditLogId: crypto.randomUUID(), StepInstanceId: instance.StepInstanceId, WR_ID: current.WR_ID, ActorId: currentTechnicianId, Action: "modified" as const, PreviousValue: baseline.find((item) => item.stepId === result.stepId)?.value, NewValue: result.value, OccurredAt: now }] : []; })] };
         }, "Checklist progress saved.")} />;

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -60,7 +60,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "building": return wr.bl_id;
       case "floor": return wr.LevelName ?? "";
       case "room": return wr.RoomCode ?? "";
-      case "equipment": return wr.EquipmentCodes.join(", ");
+      case "equipment": return pmTargetLabel(wr);
       case "cost": return wr.EstimatedCostEur?.toString() ?? "";
       case "costType": return wr.CostType ?? "";
       case "craftperson": return wr.AssignedCraftpersonIds.map((id) => {

@@ -1,7 +1,7 @@
 import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { FrequencyPill } from "../../../web-portal/components/common/PmFrequency";
-import { BaseWorkRequest } from "@cafm/shared-schema";
+import { BaseWorkRequest, pmTargetLabel } from "@cafm/shared-schema";
 import type { LocationFreeze } from "@cafm/shared-schema";
 import { formatFreezePeriodWindow, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
 import { WRPreviewCard } from "./WRPreviewCard";
@@ -126,7 +126,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
           : frozen ? <span className={`${pill} bg-sky-100 text-sky-800`}>Freeze</span>
           : time ? <span className="shrink-0 text-[11px] font-medium text-slate-600">{time}</span> : null}
       </div>
-      <p className="mt-0.5 truncate text-[11px] text-slate-500">{[[wr.bl_id, wr.RoomCode].filter(Boolean).join(" / "), wr.EquipmentCodes?.[0], wr.TradeName, due].filter(Boolean).join(" · ")}</p>
+      <p className="mt-0.5 truncate text-[11px] text-slate-500">{[[wr.bl_id, wr.RoomCode].filter(Boolean).join(" / "), pmTargetLabel(wr), wr.TradeName, due].filter(Boolean).join(" · ")}</p>
     </div>;
   };
 

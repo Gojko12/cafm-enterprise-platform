@@ -1,7 +1,7 @@
-import { createPMCycleKey } from "@cafm/shared-schema";
+import { createPMCycleKey, pmTargetLabel } from "@cafm/shared-schema";
 import type { BaseWorkRequest, PM_ChecklistStandard, PMFrequencyCode, PM_Schedule, PM_ScheduleStep, SiteId, SuppressedPmOccurrence } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
-import { createPmOrder } from "./pm-orders";
+import { createPmOrder, createTargetPmOrder, nextBlueprintCode } from "./pm-orders";
 import { frequencyOf, occurrenceKey, orderedFrequencies, previewCycles, shiftDays, shiftMonths, suppressionLog, withCompiledScope } from "./pm-suppression";
 import { calendarDate } from "./dispatch";
 
@@ -17,9 +17,9 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
   const changed = new Set<string>();
   const families: Array<{ key: string; name: string; equipment: string; codes: PMFrequencyCode[]; trade: string; copies: number }> = [
     { key: "CHILLER-MECH", name: "Chiller Routine Mechanical", equipment: "Chiller", codes: ["01M", "03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
-    { key: "BOILER-MECH", name: "Boiler Routine Mechanical", equipment: "Heating Boiler", codes: ["03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
-    { key: "AHU", name: "AHU Routine Servicing", equipment: "Cleanroom AHU", codes: ["03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
-    { key: "GENERATOR-ELEC", name: "Generator Electrical Servicing", equipment: "Diesel Generator", codes: ["01M", "06M", "01Y"], trade: "Electrical", copies: 1 },
+    { key: "BOILER-MECH", name: "Heating Boiler Servicing", equipment: "Heating Boiler", codes: ["03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
+    { key: "AHU", name: "Cleanroom AHU Servicing", equipment: "Cleanroom AHU", codes: ["03M", "06M", "01Y"], trade: "Mechanical", copies: 2 },
+    { key: "GENERATOR-ELEC", name: "Diesel Generator Servicing", equipment: "Diesel Generator", codes: ["01M", "06M", "01Y"], trade: "Electrical", copies: 2 },
   ];
   for (const site of sites) {
     const people = data.craftspeople.filter((item) => item.SiteId === site);
@@ -32,7 +32,7 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
         Instructions: "Follow the approved equipment procedure and applicable isolation requirements. Record defects and supporting evidence.",
         ...(replacement && i === 0 ? { replacesStepId: replacement } : {}),
       }));
-      const blueprint: PM_ChecklistStandard = { ChecklistCode: id, SiteId: site, Title: title, MaintenanceReason: "Approved preventive maintenance",
+      const blueprint: PM_ChecklistStandard = { ChecklistCode: nextBlueprintCode(data.blueprints, code), SiteId: site, Title: title, MaintenanceReason: "Approved preventive maintenance",
         frequencyCode: code, blueprintMode: family ? "family_ladder" : "standalone", familyId: family?.id, familyName: family?.name,
         TradeId: trade, TradeName: trade, Steps: steps, ExpectedHours: code === "01Y" ? 3 : 1.5, IsActive: true, Version: 1 };
       data.blueprints.push(blueprint);
@@ -50,7 +50,7 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
         data.equipment.push(second); assets.push(second);
       }
       const base = `${site}-BP-${family.key}`;
-      const blueprintFamily = { id: `FAM-${site}-${family.key}`, name: family.name };
+      const blueprintFamily = { id: `FAM-${String(families.indexOf(family) + 1).padStart(3, "0")}`, name: family.name };
       const procedures = family.codes.map((code) => makeBlueprint(`${base}-${code}`, `${family.name} · ${code}`, code, family.trade,
         code === "01M" ? ["Check operating indications and alarms"] :
           code === "03M" ? [family.key === "AHU" ? "Inspect air filter condition & pressure drop" : "Inspect service filter condition & pressure", "Inspect guards and access", "Inspect connections for leakage", "Verify operating temperatures"] :
@@ -67,7 +67,8 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
         const plan = previewCycles(rules, asset.EquipmentCode, anchor, 12);
         const ids = new Map<string, string>();
         const ordered = [...plan.winners].sort((a, b) => ["03M", "06M", "01Y", "01M"].indexOf(frequencyOf(a.schedule)!) - ["03M", "06M", "01Y", "01M"].indexOf(frequencyOf(b.schedule)!));
-        for (const occurrence of ordered) {
+        const seeded = family.key === "GENERATOR-ELEC" && assetIndex === 1 ? ordered.slice(0, 2) : ordered;
+        for (const occurrence of seeded) {
           const template = available[index++];
           if (!template) throw new Error(`Not enough open PM seed slots at ${site}.`);
           const person = people[0];
@@ -78,10 +79,10 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
         }
         for (const { occurrence, coveredBy } of plan.suppressed) {
           const id = ids.get(occurrenceKey(coveredBy));
-          if (!id) throw new Error("Suppression seed winner is missing.");
+          if (!id) continue;
           logs.push(suppressionLog(occurrence, coveredBy, id, timestamp));
         }
-        for (const rule of rules) rule.NextDueDate = shiftMonths(rule.NextDueDate, 12);
+        if (seeded.length === ordered.length) for (const rule of rules) rule.NextDueDate = shiftMonths(rule.NextDueDate, 12);
         if (family.key === "BOILER-MECH" || family.key === "CHILLER-MECH") data.schedules.push(createPmOrder(data.schedules, data.blueprints, statutory, asset, anchor, "SmartPM"));
       }
     }
@@ -99,6 +100,27 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
       const bp = makeBlueprint(`${site}-BP-EQ-${asset.EquipmentCode}`, `${asset.EquipmentName} monthly inspection`, "01M", legacy.TradeId, legacy.Steps.map((item) => item.Title));
       data.schedules.push(createPmOrder(data.schedules, data.blueprints, bp, asset, `${year}-01-15`, "SmartPM"));
     }
+    const safety = { id: "FAM-005", name: "Building & Room Safety Inspections" };
+    const safetyMonthly = makeBlueprint(`${site}-SAFETY-01M`, "Monthly Location Safety Inspection", "01M", "Civil", ["Inspect access and housekeeping", "Record structural, hygiene and fire escape defects"], safety);
+    const safetyQuarterly = makeBlueprint(`${site}-SAFETY-03M`, "Quarterly Location Safety Review", "03M", "Civil", ["Verify roof, drainage and fire safety compliance"], safety);
+    const building = data.buildings.find((item) => item.SiteId === site)!;
+    const floor = data.floors.find((item) => item.SiteId === site && item.bl_id === building.bl_id)!;
+    const room = data.rooms.find((item) => item.SiteId === site && item.bl_id === floor.bl_id && item.LevelName === floor.LevelName)!;
+    for (const target of [
+      { SiteId: site, targetType: "building" as const, bl_id: building.bl_id, title: "Building Roof & Gutter Inspection" },
+      { SiteId: site, targetType: "floor" as const, bl_id: floor.bl_id, LevelName: floor.LevelName, title: "Floor Fire Escape Route Check" },
+      { SiteId: site, targetType: "room" as const, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, title: "Room Cleanroom Hygiene Inspection" },
+    ]) for (const bp of [safetyMonthly, safetyQuarterly]) {
+      const order = createTargetPmOrder(data.schedules, data.blueprints, bp, target, `${year}-10-15`, "SmartPM");
+      order.Title = target.title;
+      data.schedules.push(order);
+      const template = available[index++];
+      if (!template) throw new Error(`Not enough open PM slots for location seed at ${site}.`);
+      const wr = seededRequest(template, order, order.NextDueDate, people[0], timestamp, today, index, data);
+      data.workRequests[data.workRequests.findIndex((item) => item.WR_ID === wr.WR_ID && item.SiteId === site)] = { ...wr, Description: `${target.title} · ${bp.frequencyCode}` };
+      changed.add(wr.WR_ID);
+      order.NextDueDate = shiftMonths(order.NextDueDate, bp.frequencyCode === "01M" ? 1 : 3);
+    }
     let n = 0;
     for (const [i, wr] of data.workRequests.entries()) {
       if (wr.SiteId !== site || wr.WR_Type !== "PM" || changed.has(wr.WR_ID)) continue;
@@ -115,16 +137,16 @@ export function seedNestedPM(source: Seeded, sites: SiteId[]): Seeded & { suppre
 }
 
 function seededRequest(template: BaseWorkRequest, schedule: PM_Schedule, due: string, person: DemoData["craftspeople"][number], now: string, today: string, index: number, data: Seeded): BaseWorkRequest {
-  const asset = data.equipment.find((item) => item.SiteId === schedule.SiteId && item.EquipmentCode === schedule.EquipmentCodes[0])!;
+  const asset = data.equipment.find((item) => item.SiteId === schedule.SiteId && item.EquipmentCode === schedule.EquipmentCodes[0]);
   const blueprint = data.blueprints.find((item) => item.ChecklistCode === schedule.ChecklistCode && item.SiteId === schedule.SiteId)!;
   const day = shiftDays(today, Math.floor((index - 1) / 4));
   const start = `${day}T${String(7 + ((index - 1) % 4) * 2).padStart(2, "0")}:00`;
   const end = `${day}T${String(9 + ((index - 1) % 4) * 2).padStart(2, "0")}:00`;
   const wr = withCompiledScope({
-    ...template, ScheduleId: schedule.ScheduleId, ChecklistStandardCode: schedule.ChecklistCode, Description: `${blueprint.Title} · ${asset.EquipmentName}`,
-    EquipmentCodes: [asset.EquipmentCode], bl_id: asset.bl_id, LevelName: asset.LevelName, RoomCode: asset.RoomCode,
-    ProblemLocation: `${asset.bl_id} / ${asset.LevelName} / ${asset.RoomCode}`, TradeId: blueprint.TradeId, TradeName: blueprint.TradeName,
-    PM_CycleKey: `${createPMCycleKey(schedule.ScheduleId, due)}::${asset.EquipmentCode}`,
+    ...template, ScheduleId: schedule.ScheduleId, ChecklistStandardCode: schedule.ChecklistCode, Description: `${blueprint.Title} · ${asset?.EquipmentName ?? pmTargetLabel(schedule)}`,
+    EquipmentCodes: asset ? [asset.EquipmentCode] : [], bl_id: asset?.bl_id ?? schedule.bl_id!, LevelName: asset?.LevelName ?? schedule.LevelName, RoomCode: asset?.RoomCode ?? schedule.RoomCode,
+    ProblemLocation: pmTargetLabel(schedule), TradeId: blueprint.TradeId, TradeName: blueprint.TradeName,
+    PM_CycleKey: `${createPMCycleKey(schedule.ScheduleId, due)}::${asset?.EquipmentCode ?? "location"}`,
     DueDate: due, MarginDate: shiftDays(due, 7), StartDate_DateToPerform: due, StartDate: due,
     WorkRequestStatus: "Issued", WorkRequestSubstatus: "Issued", Percentage: 50, TotalTimeMinutes: 0,
     AssignedCraftpersonIds: [person.id], AssignedUserIds: [person.id],

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Plus, MoreVertical, ArrowUp, Eye } from "lucide-react";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { LongJobDrawer } from "@/components/modules/long-jobs/LongJobDrawer";
-import { BaseWorkRequest, WR_Statuses, WR_Type } from "@cafm/shared-schema";
+import { BaseWorkRequest, WR_Statuses, WR_Type, pmTargetLabel } from "@cafm/shared-schema";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
@@ -517,7 +517,7 @@ export default function WorkRequestsPage() {
                     </span>
                   </div>
                   <p className="text-gray-700">{wr.Description}</p>
-                  <p className="text-sm text-gray-600 mt-1">{wr.ProblemLocation}</p>
+                  <p className="text-sm text-gray-600 mt-1">{wr.ProblemLocation} · {pmTargetLabel(wr)}</p>
                   <div className="mt-2"><WRSignals wr={wr} onOpen={handleViewWR} /></div>
                 </div>
                 <div className="flex items-center gap-2">

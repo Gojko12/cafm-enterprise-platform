@@ -15,9 +15,24 @@ export const PMSuppressionFields = {
 export const PMStepOriginFields = {
   originFrequency: z.string().optional(), isInherited: z.boolean().optional(),
   replacesStepId: z.string().min(1).optional(), replacesStepLabel: z.string().optional(),
+  lastCorrectedBy: z.string().optional(), lastCorrectedAt: z.string().optional(), previousValue: z.unknown().optional(),
 };
+export const PMTargetFields = {
+  targetType: z.enum(["equipment", "building", "floor", "room"]).optional(),
+  targetKey: z.string().min(1).optional(),
+  equipmentCode: z.string().min(1).optional(),
+  levelName: z.string().min(1).optional(),
+  roomCode: z.string().min(1).optional(),
+};
+export const BlueprintAuditEntrySchema = z.object({
+  id: z.string().min(1), siteId: SiteIdSchema, blueprintCode: z.string().min(1),
+  action: z.string().min(1), summary: z.string().min(1), before: z.unknown(), after: z.unknown(),
+  actor: z.string().min(1), timestamp: z.iso.datetime(),
+});
+export type BlueprintAuditEntry = z.infer<typeof BlueprintAuditEntrySchema>;
 export const SuppressedPmOccurrenceSchema = z.object({
-  id: z.string().min(1), siteId: SiteIdSchema, equipmentCode: z.string().min(1),
+  ...PMTargetFields,
+  id: z.string().min(1), siteId: SiteIdSchema, equipmentCode: z.string(),
   suppressionGroupName: z.string().min(1), suppressedFrequency: PMFrequencyCodeSchema,
   dueDate: z.iso.date(), coveredByFrequency: PMFrequencyCodeSchema,
   coveredByWrId: z.string().min(1), createdAt: z.iso.datetime(),
@@ -136,6 +151,14 @@ export const PM_ChecklistStandardSchema = PM_LegacyChecklistStandardSchema.super
 export const PM_LegacyScheduleSchema = z
   .object({
     ScheduleId: z.string().min(1),
+    ...PMTargetFields,
+    effectiveFromDate: z.iso.date().optional(),
+    scheduleChangeLog: z.array(z.object({
+      changedAt: z.iso.datetime(), changedBy: z.string().min(1),
+      oldAnchor: z.iso.date(), newAnchor: z.iso.date(), effectiveFrom: z.iso.date(),
+      openWrAction: z.enum(["move", "keep"]),
+      preservedCycles: z.array(z.object({ wrId: z.string().min(1), dueDate: z.iso.date() })).optional(),
+    })).optional(),
     anchorDate: z.iso.date().optional(),
     ...PMSuppressionFields,
     ChecklistCode: z.string().min(1),
@@ -189,7 +212,7 @@ export const PM_LegacyScheduleSchema = z
         message: "Floor-targeted schedules must include a building ID.",
       });
     }
-    if (schedule.EquipmentCodes.length === 0 && !schedule.bl_id) {
+    if (schedule.EquipmentCodes.length === 0 && !schedule.equipmentCode && !schedule.bl_id) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["EquipmentCodes"],
@@ -200,7 +223,12 @@ export const PM_LegacyScheduleSchema = z
 
 export const PM_ScheduleSchema = PM_LegacyScheduleSchema.superRefine((schedule, context) => {
   if (!/^(?!00000)\d{5}$/.test(schedule.ScheduleId)) context.addIssue({ code: "custom", path: ["ScheduleId"], message: "PMS IDs must be five-digit order numbers 00001–99999." });
-  if (schedule.EquipmentCodes.length !== 1) context.addIssue({ code: "custom", path: ["EquipmentCodes"], message: "Each PMS order links exactly one machine to one blueprint." });
+  const type = schedule.targetType ?? (schedule.EquipmentCodes.length || schedule.equipmentCode ? "equipment" : schedule.RoomCode || schedule.roomCode ? "room" : schedule.LevelName || schedule.levelName ? "floor" : "building");
+  const equipment = schedule.EquipmentCodes.length ? schedule.EquipmentCodes : schedule.equipmentCode ? [schedule.equipmentCode] : [];
+  if (type === "equipment" ? equipment.length !== 1 : equipment.length !== 0 || !schedule.bl_id ||
+      (type === "floor" || type === "room") && !(schedule.levelName ?? schedule.LevelName) ||
+      type === "room" && !(schedule.roomCode ?? schedule.RoomCode))
+    context.addIssue({ code: "custom", path: ["targetType"], message: "A PMS must identify exactly one equipment, building, floor or room with its parent location." });
   if (!schedule.anchorDate) context.addIssue({ code: "custom", path: ["anchorDate"], message: "An equipment anchor date is required." });
 });
 

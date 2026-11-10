@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema,
-  PM_ChecklistStandardSchema, PM_ScheduleSchema, SuppressedPmOccurrenceSchema,
+  PM_ChecklistStandardSchema, PM_ScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema,
   LocationFreezeSchema, SiteIdSchema, UserAccessProfileSchema,
 } from "@cafm/shared-schema";
 import type {
@@ -24,6 +24,7 @@ const stateSchema = z.object({
   blueprints: z.array(z.custom<PM_ChecklistStandard>((value) => PM_ChecklistStandardSchema.safeParse(value).success)),
   schedules: z.array(z.custom<PM_Schedule>((value) => PM_ScheduleSchema.safeParse(value).success)),
   suppressedPmOccurrences: z.array(SuppressedPmOccurrenceSchema).optional(),
+  blueprintAuditLog: z.array(BlueprintAuditEntrySchema).optional(),
   workRequests: z.array(workRequestSchema),
   craftspeople: z.array(z.object({ id: z.string().min(1), Name: z.string().min(1), LastName: z.string(), Trade: z.string(), HourlyRate: z.number().nonnegative(), SiteId: SiteIdSchema }).passthrough()).optional(),
   userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
@@ -151,6 +152,7 @@ export async function synchronizePortal(
       state.userAccessProfiles?.some((item) => item.siteId !== site) ||
       state.locationFreezes?.some((item) => item.siteId !== site) ||
       state.suppressedPmOccurrences?.some((item) => item.siteId !== site) ||
+      state.blueprintAuditLog?.some((item) => item.siteId !== site) ||
       state.workRequests.some((item) => item.SiteId !== site)) {
     throw new Error("The portal returned records belonging to another site.");
   }

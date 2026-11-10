@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { BaseWorkRequest } from "@cafm/shared-schema";
+import { BaseWorkRequest, pmTargetLabel } from "@cafm/shared-schema";
 import { formatDistanceToNow, format } from "date-fns";
 
 interface WRPreviewCardProps {
@@ -73,7 +73,7 @@ export const WRPreviewCard: React.FC<WRPreviewCardProps> = ({ wr, onClick }) => 
       </div>
 
       {/* Row 2: MarginDate | DueDate */}
-      <p className="text-xs text-slate-500">{[wr.bl_id, wr.LevelName, wr.RoomCode, wr.EquipmentCodes.join(", ")].filter(Boolean).join(" · ")}</p>
+      <p className="text-xs text-slate-500">{[wr.bl_id, wr.LevelName, wr.RoomCode, pmTargetLabel(wr)].filter(Boolean).join(" · ")}</p>
       <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-2">
         <span>
           Margin: {wr.MarginDate ? formatDateShort(wr.MarginDate) : "—"}

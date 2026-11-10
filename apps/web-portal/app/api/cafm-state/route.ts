@@ -10,8 +10,9 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema } from "@cafm/shared-schema";
+import { PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
+import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -121,6 +122,7 @@ const technicianFieldUpdateSchema = z.object({
   resolvedBy: z.string().optional(), resolvedAt: z.string().optional(),
 });
 const workRequestRecord = z.object({
+  ...PMTargetFields,
   WR_ID: z.string().min(1),
   pmsId: z.string().regex(/^(?!00000)\d{5}$/).optional(),
   ParentPM_WR_ID: z.string().min(1).optional(),
@@ -147,6 +149,8 @@ const stateSchema = z.object({
   pmModelVersion: z.literal(60).optional(),
   pmMigrationNotes: z.array(z.string()).optional(),
   pmsOrderHighWatermark: z.number().int().min(0).max(99999).optional(),
+  blueprintHighWatermark: z.number().int().min(0).max(9999).optional(),
+  blueprintAuditLog: z.array(BlueprintAuditEntrySchema).default([]),
   sites: z.array(z.string().min(1)),
   buildings: records,
   floors: records,
@@ -230,8 +234,14 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   const scoped = ["buildings", "floors", "rooms", "desks", "equipment", "schedules", "craftspeople", "siteRoleAssignments", "workRequests", "tradeRoleMappings", "siteRoleMappings"] as const;
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
+  if (state.blueprintAuditLog.some((item) => item.siteId !== site)) return false;
+  if (state.schedules.some((order) => !state.blueprints.some((bp) => bp.ChecklistCode === order.ChecklistCode) ||
+      !state.buildings.some((building) => building.bl_id === order.bl_id) ||
+      order.targetType === "equipment" && !state.equipment.some((asset) => asset.EquipmentCode === order.EquipmentCodes[0]) ||
+      (order.targetType === "floor" || order.targetType === "room") && !state.floors.some((floor) => floor.bl_id === order.bl_id && floor.LevelName === order.LevelName) ||
+      order.targetType === "room" && !state.rooms.some((room) => room.bl_id === order.bl_id && room.LevelName === order.LevelName && room.RoomCode === order.RoomCode))) return false;
   if (state.suppressedPmOccurrences?.some((item) => item.siteId !== site ||
-      !state.equipment.some((asset) => asset.EquipmentCode === item.equipmentCode && asset.SiteId === site) ||
+      (item.targetType && item.targetType !== "equipment" ? !state.schedules.some((order) => order.targetKey === item.targetKey) : !state.equipment.some((asset) => asset.EquipmentCode === item.equipmentCode && asset.SiteId === site)) ||
       !state.workRequests.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site) &&
       !state.deletedWorkRequests?.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site))) return false;
   if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
@@ -360,8 +370,9 @@ export async function GET(request: Request) {
     const storage = await backend();
     const { database } = await load(storage);
     const current = database.sites[site];
-    const highWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => entry.state.schedules.map((order) => Number(order.ScheduleId))));
-    const response = reply(request, current ? { ...current, state: { ...current.state, pmsOrderHighWatermark: highWatermark } } : { revision: 0, state: null });
+    const highWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => [entry.state.pmsOrderHighWatermark ?? 0, ...entry.state.schedules.map((order) => Number(order.ScheduleId))]));
+    const blueprintHighWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => [entry.state.blueprintHighWatermark ?? 0, ...entry.state.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))]));
+    const response = reply(request, current ? { ...current, state: { ...current.state, pmsOrderHighWatermark: highWatermark, blueprintHighWatermark } } : { revision: 0, state: null });
     response.headers.set("X-CAFM-Storage", storage.kind);
     return response;
   } catch (error) {
@@ -406,17 +417,24 @@ export async function POST(request: Request) {
     const duplicate = parsed.data.state.workRequests.find((wr) => typeof wr.OriginatingWR_ID === "string" && !existing.has(wr.WR_ID) && otherIds.has(wr.WR_ID));
     if (duplicate) return reply(request, { error: `Follow-up work request ID ${String(duplicate.WR_ID)} is already in use at another site.` }, 409);
     const forceReset = new URL(request.url).searchParams.get("reset") === "1" || (json as { forceReset?: unknown } | null)?.forceReset === true;
+    if (forceReset) {
+      const otherStates = Object.entries(database.sites).filter(([id]) => id !== site).map(([, entry]) => entry.state);
+      parsed.data.state = uniquePmsOrdersAcrossSites([...otherStates, parsed.data.state]).at(-1)!;
+    }
     const otherOrders = new Set(Object.entries(database.sites).filter(([id]) => id !== site).flatMap(([, entry]) => entry.state.schedules.map((order) => order.ScheduleId)));
     const existingOrders = new Set(current?.state.schedules.map((order) => order.ScheduleId) ?? []);
     const collision = parsed.data.state.schedules.find((order) => !existingOrders.has(order.ScheduleId) && otherOrders.has(order.ScheduleId));
     if (collision) return reply(request, { error: `PMS #${collision.ScheduleId} was allocated at another site. Refresh site data and retry the assignment.` }, 409);
+    const otherBlueprints = new Set(Object.entries(database.sites).filter(([id]) => id !== site).flatMap(([, entry]) => entry.state.blueprints.map((bp) => bp.ChecklistCode.slice(0, 7))));
+    const blueprintCollision = parsed.data.state.blueprints.find((bp) => otherBlueprints.has(bp.ChecklistCode.slice(0, 7)));
+    if (blueprintCollision) return reply(request, { error: `Blueprint ${blueprintCollision.ChecklistCode} is in use at another site. Refresh site data and retry.` }, 409);
     if (!forceReset && current) {
       const changed = parsed.data.state.blueprints.find((bp) => current.state.blueprints.some((old) =>
         old.ChecklistCode === bp.ChecklistCode && old.SiteId === bp.SiteId && old.frequencyCode !== bp.frequencyCode));
       if (changed) return reply(request, { error: `Blueprint ${changed.ChecklistCode} has a locked frequency. Create a new blueprint instead.` }, 400);
     }
     const merged = forceReset || !current ? parsed.data.state : mergeNewerWorkRequests(current.state, parsed.data.state);
-    const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(merged) };
+    const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(recordBlueprintRevisions(current?.state, merged, request.headers.get("X-CAFM-Person")?.trim() || "Web Portal")) };
     database.sites[site] = next;
     if (storage.kind === "supabase") {
       const newVersion = randomUUID();

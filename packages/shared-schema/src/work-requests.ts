@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LocationHierarchySchema, SiteIdSchema } from "./locations.js";
-import { PM_ScheduleStepSchema, PM_StepAuditLogSchema, PM_WorkRequestStepSchema } from "./smart-pm.js";
+import { PM_ScheduleStepSchema, PM_StepAuditLogSchema, PM_WorkRequestStepSchema, PMTargetFields } from "./smart-pm.js";
 import { CalendarDateSchema, LocalDateTimeSchema } from "./dispatch.js";
 
 export const WR_Type = z.enum(["PM", "LJ", "FJ"]);
@@ -111,6 +111,7 @@ export const WRTodoStepSchema = z.object({
   technicianComment: z.string().optional(),
   photoUrls: z.array(z.string()).optional(),
   isFavourable: z.boolean().optional(),
+  lastCorrectedBy: z.string().optional(), lastCorrectedAt: z.string().optional(), previousValue: z.unknown().optional(),
 });
 
 export const WR_Statuses: readonly WRStatusDefinition[] = Object.freeze([
@@ -202,6 +203,7 @@ export const BaseWorkRequestSchema = z.object({
   TradeId: z.string().min(1).optional(),
   TradeName: z.string().min(1).optional(),
   EquipmentCodes: z.array(z.string().min(1)).default([]),
+  ...PMTargetFields,
   PM_CycleKey: z.string().min(1).optional(),
   ScheduleId: z.string().min(1).optional(),
   ExpectedHours: z.number().nonnegative().optional(),
@@ -361,6 +363,9 @@ export const BaseWorkRequestSchema = z.object({
     photoPaths: z.array(z.string()).optional(),
     comment: z.string().optional(),
     completedAt: z.string(),
+    lastCorrectedBy: z.string().optional(),
+    lastCorrectedAt: z.string().optional(),
+    previousValue: z.unknown().optional(),
   })).optional(),
   // Long Job specific fields
   RequiresSAT: z.boolean().default(false),

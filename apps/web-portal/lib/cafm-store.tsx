@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { logChecklistCorrections } from "@cafm/shared-schema";
 import type { SiteId } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
 import { seedAccessProfiles, resolveEffectivePermissions } from "./access-profiles";
@@ -14,8 +15,8 @@ export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from 
 
 export { ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS, seedSiteData } from "./demo-seed";
 import { scopeData, withAccessProfileDefaults, seedData, SITE_ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES } from "./demo-seed";
-const STORAGE_KEY = "cafm-demo-data-v21";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v20", "cafm-demo-data-v19", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v22";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v21", "cafm-demo-data-v20", "cafm-demo-data-v19", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 function safeStorageSet(key: string, value: string): boolean {
@@ -299,7 +300,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     const before = JSON.stringify(expected);
     if (JSON.stringify(current.current) !== before) throw new Error("Data changed since preview. Run the dry-run again.");
     const optimistic = options?.optimistic === true;
-    next = reconcileAssurance(migratePmState(next));
+    next = reconcileAssurance(migratePmState({ ...next, workRequests: next.workRequests.map((wr) => {
+      const old = expected.workRequests.find((item) => item.WR_ID === wr.WR_ID && item.SiteId === wr.SiteId);
+      return old && old !== wr ? logChecklistCorrections(old, wr, personRef.current, new Date().toISOString()) : wr;
+    }) }));
     const after = JSON.stringify(next);
     busy.current = true;
     let committed = false;
@@ -311,13 +315,15 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next, ...(options?.forceReset ? { forceReset: true } : {}) });
       committed = true;
       revision.current = result.revision;
-      acknowledged.current = after;
+      if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Server returned an invalid saved state.");
+      const savedState = scopeData(withAccessProfileDefaults(result.state as DemoData, site), site);
+      acknowledged.current = JSON.stringify(savedState);
       if (JSON.stringify(current.current) !== (optimistic ? after : before)) {
         blocked.current = true;
         throw new Error("Changes were saved on the server, but local data changed during the commit. Local edits were retained; resolve the conflict.");
       }
-      current.current = next;
-      setData(next);
+      current.current = savedState;
+      setData(savedState);
       let cacheError: string | null = null;
       try {
         safeStorageSet(storageKey, acknowledged.current);
@@ -346,7 +352,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const reset = () => {
-    if (!window.confirm(`Replace saved demo data for ${site} with the Section 60 blueprint-family seed? This cannot be undone.`)) return;
+    if (!window.confirm(`Replace saved demo data for ${site} with the Section 61 equipment/location PM seed? This cannot be undone.`)) return;
     const previous = current.current;
     const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
     void commitSnapshot(previous, next, { forceReset: true }).catch((error: unknown) => {
@@ -359,7 +365,12 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const setUserData: React.Dispatch<React.SetStateAction<DemoData>> = (update) => {
     if (!connected.current) offlineEdits.current = true;
     setData((previous) => {
-      const next = reconcileAssurance(typeof update === "function" ? update(previous) : update);
+      let next = reconcileAssurance(typeof update === "function" ? update(previous) : update);
+      const now = new Date().toISOString();
+      next = { ...next, workRequests: next.workRequests.map((wr) => {
+        const old = previous.workRequests.find((item) => item.WR_ID === wr.WR_ID && item.SiteId === wr.SiteId);
+        return old && old !== wr ? logChecklistCorrections(old, wr, personRef.current, now) : wr;
+      }) };
       const workRequests = stampChangedWorkRequests(previous.workRequests, next.workRequests);
       return workRequests === next.workRequests ? next : { ...next, workRequests };
     });

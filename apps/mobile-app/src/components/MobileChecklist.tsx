@@ -74,10 +74,13 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
   const renderStep = (step: PM_StepDefinition) => {
     const result = values.find((item) => item.stepId === step.StepId);
     const val = result?.value;
+    const correction = result ?? wr.ChecklistSteps?.find((item) => item.StepId === step.StepId);
+    const correctedBy = result?.lastCorrectedBy ?? wr.ChecklistSteps?.find((item) => item.StepId === step.StepId)?.lastCorrectedBy ?? wr.todoSteps?.find((item) => item.id === step.StepId)?.lastCorrectedBy;
     const optionClass = (selected: boolean) => `flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left ${selected ? "border-2 border-blue-700 bg-blue-600 font-semibold text-white shadow-sm" : "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"}`;
     return <article key={step.StepId} className="space-y-3 rounded border bg-white p-4"><fieldset disabled={leaving || !editable} className="space-y-3">
       <FrequencyPill code={step.originFrequency} inherited={step.isInherited} />
       <h3 className="font-semibold">{step.StepNumber}. {step.StepTitle}</h3>
+      {correctedBy && <p className="text-xs text-amber-800" title={correction?.lastCorrectedAt}>✎ Corrected by {correctedBy}</p>}
       {step.replacesStepLabel && <p className="rounded bg-amber-50 p-2 text-xs text-amber-900">{step.replacesStepLabel}</p>}
       {step.Instruction && <p className="whitespace-pre-wrap text-sm text-slate-600">{step.Instruction}</p>}
       {step.InputType === "Boolean" && (todoMode ? <button type="button" aria-pressed={val !== undefined && val !== ""} className={optionClass(val !== undefined && val !== "")} onClick={() => change(step, { value: val !== undefined && val !== "" ? "" : "true", passed: result?.passed ?? true })}><span>☑ Completed</span><span>{val !== undefined && val !== "" ? "✓ Selected" : "○"}</span></button> : <div className="grid gap-2">{([true, false] as const).map((value) => <button type="button" key={String(value)} aria-pressed={val === String(value)} className={optionClass(val === String(value))} onClick={() => change(step, { value: String(value), passed: value === (step.favourableBoolean ?? true) })}><span>{value ? "Yes" : "No"}</span><span>{val === String(value) ? "● Selected" : "○"}</span></button>)}</div>)}

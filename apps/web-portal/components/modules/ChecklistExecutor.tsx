@@ -74,6 +74,7 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
         <button type="button" className="border rounded px-2 py-1" onClick={() => setTimerRunning((value) => !value)}>{timerRunning ? "Pause" : "Start"}</button>
       </div>
       <h3 className="font-semibold">{step.Title}</h3>
+      {(result?.lastCorrectedBy || step.lastCorrectedBy) && <p className="text-xs text-amber-800" title={result?.lastCorrectedAt ?? step.lastCorrectedAt}>✎ Corrected by {result?.lastCorrectedBy ?? step.lastCorrectedBy}</p>}
       {step.Instructions && <p>{step.Instructions}</p>}
       {step.InputType === "Boolean" && <div className="flex gap-2">
         {[true, false].map((value) => <button key={String(value)} type="button" aria-pressed={result?.value === String(value)}

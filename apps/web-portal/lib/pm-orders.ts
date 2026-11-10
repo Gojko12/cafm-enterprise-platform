@@ -1,5 +1,5 @@
-import { compileBlueprintChecklist, nextPmsOrderNumber, PM_ChecklistStandardSchema, PM_ScheduleSchema } from "@cafm/shared-schema";
-import type { Equipment, PM_ChecklistStandard, PM_Schedule, SuppressedPmOccurrence } from "@cafm/shared-schema";
+import { compileBlueprintChecklist, nextPmsOrderNumber, PM_ChecklistStandardSchema, PM_ScheduleSchema, pmTargetKey, pmTargetType } from "@cafm/shared-schema";
+import type { Equipment, PMTarget, PM_ChecklistStandard, PM_Schedule, SuppressedPmOccurrence, BlueprintAuditEntry } from "@cafm/shared-schema";
 import { frequencyOf, nextTickOnOrAfter, resolveBlueprintSchedule, shiftDays } from "./pm-suppression";
 
 export { nextPmsOrderNumber };
@@ -8,27 +8,44 @@ export function validateBlueprintFamilies(blueprints: PM_ChecklistStandard[]) {
 }
 export function sharedFamilyAnchor(schedules: PM_Schedule[], blueprints: PM_ChecklistStandard[], equipment: string, blueprint: PM_ChecklistStandard): string | undefined {
   if (blueprint.blueprintMode !== "family_ladder") return undefined;
-  return schedules.find((item) => item.IsActive && item.SiteId === blueprint.SiteId && item.EquipmentCodes.includes(equipment) &&
+  return schedules.find((item) => item.IsActive && item.SiteId === blueprint.SiteId && (pmTargetKey(item) === equipment || item.EquipmentCodes.includes(equipment)) &&
     blueprints.some((bp) => bp.ChecklistCode === item.ChecklistCode && bp.SiteId === blueprint.SiteId && bp.blueprintMode === "family_ladder" && bp.familyId === blueprint.familyId))?.anchorDate;
 }
 export function createPmOrder(schedules: PM_Schedule[], blueprints: PM_ChecklistStandard[], blueprint: PM_ChecklistStandard, equipment: Equipment, anchor: string, actor: string, highWatermark = 0): PM_Schedule {
-  if (schedules.some((item) => item.IsActive && item.SiteId === equipment.SiteId && item.ChecklistCode === blueprint.ChecklistCode && item.EquipmentCodes.includes(equipment.EquipmentCode)))
-    throw new Error(`${equipment.EquipmentCode} already has an active order for ${blueprint.Title}.`);
-  const date = sharedFamilyAnchor(schedules, blueprints, equipment.EquipmentCode, blueprint) ?? anchor;
+  return createTargetPmOrder(schedules, blueprints, blueprint, { ...equipment, targetType: "equipment", equipmentCode: equipment.EquipmentCode }, anchor, actor, highWatermark);
+}
+export function createTargetPmOrder(schedules: PM_Schedule[], blueprints: PM_ChecklistStandard[], blueprint: PM_ChecklistStandard, target: PMTarget & { SiteId: PM_Schedule["SiteId"] }, anchor: string, actor: string, highWatermark = 0): PM_Schedule {
+  const key = pmTargetKey(target), type = pmTargetType(target);
+  if (blueprint.SiteId && blueprint.SiteId !== target.SiteId) throw new Error("Blueprint and target must belong to the same site.");
+  if (schedules.some((item) => item.IsActive && item.SiteId === target.SiteId && item.ChecklistCode === blueprint.ChecklistCode && pmTargetKey(item) === key))
+    throw new Error(`${key} already has an active order for ${blueprint.Title}.`);
+  const date = sharedFamilyAnchor(schedules, blueprints, key, blueprint) ?? anchor;
   const base = resolveBlueprintSchedule({
-    ScheduleId: nextPmsOrderNumber(schedules, highWatermark), ChecklistCode: blueprint.ChecklistCode, SiteId: equipment.SiteId,
-    EquipmentCodes: [equipment.EquipmentCode], bl_id: equipment.bl_id, LevelName: equipment.LevelName, RoomCode: equipment.RoomCode,
+    ScheduleId: nextPmsOrderNumber(schedules, highWatermark), ChecklistCode: blueprint.ChecklistCode, SiteId: target.SiteId,
+    targetType: type, targetKey: key, equipmentCode: type === "equipment" ? target.equipmentCode ?? target.EquipmentCode : undefined,
+    EquipmentCodes: type === "equipment" ? [target.equipmentCode ?? target.EquipmentCode!] : [],
+    bl_id: target.bl_id, LevelName: target.levelName ?? target.LevelName, RoomCode: target.roomCode ?? target.RoomCode,
+    levelName: target.levelName ?? target.LevelName, roomCode: target.roomCode ?? target.RoomCode,
     Frequency: "Monthly", FrequencyInterval: 1, anchorDate: date, NextDueDate: date, LeadTimeDays: 14, MarginWindowDays: 7,
     Title: blueprint.Title, CreatedBy: actor, CreatedAt: new Date().toISOString(), IsActive: true,
   }, blueprints);
   return { ...base, NextDueDate: nextTickOnOrAfter(base, shiftDays(date, 1)) };
+}
+export function nextBlueprintCode(blueprints: PM_ChecklistStandard[], frequency: string, high = 0): string {
+  const next = Math.max(high, 0, ...blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))) + 1;
+  if (next > 9999) throw new Error("Blueprint number range exhausted.");
+  return `CB-${String(next).padStart(4, "0")}-${frequency}`;
+}
+export function nextFamilyId(blueprints: PM_ChecklistStandard[]): string {
+  const next = Math.max(0, ...blueprints.map((bp) => Number(/^FAM-(\d+)$/.exec(bp.familyId ?? "")?.[1] ?? 0))) + 1;
+  return `FAM-${String(next).padStart(3, "0")}`;
 }
 export function changeFamilyAnchor(schedules: PM_Schedule[], blueprints: PM_ChecklistStandard[], schedule: PM_Schedule, anchor: string): PM_Schedule[] {
   const blueprint = blueprints.find((item) => item.ChecklistCode === schedule.ChecklistCode && (!item.SiteId || item.SiteId === schedule.SiteId));
   if (!blueprint) throw new Error("Blueprint not found.");
   return schedules.map((item) => {
     const sibling = blueprints.find((bp) => bp.ChecklistCode === item.ChecklistCode && (!bp.SiteId || bp.SiteId === item.SiteId));
-    if (item.SiteId !== schedule.SiteId || item.EquipmentCodes[0] !== schedule.EquipmentCodes[0] ||
+    if (item.SiteId !== schedule.SiteId || pmTargetKey(item) !== pmTargetKey(schedule) ||
       (blueprint.blueprintMode === "standalone" ? item.ScheduleId !== schedule.ScheduleId : sibling?.blueprintMode !== "family_ladder" || sibling.familyId !== blueprint.familyId)) return item;
     const updated = resolveBlueprintSchedule({ ...item, anchorDate: anchor }, blueprints);
     return { ...updated, NextDueDate: nextTickOnOrAfter(updated, shiftDays(anchor, 1)), UpdatedAt: new Date().toISOString() };
@@ -36,7 +53,39 @@ export function changeFamilyAnchor(schedules: PM_Schedule[], blueprints: PM_Chec
 }
 
 type ReferencedWr = { WR_ID: string; SiteId?: unknown; ScheduleId?: unknown; PM_CycleKey?: unknown; ChecklistInstances?: unknown; CraftpersonAssignments?: unknown; EquipmentCodes?: unknown };
-type PmState = { pmModelVersion?: 60; pmMigrationNotes?: string[]; blueprints: PM_ChecklistStandard[]; schedules: PM_Schedule[]; workRequests: ReferencedWr[]; suppressedPmOccurrences?: SuppressedPmOccurrence[]; deletedWorkRequests?: ReferencedWr[] };
+type PmState = { pmModelVersion?: 60; pmMigrationNotes?: string[]; blueprintAuditLog?: BlueprintAuditEntry[]; blueprints: PM_ChecklistStandard[]; schedules: PM_Schedule[]; workRequests: ReferencedWr[]; suppressedPmOccurrences?: SuppressedPmOccurrence[]; deletedWorkRequests?: ReferencedWr[] };
+
+function renameBlueprints<T extends PmState>(state: T, occupied = new Set<string>(), floor = 0): T {
+  let high = Math.max(floor, 0, ...[...occupied].map((code) => Number(code.slice(3))), ...state.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0)));
+  const map = new Map<string, string>(), families = new Map<string, string>();
+  const familyHigh = Math.max(0, ...state.blueprints.map((bp) => Number(/^FAM-(\d+)$/.exec(bp.familyId ?? "")?.[1] ?? 0)));
+  let familyNumber = familyHigh;
+  const blueprints = state.blueprints.map((bp) => {
+    let code = bp.ChecklistCode;
+    if (/^CB-\d{4}-/.test(code) && !code.endsWith(`-${bp.frequencyCode}`)) throw new Error(`Blueprint ${code} does not match its locked frequency.`);
+    if (!/^CB-(?!0000)\d{4}-(01D|01W|02W|01M|03M|06M|01Y|02Y|05Y)$/.test(code) || occupied.has(code.slice(0, 7))) {
+      if (++high > 9999) throw new Error("Blueprint number range exhausted during migration.");
+      code = `CB-${String(high).padStart(4, "0")}-${bp.frequencyCode}`;
+    }
+    occupied.add(code.slice(0, 7)); map.set(`${bp.SiteId}:${bp.ChecklistCode}`, code);
+    let familyId = bp.familyId;
+    if (familyId && !/^FAM-\d{3,}$/.test(familyId)) {
+      const key = `${bp.SiteId}:${familyId}`;
+      if (!families.has(key)) families.set(key, `FAM-${String(++familyNumber).padStart(3, "0")}`);
+      familyId = families.get(key);
+    }
+    return { ...bp, ChecklistCode: code, familyId };
+  });
+  const codeFor = (site: unknown, code: unknown) => map.get(`${site}:${code}`) ?? code;
+  const remapWr = <W extends ReferencedWr>(wr: W): W => {
+    const record = wr as W & { ChecklistStandardCode?: string };
+    return { ...wr, ...(record.ChecklistStandardCode ? { ChecklistStandardCode: codeFor(wr.SiteId, record.ChecklistStandardCode) } : {}),
+      ChecklistInstances: Array.isArray(wr.ChecklistInstances) ? wr.ChecklistInstances.map((step: Record<string, unknown>) => ({ ...step, ChecklistCode: codeFor(wr.SiteId, step.ChecklistCode) })) : wr.ChecklistInstances };
+  };
+  return { ...state, blueprints, blueprintAuditLog: state.blueprintAuditLog?.map((entry) => ({ ...entry, blueprintCode: String(codeFor(entry.siteId, entry.blueprintCode)) })),
+    schedules: state.schedules.map((order) => resolveBlueprintSchedule({ ...order, ChecklistCode: String(codeFor(order.SiteId, order.ChecklistCode)) }, blueprints)),
+    workRequests: state.workRequests.map(remapWr), deletedWorkRequests: state.deletedWorkRequests?.map(remapWr) };
+}
 
 // Legacy fields are accepted at the boundary, then deterministically converted without rewriting executed checklist snapshots.
 export function migratePmState<T extends PmState>(state: T): T {
@@ -45,24 +94,24 @@ export function migratePmState<T extends PmState>(state: T): T {
     validateBlueprintFamilies(blueprints);
     const ids = new Set<string>(), assignments = new Set<string>(), anchors = new Map<string, string>();
     const schedules = state.schedules.map((item) => {
-      PM_ScheduleSchema.parse(item);
+      const parsed = PM_ScheduleSchema.parse(item);
       const id = `${item.SiteId}:${item.ScheduleId}`;
       if (ids.has(id)) throw new Error(`Duplicate PMS order #${item.ScheduleId}.`);
       ids.add(id);
-      const order = resolveBlueprintSchedule(item, blueprints);
+      const order = resolveBlueprintSchedule(parsed, blueprints);
       if (order.IsActive) {
-        const assignment = `${order.SiteId}:${order.EquipmentCodes[0]}:${order.ChecklistCode}`;
+        const assignment = `${order.SiteId}:${pmTargetKey(order)}:${order.ChecklistCode}`;
         if (assignments.has(assignment)) throw new Error(`Duplicate blueprint assignment for equipment ${order.EquipmentCodes[0]}.`);
         assignments.add(assignment);
         if (order.suppressionMode !== "independent") {
-          const family = `${order.SiteId}:${order.EquipmentCodes[0]}:${order.suppressionGroupKey}`;
+          const family = `${order.SiteId}:${pmTargetKey(order)}:${order.suppressionGroupKey}`;
           if (anchors.has(family) && anchors.get(family) !== order.anchorDate) throw new Error(`Family orders on ${order.EquipmentCodes[0]} must share one anchor date.`);
           anchors.set(family, order.anchorDate!);
         }
       }
       return order;
     });
-    return { ...state, blueprints, schedules };
+    return renameBlueprints({ ...state, blueprints, schedules });
   }
   const blueprints: PM_ChecklistStandard[] = [];
   const blueprintMap = new Map<string, string>();
@@ -108,19 +157,18 @@ export function migratePmState<T extends PmState>(state: T): T {
   const schedules: PM_Schedule[] = [];
   const notes = [...(state.pmMigrationNotes ?? [])];
   for (const old of state.schedules) {
-    if (!old.EquipmentCodes.length) throw new Error(`Legacy PMS ${old.ScheduleId} has no equipment. Assign equipment before migrating this order.`);
     const ids: string[] = [];
-    for (const equipment of old.EquipmentCodes) {
+    for (const equipment of old.EquipmentCodes.length ? old.EquipmentCodes : old.equipmentCode ? [old.equipmentCode] : [""]) {
       const retain = ids.length === 0 && /^(?!00000)\d{5}$/.test(old.ScheduleId);
       if (!retain && ++number > 99999) throw new Error("PMS order number range exhausted during migration.");
       const id = retain ? old.ScheduleId : String(number).padStart(5, "0");
       const blueprintId = blueprintMap.get(key(old.SiteId, old.ScheduleId)) ?? old.ChecklistCode;
       const blueprint = blueprints.find((item) => item.ChecklistCode === blueprintId && (!item.SiteId || item.SiteId === old.SiteId));
       if (!blueprint) throw new Error(`Missing blueprint for PMS ${old.ScheduleId}.`);
-      const anchor = sharedFamilyAnchor(schedules, blueprints, equipment, blueprint) ?? old.anchorDate ?? old.sharedAnchorDate ?? old.NextDueDate.slice(0, 10);
+      const anchor = sharedFamilyAnchor(schedules, blueprints, equipment || pmTargetKey(old), blueprint) ?? old.anchorDate ?? old.sharedAnchorDate ?? old.NextDueDate.slice(0, 10);
       const duplicate = old.IsActive && schedules.some((item) => item.IsActive && item.SiteId === old.SiteId && item.ChecklistCode === blueprintId && item.EquipmentCodes.includes(equipment));
       if (duplicate) notes.push(`Legacy duplicate PMS ${old.ScheduleId} retained as inactive PMS #${id}; existing WR history is preserved.`);
-      schedules.push(resolveBlueprintSchedule({ ...old, ScheduleId: id, ChecklistCode: blueprintId, EquipmentCodes: [equipment], anchorDate: anchor, IsActive: duplicate ? false : old.IsActive }, blueprints));
+      schedules.push(resolveBlueprintSchedule({ ...old, ScheduleId: id, ChecklistCode: blueprintId, EquipmentCodes: equipment ? [equipment] : [], anchorDate: anchor, IsActive: duplicate ? false : old.IsActive }, blueprints));
       ids.push(id);
     }
     idMap.set(key(old.SiteId, old.ScheduleId), ids);
@@ -156,7 +204,7 @@ function remapPmsReferences<T extends PmState>(state: T, mapId: (site: unknown, 
   return { ...state, workRequests: state.workRequests.map(remapWr), deletedWorkRequests: state.deletedWorkRequests?.map(remapWr),
     suppressedPmOccurrences: state.suppressedPmOccurrences?.map((log) => {
       const lower = log.suppressedPmsId ? String(mapId(log.siteId, log.suppressedPmsId, [log.equipmentCode])) : undefined;
-      return { ...log, id: lower ? `suppressed:${log.siteId}:${lower}:${log.equipmentCode}:${log.dueDate}` : log.id,
+      return { ...log, id: lower ? `suppressed:${log.siteId}:${lower}:${log.targetType && log.targetType !== "equipment" ? log.targetKey : log.equipmentCode}:${log.dueDate}` : log.id,
         suppressedPmsId: lower,
         coveredByPmsId: log.coveredByPmsId ? String(mapId(log.siteId, log.coveredByPmsId, [log.equipmentCode])) : undefined };
     }) };
@@ -164,6 +212,8 @@ function remapPmsReferences<T extends PmState>(state: T, mapId: (site: unknown, 
 
 export function uniquePmsOrdersAcrossSites<T extends PmState>(states: T[]): T[] {
   const used = new Set<string>();
+  const usedBlueprints = new Set<string>();
+  const blueprintHigh = Math.max(0, ...states.flatMap((state) => state.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))));
   let high = Math.max(0, ...states.flatMap((state) => state.schedules.map((order) => Number(order.ScheduleId))));
   return states.map((state) => {
     const map = new Map<string, string>();
@@ -176,8 +226,9 @@ export function uniquePmsOrdersAcrossSites<T extends PmState>(states: T[]): T[] 
       used.add(id); map.set(`${order.SiteId}:${order.ScheduleId}`, id);
       return id === order.ScheduleId ? order : { ...order, ScheduleId: id };
     });
-    if (schedules.every((order, index) => order === state.schedules[index])) return state;
-    return remapPmsReferences({ ...state, schedules, pmMigrationNotes: [...(state.pmMigrationNotes ?? []), "PMS order IDs were reallocated to avoid collisions with another site; all WR and compliance references were migrated."] },
-      (site, id) => map.get(`${site}:${id}`) ?? id);
+    const next = schedules.every((order, index) => order === state.schedules[index]) ? state :
+      remapPmsReferences({ ...state, schedules, pmMigrationNotes: [...(state.pmMigrationNotes ?? []), "PMS order IDs were reallocated to avoid collisions with another site; all WR and compliance references were migrated."] },
+        (site, id) => map.get(`${site}:${id}`) ?? id);
+    return renameBlueprints(next, usedBlueprints, blueprintHigh);
   });
 }
