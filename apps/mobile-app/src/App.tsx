@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { initOfflineEngine, OfflineEngine } from "./lib/offline-engine";
 import { getDB } from "./lib/db";
 import {
-  MobileHeader,
+  MobileDrawer,
+  MenuButton,
   TechnicianHome,
   AdvancedFilterPanel,
   QRScanner,
@@ -29,6 +30,7 @@ import { applyFilters, useFilterStore } from "./lib/store";
 import { classifyEquipmentWRs } from "./lib/equipment-wrs";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
+import type { WorkType } from "./components/TechnicianHome";
 import { ExecutionHub } from "./components/ExecutionHub";
 import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
 import { FieldUpdateModal } from "./components/FieldUpdateModal";
@@ -121,13 +123,25 @@ export default function App() {
   const [resetSignal, setResetSignal] = useState(0);
   const [pctOpen, setPctOpen] = useState(false);
   const substatusInitSite = useRef<string | null>(null);
+  const [workType, setWorkType] = useState<WorkType>("All");
+  const [homeTab, setHomeTab] = useState<"my-wrs" | "unassigned">("my-wrs");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const siteDefaultPercents = (() => {
+    const values = [...new Set(siteWRs.map((wr) => Number(wr.Percentage)).filter(Number.isFinite))].sort((a, b) => a - b);
+    const preferred = values.filter((value) => value === 50 || value === 55);
+    return preferred.length ? preferred : values.filter((value) => value < 78);
+  })();
+  const defaultSubstatuses = siteDefaultPercents;
+  const defaultKey = siteDefaultPercents.join(",");
+  // Options are scoped to the selected work type, My/Unassigned scope, and the location/trade filters.
   const percentCounts = new Map<number, number>();
-  for (const wr of siteWRs) { const value = Number(wr.Percentage); if (Number.isFinite(value)) percentCounts.set(value, (percentCounts.get(value) ?? 0) + 1); }
+  const optionPool = applyFilters((homeTab === "my-wrs" ? myWRs : unassignedWRs).filter((wr) => workType === "All" || wr.WR_Type === workType), { ...appliedFilters, selectedSubstatuses: [] });
+  for (const wr of optionPool) { const value = Number(wr.Percentage); if (Number.isFinite(value)) percentCounts.set(value, (percentCounts.get(value) ?? 0) + 1); }
   const substatusOptions = [...percentCounts.entries()].sort(([a], [b]) => a - b).map(([value, count]) => ({ value, count }));
   const existingPercents = substatusOptions.map((option) => option.value);
-  const preferredPercents = existingPercents.filter((value) => value === 50 || value === 55);
-  const defaultSubstatuses = preferredPercents.length ? preferredPercents : existingPercents.filter((value) => value < 78);
-  const defaultKey = defaultSubstatuses.join(",");
+  const rawPercents = appliedFilters.selectedSubstatuses ?? [];
+  const effectivePercents = rawPercents.length && !rawPercents.some((value) => existingPercents.includes(value)) ? existingPercents.filter((value) => value < 78) : rawPercents;
+  const effectiveFilters: FilterCriteria = effectivePercents === rawPercents ? appliedFilters : { ...appliedFilters, selectedSubstatuses: effectivePercents };
   useEffect(() => {
     if (loadedSite !== activeSiteId || !siteWRs.length || substatusInitSite.current === activeSiteId) return;
     substatusInitSite.current = activeSiteId;
@@ -141,13 +155,14 @@ export default function App() {
     useFilterStore.setState({ filters: base });
     setAppliedFilters(base);
     setPctOpen(false);
+    setWorkType("All");
     setResetSignal((value) => value + 1);
   };
   const setPercents = (values: number[]) => {
     useFilterStore.getState().setFilter("selectedSubstatuses", values);
     setAppliedFilters((current) => ({ ...current, selectedSubstatuses: values }));
   };
-  const appliedPercents = appliedFilters.selectedSubstatuses ?? [];
+  const appliedPercents = effectivePercents;
   const percentChip = existingPercents.length ? (
     <>
       <button type="button" aria-expanded={pctOpen} onClick={() => setPctOpen((open) => !open)} className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">{appliedPercents.length ? appliedPercents.map((value) => `${value}%`).join(", ") : "All %"} {"\u25be"}</button>
@@ -507,9 +522,14 @@ export default function App() {
     navigationRef: checklistNavigation,
   };
 
+  const offlineNow = isSimulatedOffline || !browserOnline || !apiReachable;
+  const menuButton = <MenuButton onClick={() => setMenuOpen(true)} badge={offlineNow ? "offline" : pendingCount > 0 ? "pending" : null} />;
+  const pageTitles: Partial<Record<AppView, string>> = { scanner: "Scan QR", timers: "Timers", "audit-assurance": "Audit & Assurance", settings: "Profile" };
+  const pageTitle = pageTitles[currentView];
+
   // Render based on current view
   const renderContent = () => {
-    if (currentView === "settings") return <section className="space-y-4 p-4 pb-32"><div className="flex items-start justify-between"><h1 className="text-xl font-bold">Profile</h1><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-400">{MOBILE_APP_VERSION}</span></div><div className="rounded-xl border bg-white p-3"><strong>{technicianName || "Select technician"}</strong><p>{activeSiteId} · {access?.primaryRole ?? "Technician"}</p><p className="text-sm">VPA trades: {vpaTrades.join(", ") || "None"}</p></div><button className="rounded border bg-white p-3" onClick={() => handleToggleOfflineMode(!isSimulatedOffline)}>{isSimulatedOffline ? "🟢 Resume online" : "📴 Simulate offline"}</button><div className="rounded-xl border bg-white p-3"><strong>Field reports</strong><p>{siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} submitted updates</p></div><button className="rounded border bg-white p-3" onClick={() => setShareOpen(true)}>📱 Share / Open on Phone (QR &amp; URL)</button><details className="rounded-xl border bg-white p-3"><summary>Advanced Developer Options</summary><label className="block">API base URL (blank uses same origin)<input className="block w-full border p-2" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://example.com" /></label>{settingsError && <p role="alert" className="text-red-700">{settingsError}</p>}<button className="rounded border bg-white p-2" onClick={() => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } }}>Save API base</button></details><p className="text-sm">Offline refresh requires a previously installed production build over HTTPS or localhost.</p><div className="flex items-center justify-between text-[11px] text-slate-400"><span>CAFM Mobile · {MOBILE_APP_VERSION}</span><button className="underline" onClick={() => { void (async () => { try { const regs = await navigator.serviceWorker?.getRegistrations?.() ?? []; await Promise.all(regs.map((reg) => reg.unregister())); if ("caches" in window) await Promise.all((await caches.keys()).map((key) => caches.delete(key))); } finally { window.location.reload(); } })(); }}>↻ Force App Reload</button></div></section>;
+    if (currentView === "settings") return <section className="space-y-4 p-4 pb-32"><div className="flex items-start justify-between"><span className="text-sm text-slate-500">Profile &amp; Settings</span><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-400">{MOBILE_APP_VERSION}</span></div><div className="rounded-xl border bg-white p-3"><strong>{technicianName || "Select technician"}</strong><p>{activeSiteId} · {access?.primaryRole ?? "Technician"}</p><p className="text-sm">VPA trades: {vpaTrades.join(", ") || "None"}</p></div><button className="rounded border bg-white p-3" onClick={() => handleToggleOfflineMode(!isSimulatedOffline)}>{isSimulatedOffline ? "🟢 Resume online" : "📴 Simulate offline"}</button><div className="rounded-xl border bg-white p-3"><strong>Field reports</strong><p>{siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} submitted updates</p></div><button className="rounded border bg-white p-3" onClick={() => setShareOpen(true)}>📱 Share / Open on Phone (QR &amp; URL)</button><details className="rounded-xl border bg-white p-3"><summary>Advanced Developer Options</summary><label className="block">API base URL (blank uses same origin)<input className="block w-full border p-2" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://example.com" /></label>{settingsError && <p role="alert" className="text-red-700">{settingsError}</p>}<button className="rounded border bg-white p-2" onClick={() => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } }}>Save API base</button></details><p className="text-sm">Offline refresh requires a previously installed production build over HTTPS or localhost.</p><div className="flex items-center justify-between text-[11px] text-slate-400"><span>CAFM Mobile · {MOBILE_APP_VERSION}</span><button className="underline" onClick={() => { void (async () => { try { const regs = await navigator.serviceWorker?.getRegistrations?.() ?? []; await Promise.all(regs.map((reg) => reg.unregister())); if ("caches" in window) await Promise.all((await caches.keys()).map((key) => caches.delete(key))); } finally { window.location.reload(); } })(); }}>↻ Force App Reload</button></div></section>;
     switch (currentView) {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
@@ -608,11 +628,17 @@ export default function App() {
               onResetFilters={handleResetFilters}
               substatusOptions={substatusOptions}
               defaultSubstatuses={defaultSubstatuses}
+              workType={workType}
+              onWorkTypeChange={setWorkType}
             />}
               substatusChip={percentChip}
               resetSignal={resetSignal}
-              myWRs={applyFilters(myWRs, appliedFilters)}
-              unassignedWRs={applyFilters(unassignedWRs, appliedFilters)}
+              menuButton={menuButton}
+              type={workType}
+              onTypeChange={setWorkType}
+              onTabChange={setHomeTab}
+              myWRs={applyFilters(myWRs, effectiveFilters)}
+              unassignedWRs={applyFilters(unassignedWRs, effectiveFilters)}
               onClaimWR={access?.permissions.canClaimUnassignedWR ? handleClaimWR : undefined}
               onOpenWR={handleOpenWR}
               onReport={setFieldWR}
@@ -628,13 +654,20 @@ export default function App() {
     <>
     <button className="desktop-frame-toggle" onClick={() => setPhoneFrame((value) => !value)}>{phoneFrame ? "🖥️ Full Width" : "📱 Phone Frame (390×844)"}</button>
     <div className={`fixed inset-0 bg-gray-50 mobile-app ${phoneFrame ? "phone-frame" : ""}`}>
-      {/* Header */}
-      <MobileHeader
+      {/* Drawer */}
+      <MobileDrawer
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
         activeSiteId={activeSiteId}
         technicianId={currentTechnicianId}
         technicians={technicians}
         profiles={profiles}
         vpaTrades={vpaTrades}
+        version={MOBILE_APP_VERSION}
+        timerCount={timers.length}
+        currentView={currentView}
+        onNavigate={(view) => { setMenuOpen(false); navigateSafely(() => { setSelectedWR(null); setCurrentView(view); }); }}
+        onToggleOffline={handleToggleOfflineMode}
         onTechnicianChange={(id) => { if ((currentView !== "home" && currentView !== "settings") || fieldWR) { notify("Close the editor before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
         onSiteChange={(site) => {
           if ((currentView !== "home" && currentView !== "settings") || fieldWR) {
@@ -645,11 +678,12 @@ export default function App() {
         }}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}
-        isOffline={isSimulatedOffline || !browserOnline || !apiReachable}
+        isOffline={offlineNow}
         pendingCount={pendingCount}
       />
-      {toast && <div role="status" className="absolute left-3 right-3 top-16 z-[100] rounded-xl bg-slate-800 p-3 text-sm text-white shadow-lg">{toast}<button className="float-right" onClick={() => setToast("")} aria-label="Dismiss">✕</button></div>}
-      {(isSimulatedOffline || !browserOnline || !apiReachable) && <p role="status" className="bg-amber-100 px-3 py-2 text-sm text-amber-950">📴 OFFLINE MODE — Timer sessions, checklist answers, photos &amp; Sophia inspections are saved on device ({pendingCount} changes queued).</p>}
+      {pageTitle && <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">{menuButton}<h1 className="text-base font-semibold text-slate-900">{pageTitle}</h1></div>}
+      {toast && <div role="status" className="absolute left-3 right-3 top-3 z-[100] rounded-xl bg-slate-800 p-3 text-sm text-white shadow-lg">{toast}<button className="float-right" onClick={() => setToast("")} aria-label="Dismiss">✕</button></div>}
+      {offlineNow && <p role="status" className="bg-amber-100 px-3 py-2 text-sm text-amber-950">📴 OFFLINE MODE — Timer sessions, checklist answers, photos &amp; Sophia inspections are saved on device ({pendingCount} changes queued).</p>}
       {installError && <p role="alert" className="bg-amber-100 p-2 text-sm">Offline app installation failed. Keep this page open and reconnect before refreshing.</p>}
       {syncNotice && <p role="status" className="bg-emerald-100 px-3 py-1.5 text-xs text-emerald-900">{syncNotice}</p>}
 
@@ -665,9 +699,7 @@ export default function App() {
           {([
             ["home", "WRs", "M9 5h6M9 3h6v4H9z M6 5H4v16h16V5h-2 M8 11h8 M8 15h8"],
             ["scanner", "Scan QR", "M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5 M8 8h3v3H8z M14 8h2v2h-2z M8 14h2v2H8z M14 14h3v3h-3z"],
-            ["audit-assurance", "Audit", "M12 3 4 6v5c0 5 3 8 8 10 5-2 8-5 8-10V6z M8 12l3 3 5-6"],
             ["timers", "Timers", "M9 2h6 M12 7V4 M12 12v4l3 2 M20 13a8 8 0 1 1-16 0 8 8 0 0 1 16 0z"],
-            ["settings", "Profile", "M4 7h16 M4 17h16 M8 4v6 M16 14v6"],
           ] as const).map(([view, label, icon]) => <button key={view} onClick={() => navigateSafely(() => setCurrentView(view))} className={`relative flex flex-1 flex-col items-center gap-1 py-2 text-xs ${currentView === view ? "text-blue-700" : "text-slate-600"}`} aria-current={currentView === view ? "page" : undefined}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={icon} /></svg>{view === "timers" && timers.length > 0 && <span className="absolute right-4 top-0 rounded-full bg-emerald-600 px-1 text-white">{timers.length}</span>}{label}</button>)}
         </nav>
       {shareOpen && <PhoneShare initialUrl={`${window.location.origin}${window.location.pathname}`} onClose={() => setShareOpen(false)} />}

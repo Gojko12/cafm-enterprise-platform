@@ -1,5 +1,5 @@
 // Component exports
-export { MobileHeader } from "./MobileHeader";
+export { MobileDrawer, MenuButton } from "./MobileDrawer";
 export { TechnicianHome } from "./TechnicianHome";
 export { WRPreviewCard } from "./WRPreviewCard";
 export { AdvancedFilterPanel } from "./AdvancedFilterPanel";

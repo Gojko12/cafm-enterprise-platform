@@ -105,7 +105,9 @@ export class OfflineEngine {
   /**
    * Write work request to local persistence
    */
-  async saveWorkRequest(wr: BaseWorkRequest, expectedBase?: BaseWorkRequest | null): Promise<void> {
+  async saveWorkRequest(input: BaseWorkRequest, expectedBase?: BaseWorkRequest | null): Promise<void> {
+    const stampedAt = new Date().toISOString();
+    const wr = { ...input, updatedAt: stampedAt, UpdatedAt: stampedAt } as BaseWorkRequest;
     const db = await getDB();
     const tx = db.transaction(["workRequests", "syncQueue"], "readwrite");
     const previous = await tx.objectStore("workRequests").get(wr.WR_ID);

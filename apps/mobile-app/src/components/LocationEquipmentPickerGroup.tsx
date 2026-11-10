@@ -243,12 +243,12 @@ function PickerModal<T>({
   const [query, setQuery] = useState("");
   const filtered = items.filter((item) => matches(item, query.trim().toLowerCase()));
   return (
-    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] bg-slate-900/50 flex items-end sm:items-center justify-center">
       <section
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-xl max-h-[85vh] bg-white rounded-lg shadow-xl flex flex-col"
+        className="w-full max-w-xl max-h-[85dvh] bg-white rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl flex flex-col"
       >
         <header className="px-4 py-3 border-b flex items-center justify-between">
           <h3 className="text-lg font-semibold">{title}</h3>
@@ -469,14 +469,14 @@ function SelectEquipmentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-end justify-center p-3">
+    <div className="fixed inset-0 z-[100] bg-slate-900/50 flex items-end sm:items-center justify-center">
       <section
         role="dialog"
         aria-modal="true"
         aria-label="Select Equipment"
-        className="w-full max-w-3xl max-h-[94vh] bg-white rounded-t-xl flex flex-col"
+        className="w-full max-w-3xl max-h-[85dvh] flex flex-col rounded-t-2xl sm:rounded-2xl bg-white overflow-hidden shadow-2xl"
       >
-        <header className="px-4 py-3 border-b flex items-center justify-between">
+        <header className="shrink-0 px-4 py-3 border-b flex items-center justify-between">
           <h3 className="text-lg font-bold">Select Equipment</h3>
           <span className="text-sm text-blue-700">{stagedSelection.size} selected</span>
         </header>
@@ -484,12 +484,12 @@ function SelectEquipmentModal({
           type="button"
           aria-expanded={filtersExpanded}
           onClick={() => setFiltersExpanded((expanded) => !expanded)}
-          className="px-4 py-3 text-left font-medium border-b"
+          className="shrink-0 px-4 py-2.5 text-left text-sm font-medium border-b"
         >
           Filter {filtersExpanded ? "▲" : "▼"}
         </button>
         {filtersExpanded && (
-          <div className="p-4 border-b space-y-3">
+          <div className="shrink-0 max-h-[40dvh] overflow-y-auto p-4 border-b space-y-3">
             <LocationEquipmentPickerGroup
               buildings={buildings}
               floors={floors}
@@ -518,59 +518,59 @@ function SelectEquipmentModal({
             </div>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
           {filteredEquipment.map((item) => {
             const isSelected = stagedSelection.has(item.EquipmentCode);
             return (
-              <article
+              <button
                 key={item.EquipmentCode}
-                className="p-3 border rounded-lg space-y-1"
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => toggle(item.EquipmentCode)}
+                className={`w-full text-left px-3 py-2 rounded-xl border flex items-center justify-between gap-3 ${
+                  isSelected ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                }`}
               >
-                <div className="font-semibold">EQ: {item.EquipmentCode}</div>
-                <div className="text-sm">{item.EquipmentName}</div>
-                <div className="text-xs text-gray-500">
-                  {item.RoomCode} • {item.LevelName} • {item.bl_id}
-                </div>
-                <button
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => toggle(item.EquipmentCode)}
-                  className={`w-full px-3 py-2 rounded text-white font-medium ${
-                    isSelected
-                      ? "bg-orange-500 hover:bg-orange-600"
-                      : "bg-blue-600 hover:bg-blue-700"
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">{item.EquipmentCode} {"\u00b7"} {item.EquipmentName}</span>
+                  <span className="block truncate text-xs text-slate-500">{item.RoomCode} {"\u00b7"} {item.LevelName} {"\u00b7"} {item.bl_id}</span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`h-6 w-6 shrink-0 rounded-full border flex items-center justify-center text-xs font-bold ${
+                    isSelected ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 text-transparent"
                   }`}
                 >
-                  {isSelected ? "Unselect" : "Select"}
-                </button>
-              </article>
+                  {"\u2713"}
+                </span>
+              </button>
             );
           })}
           {filteredEquipment.length === 0 && (
             <p className="py-8 text-center text-sm text-gray-500">No equipment found</p>
           )}
         </div>
-        <footer className="sticky bottom-0 bg-white border-t px-4 py-3 flex flex-wrap gap-2">
+        <footer className="shrink-0 border-t bg-white px-3.5 py-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex gap-2">
           <button
             type="button"
             onClick={() => setStagedSelection(new Set<string>())}
-            className="flex-1 min-w-[8rem] px-3 py-2 bg-orange-500 text-white rounded"
+            className="px-3 py-2 rounded-xl border border-slate-300 text-sm text-slate-700"
           >
-            Unselect All
+            Clear
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 min-w-[8rem] px-3 py-2 bg-gray-200 text-gray-800 rounded"
+            className="px-3 py-2 rounded-xl border border-slate-300 text-sm text-slate-700"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={() => onConfirm(new Set(stagedSelection))}
-            className="flex-1 min-w-[8rem] px-3 py-2 bg-blue-600 text-white rounded"
+            className="flex-1 px-3 py-2 rounded-xl bg-blue-600 text-sm font-semibold text-white"
           >
-            Confirm Selection
+            Apply Selection ({stagedSelection.size})
           </button>
         </footer>
       </section>

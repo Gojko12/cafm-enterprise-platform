@@ -15,6 +15,8 @@ interface AdvancedFilterPanelProps {
   onResetFilters: () => void;
   substatusOptions: { value: number; count: number }[];
   defaultSubstatuses: number[];
+  workType: "All" | "PM" | "FJ" | "LJ";
+  onWorkTypeChange: (type: "All" | "PM" | "FJ" | "LJ") => void;
   resultCount: number;
 }
 
@@ -30,6 +32,8 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   onResetFilters,
   substatusOptions,
   defaultSubstatuses,
+  workType,
+  onWorkTypeChange,
   resultCount,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -110,6 +114,13 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
                 onLocationChange={({ building, floor, room }) => set({ bl_id: building?.bl_id, levelName: floor?.LevelName, roomCode: room?.RoomCode })}
                 onEquipmentChange={(codes) => set({ selectedEquipmentCodes: codes })}
               />
+
+              <div>
+                <span className={labelClass}>Work Type</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["All", "PM", "FJ", "LJ"] as const).map((item) => <button key={item} type="button" aria-pressed={workType === item} onClick={() => onWorkTypeChange(item)} className={`rounded-full border px-2.5 py-1 text-xs font-medium ${workType === item ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>{item}</button>)}
+                </div>
+              </div>
 
               <div>
                 <span className={labelClass}>Substatus (%)</span>

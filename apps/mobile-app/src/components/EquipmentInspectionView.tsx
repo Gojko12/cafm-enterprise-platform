@@ -2,6 +2,7 @@ import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { Equipment, BaseWorkRequest, Building, Floor, Room } from "@cafm/shared-schema";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
+import { EquipmentDetailsSheet } from "./EquipmentDetailsSheet";
 
 interface EquipmentInspectionViewProps {
   equipment: Equipment;
@@ -41,19 +42,18 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
   floors = [],
   rooms = [],
   equipmentList = [],
-  onStartPM,
   onOpenWR,
   onCreateFJ,
-  onCreateLJ,
   onLogTechnicalAudit,
   onDeskCheckIn,
   onClose,
 }) => {
   const [showFJModal, setShowFJModal] = useState(false);
-  const [showLJModal, setShowLJModal] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [activeOpen, setActiveOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [fjDescription, setFjDescription] = useState("");
   const [fjPhoto, setFjPhoto] = useState<string | null>(null);
-  const [ljDescription, setLjDescription] = useState("");
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -114,27 +114,6 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
     } catch (error) {
       console.error("Could not create Fast Job", error);
       notify("Could not save the Fast Job. Please try again.");
-    }
-  };
-
-  const handleLJComplete = async () => {
-    if (!ljDescription.trim() || !selectedBuilding || !selectedFloor) {
-      notify("Enter a description and select a building and floor.");
-      return;
-    }
-    try {
-      await onCreateLJ?.({
-        equipmentCodes: Array.from(selectedEquipmentCodes),
-        bl_id: selectedBuilding.bl_id,
-        levelName: selectedFloor.LevelName,
-        roomCode: selectedRoom?.RoomCode,
-        description: ljDescription.trim(),
-      });
-      setShowLJModal(false);
-      setLjDescription("");
-    } catch (error) {
-      console.error("Could not create Long Job", error);
-      notify("Could not save the Long Job. Please try again.");
     }
   };
 
@@ -241,74 +220,83 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
           </div>
         </section>
 
+        <button
+          type="button"
+          onClick={() => setShowDetails(true)}
+          className="w-full rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+        >
+          View Full Details, Docs, Floor Plan &amp; BIM {"\u2192"}
+        </button>
+
         {/* Active Work Requests */}
         <section>
-          <h3 className="text-sm font-bold text-gray-900 mb-2">
-            Active WRs ({activeWRs.length})
-          </h3>
-          {activeWRs.length === 0 ? (
+          <button
+            type="button"
+            aria-expanded={activeOpen}
+            onClick={() => setActiveOpen((open) => !open)}
+            className="w-full flex items-center justify-between text-sm font-bold text-gray-900 mb-2"
+          >
+            <span>Active WRs ({activeWRs.length})</span>
+            <span aria-hidden="true" className={`text-xs text-gray-500 transition-transform ${activeOpen ? "rotate-180" : ""}`}>{"\u25be"}</span>
+          </button>
+          {activeOpen && (activeWRs.length === 0 ? (
             <p className="text-xs text-gray-600">No active work requests</p>
           ) : (
             <div className="space-y-2">
               {activeWRs.slice(0, 20).map((wr) => (
                 <button type="button" key={wr.WR_ID} onClick={() => onOpenWR?.(wr.WR_ID)} className="w-full rounded-lg border border-blue-200 bg-blue-50 p-2 text-left">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-gray-900">{wr.WR_ID} <span className="font-normal text-gray-500">· {wr.WR_Type}</span></span>
+                    <span className="text-xs font-semibold text-gray-900">{wr.WR_ID} <span className="font-normal text-gray-500">{"\u00b7"} {wr.WR_Type}</span></span>
                     <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-semibold text-white">{wr.Percentage ?? 50}%</span>
                   </div>
                   <div className="mt-0.5 truncate text-xs text-gray-600">{wr.Description}</div>
                 </button>
               ))}
             </div>
-          )}
+          ))}
         </section>
 
         {/* Historical WRs */}
         <section>
-          <h3 className="text-sm font-bold text-gray-900 mb-2">
-            Historical ({historicalWRs.length})
-          </h3>
-          {historicalWRs.length === 0 ? (
+          <button
+            type="button"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((open) => !open)}
+            className="w-full flex items-center justify-between text-sm font-bold text-gray-900 mb-2"
+          >
+            <span>Historical ({historicalWRs.length})</span>
+            <span aria-hidden="true" className={`text-xs text-gray-500 transition-transform ${historyOpen ? "rotate-180" : ""}`}>{"\u25be"}</span>
+          </button>
+          {historyOpen && (historicalWRs.length === 0 ? (
             <p className="text-xs text-gray-600">No historical work requests</p>
           ) : (
-            <div className="space-y-2 max-h-40 overflow-y-auto">
+            <div className="space-y-2">
               {historicalWRs.slice(0, 30).map((wr) => (
                 <button type="button" key={wr.WR_ID} onClick={() => onOpenWR?.(wr.WR_ID)} className="w-full rounded-lg border border-gray-200 bg-gray-50 p-2 text-left">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-gray-900">{wr.WR_ID} <span className="font-normal text-gray-500">· {wr.WR_Type}</span></span>
+                    <span className="text-xs font-semibold text-gray-900">{wr.WR_ID} <span className="font-normal text-gray-500">{"\u00b7"} {wr.WR_Type}</span></span>
                     <span className="rounded-full bg-gray-500 px-2 py-0.5 text-[11px] font-semibold text-white">{wr.Percentage ?? 100}%</span>
                   </div>
                   <div className="mt-0.5 truncate text-xs text-gray-600">{wr.Description}</div>
                 </button>
               ))}
             </div>
-          )}
+          ))}
         </section>
+
+        {onCreateFJ && (
+          <button
+            type="button"
+            onClick={handleCreateFJ}
+            className="w-full rounded-xl border border-slate-300 bg-white py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            + Create Fast Job (FJ)
+          </button>
+        )}
       </div>
 
       {/* Action Buttons */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 space-y-2 mobile-equipment-actions">
-        <button
-          onClick={onStartPM ?? (() => notify("No active PM on this asset."))}
-          className="w-full px-4 py-3 bg-blue-500 text-white font-medium rounded hover:bg-blue-600 transition-colors text-sm"
-        >
-          Start Assigned PM
-        </button>
-
-        {onCreateFJ && <button
-          onClick={handleCreateFJ}
-          className="w-full px-4 py-3 bg-green-500 text-white font-medium rounded hover:bg-green-600 transition-colors text-sm"
-        >
-          Create Fast Job (&lt;750€)
-        </button>}
-
-        {onCreateLJ && <button
-          onClick={() => setShowLJModal(true)}
-          className="w-full px-4 py-3 bg-orange-500 text-white font-medium rounded hover:bg-orange-600 transition-colors text-sm"
-        >
-          Create Long Job (≥750€)
-        </button>}
-
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 mobile-equipment-actions">
         <div className="flex gap-2">
           {onLogTechnicalAudit && <button
             onClick={onLogTechnicalAudit}
@@ -324,6 +312,15 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
           </button>
         </div>
       </div>
+
+      {showDetails && (
+        <EquipmentDetailsSheet
+          siteId={equipment.SiteId}
+          equipmentCode={equipment.EquipmentCode}
+          equipmentName={equipment.EquipmentName}
+          onClose={() => setShowDetails(false)}
+        />
+      )}
 
       {/* Fast Job Modal */}
       {showFJModal && (
@@ -413,61 +410,6 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
         </div>
       )}
 
-      {showLJModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end mobile-lj-modal">
-          <div className="w-full bg-white rounded-t-lg p-4 max-h-[95vh] overflow-y-auto">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold">Create Long Job</h3>
-              <button
-                type="button"
-                onClick={() => setShowLJModal(false)}
-                aria-label="Close Long Job modal"
-                className="p-2"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="space-y-4">
-              <LocationEquipmentPickerGroup
-                buildings={buildings}
-                floors={floors}
-                rooms={rooms}
-                equipment={equipmentList}
-                selectedBuilding={selectedBuilding}
-                selectedFloor={selectedFloor}
-                selectedRoom={selectedRoom}
-                selectedEquipmentCodes={selectedEquipmentCodes}
-                onLocationChange={onLocationChange}
-                onEquipmentChange={handleEquipmentChange}
-              />
-              <textarea
-                value={ljDescription}
-                onChange={(event) => setLjDescription(event.target.value)}
-                placeholder="Long Job description..."
-                aria-label="Long Job description"
-                rows={4}
-                className="w-full px-3 py-2 border rounded text-sm"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowLJModal(false)}
-                  className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleLJComplete}
-                  className="flex-1 px-4 py-3 bg-orange-500 text-white rounded"
-                >
-                  Create Long Job
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

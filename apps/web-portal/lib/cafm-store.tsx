@@ -7,6 +7,7 @@ import type { DemoData } from "./cafm-data";
 import { seedAccessProfiles, resolveEffectivePermissions } from "./access-profiles";
 import { ahuTemplate } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
+import { mergeRemoteState, stampChangedWorkRequests } from "./state-merge";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -58,7 +59,7 @@ interface Store {
   data: DemoData;
   setData: React.Dispatch<React.SetStateAction<DemoData>>;
   reset: () => void;
-  commitSnapshot: (expected: DemoData, next: DemoData, options?: { optimistic?: boolean }) => Promise<void>;
+  commitSnapshot: (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => Promise<void>;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -148,8 +149,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         revision.current = remote.revision;
         knownRevision.current = true;
         if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
-          blocked.current = true;
-          setSyncError("The server changed while local edits were pending. Local edits were retained; resolve the conflict before syncing.");
+          // Keep local edits but merge newer server records; the next sync pushes the merged result.
+          initial = mergeRemoteState(initial, remote.state);
+          acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
         } else if (pending && typeof pending === "object" && "revision" in pending && pending.revision === remote.revision) {
           acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
         } else if (remote.state !== null) {
@@ -239,9 +241,18 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         }
         const snapshot = reconcileAssurance(current.current);
         if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
-        const serialized = JSON.stringify(snapshot);
+        let outgoing = snapshot;
+        let serialized = JSON.stringify(outgoing);
         if (serialized !== acknowledged.current) {
-          const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: snapshot });
+          // Merge newer server records before pushing so stale local copies never overwrite them.
+          const latest = await stateRequest(site, personRef.current, "GET");
+          if (latest.state && latest.revision !== revision.current) {
+            outgoing = mergeRemoteState(snapshot, latest.state);
+            serialized = JSON.stringify(outgoing);
+            revision.current = latest.revision;
+            if (JSON.stringify(current.current) === JSON.stringify(snapshot)) { current.current = outgoing; if (active) setData(outgoing); }
+          }
+          const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: outgoing });
           revision.current = result.revision;
           acknowledged.current = serialized;
           offlineEdits.current = false;
@@ -274,11 +285,14 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       }
     }
     void sync();
-    const interval = window.setInterval(() => void sync(), 3000);
-    return () => { active = false; window.clearInterval(interval); };
+    const run = () => { if (document.visibilityState === "visible") void sync(); };
+    const interval = window.setInterval(run, 5000);
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", run);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", run); document.removeEventListener("visibilitychange", run); };
   }, [ready, site, pendingKey, baseKey]);
 
-  const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean }) => {
+  const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => {
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
     if (busy.current) throw new Error("Synchronization is in progress. Try again.");
     const before = JSON.stringify(expected);
@@ -293,7 +307,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       setData(next);
     }
     try {
-      const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next });
+      const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next, ...(options?.forceReset ? { forceReset: true } : {}) });
       committed = true;
       revision.current = result.revision;
       acknowledged.current = after;
@@ -334,7 +348,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     if (!window.confirm(`Replace saved demo data for ${site} with the Section 27 seed? This cannot be undone.`)) return;
     const previous = current.current;
     const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
-    void commitSnapshot(previous, next).catch((error: unknown) => {
+    void commitSnapshot(previous, next, { forceReset: true }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : "Reset failed.";
       console.error("Could not reset demo data", error);
       setSyncError(`Reset failed: ${message}`);
@@ -343,7 +357,11 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
 
   const setUserData: React.Dispatch<React.SetStateAction<DemoData>> = (update) => {
     if (!connected.current) offlineEdits.current = true;
-    setData((previous) => reconcileAssurance(typeof update === "function" ? update(previous) : update));
+    setData((previous) => {
+      const next = reconcileAssurance(typeof update === "function" ? update(previous) : update);
+      const workRequests = stampChangedWorkRequests(previous.workRequests, next.workRequests);
+      return workRequests === next.workRequests ? next : { ...next, workRequests };
+    });
   };
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
     {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}

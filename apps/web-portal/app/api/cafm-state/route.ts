@@ -176,6 +176,21 @@ function reply(request: Request, body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: cors(request) });
 }
 
+function stamp(wr: Record<string, unknown>) {
+  const value = Math.max(Date.parse(String(wr.updatedAt ?? "")) || 0, Date.parse(String(wr.UpdatedAt ?? "")) || 0);
+  return value;
+}
+
+// Keeps the stored copy of any WR that is strictly newer than the incoming one, so a stale tab or device cannot clobber newer work.
+function mergeNewerWorkRequests(existing: z.infer<typeof stateSchema>, incoming: z.infer<typeof stateSchema>): z.infer<typeof stateSchema> {
+  const stored = new Map(existing.workRequests.map((wr) => [String(wr.WR_ID), wr as Record<string, unknown>]));
+  const workRequests = incoming.workRequests.map((wr) => {
+    const server = stored.get(String(wr.WR_ID));
+    return server && stamp(server) > stamp(wr as Record<string, unknown>) ? (server as typeof wr) : wr;
+  });
+  return { ...incoming, workRequests };
+}
+
 function scope(request: Request) {
   const header = request.headers.get("x-cafm-site-id");
   const query = new URL(request.url).searchParams.get("siteId");
@@ -357,7 +372,9 @@ export async function POST(request: Request) {
     const otherIds = new Set(Object.entries(database.sites).filter(([id]) => id !== site).flatMap(([, envelope]) => envelope.state.workRequests.map((wr) => wr.WR_ID)));
     const duplicate = parsed.data.state.workRequests.find((wr) => typeof wr.OriginatingWR_ID === "string" && !existing.has(wr.WR_ID) && otherIds.has(wr.WR_ID));
     if (duplicate) return reply(request, { error: `Follow-up work request ID ${String(duplicate.WR_ID)} is already in use at another site.` }, 409);
-    const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(parsed.data.state) };
+    const forceReset = new URL(request.url).searchParams.get("reset") === "1" || (json as { forceReset?: unknown } | null)?.forceReset === true;
+    const merged = forceReset || !current ? parsed.data.state : mergeNewerWorkRequests(current.state, parsed.data.state);
+    const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(merged) };
     database.sites[site] = next;
     if (storage.kind === "supabase") {
       const newVersion = randomUUID();

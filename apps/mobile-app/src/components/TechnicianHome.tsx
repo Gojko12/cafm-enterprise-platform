@@ -17,7 +17,13 @@ interface TechnicianHomeProps {
   filterControl?: React.ReactNode;
   substatusChip?: React.ReactNode;
   resetSignal?: number;
+  menuButton?: React.ReactNode;
+  type?: WorkType;
+  onTypeChange?: (type: WorkType) => void;
+  onTabChange?: (tab: "my-wrs" | "unassigned") => void;
 }
+
+export type WorkType = "All" | "PM" | "FJ" | "LJ";
 
 export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   myWRs,
@@ -30,9 +36,16 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   filterControl,
   substatusChip,
   resetSignal = 0,
+  menuButton,
+  type: typeProp,
+  onTypeChange,
+  onTabChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<"my-wrs" | "unassigned">("my-wrs");
-  const [type, setType] = useState<"All" | "PM" | "FJ" | "LJ">("All");
+  const [activeTab, setActiveTabState] = useState<"my-wrs" | "unassigned">("my-wrs");
+  const [typeState, setTypeState] = useState<WorkType>("All");
+  const type = typeProp ?? typeState;
+  const setType = (next: WorkType) => { setTypeState(next); onTypeChange?.(next); };
+  const setActiveTab = (next: "my-wrs" | "unassigned") => { setActiveTabState(next); onTabChange?.(next); };
   const [showClaimToast, setShowClaimToast] = useState(false);
   const [claimMessage, setClaimMessage] = useState("");
   const [agenda, setAgenda] = useState<"agenda" | "overdue" | "today" | "upcoming" | "all">("agenda");
@@ -79,6 +92,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
       {/* Tab Switcher */}
       <div className="border-b border-gray-200 bg-white sticky top-0 z-30">
         <div className="flex items-center gap-2 px-3">
+          {menuButton}
           <button
             onClick={() => setActiveTab("my-wrs")}
             className={`py-3 px-2 font-medium text-sm border-b-2 transition-colors ${
