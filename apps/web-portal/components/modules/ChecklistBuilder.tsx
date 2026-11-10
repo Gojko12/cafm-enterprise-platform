@@ -3,25 +3,33 @@
 import React, { useState } from "react";
 import { Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import type { PM_ChecklistStandard, PM_ScheduleStep } from "@cafm/shared-schema";
-import { CLASSICAL_TRADES, PM_ChecklistStandardSchema } from "@cafm/shared-schema";
-import { PMSuppressionFields, suppressionConfig } from "../common/PMSuppressionFields";
+import { CLASSICAL_TRADES, PM_ChecklistStandardSchema, PM_FREQUENCY_RANKS } from "@cafm/shared-schema";
+import type { PMFrequencyCode } from "@cafm/shared-schema";
 
 interface ChecklistBuilderProps {
   onSave?: (checklist: PM_ChecklistStandard) => void;
   initialBlueprint?: PM_ChecklistStandard;
   inheritedSteps?: PM_ScheduleStep[];
   frequencyCode?: string;
+  blueprintDefaults?: Partial<PM_ChecklistStandard>;
+  availableFrequencies?: PMFrequencyCode[];
+  allBlueprints?: PM_ChecklistStandard[];
 }
 
-export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = [], frequencyCode }: ChecklistBuilderProps) {
-  const [code, setCode] = useState(initialBlueprint?.ChecklistCode || "");
+export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = [], frequencyCode, blueprintDefaults, availableFrequencies, allBlueprints }: ChecklistBuilderProps) {
+  const [code, setCode] = useState(initialBlueprint?.ChecklistCode || blueprintDefaults?.ChecklistCode || "");
   const [title, setTitle] = useState(initialBlueprint?.Title || "");
   const [maintenanceReason, setMaintenanceReason] = useState(initialBlueprint?.MaintenanceReason || "");
-  const [trade, setTrade] = useState(initialBlueprint?.TradeId || "");
+  const [trade, setTrade] = useState(initialBlueprint?.TradeId || blueprintDefaults?.TradeId || "");
   const [expectedHours, setExpectedHours] = useState(initialBlueprint?.ExpectedHours || 0);
   const [steps, setSteps] = useState<PM_ScheduleStep[]>(initialBlueprint?.Steps || []);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
-  const [suppression, setSuppression] = useState(() => suppressionConfig(initialBlueprint));
+  const [lockedFrequency, setLockedFrequency] = useState<PMFrequencyCode | undefined>(initialBlueprint?.frequencyCode ?? blueprintDefaults?.frequencyCode);
+  const familyId = initialBlueprint?.familyId ?? blueprintDefaults?.familyId;
+  if (allBlueprints && familyId && lockedFrequency) inheritedSteps = allBlueprints.filter((bp) =>
+    bp.IsActive && bp.blueprintMode === "family_ladder" && bp.familyId === familyId && bp.frequencyCode && PM_FREQUENCY_RANKS[bp.frequencyCode] < PM_FREQUENCY_RANKS[lockedFrequency])
+    .sort((a, b) => PM_FREQUENCY_RANKS[a.frequencyCode!] - PM_FREQUENCY_RANKS[b.frequencyCode!])
+    .flatMap((bp) => bp.Steps.map((step) => ({ ...step, originFrequency: bp.frequencyCode, isInherited: true })));
 
   const handleAddStep = () => {
     const newStep: PM_ScheduleStep = {
@@ -75,14 +83,16 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
 
     const checklist: PM_ChecklistStandard = {
       ...initialBlueprint,
-      ...suppression,
+      ...blueprintDefaults,
+      frequencyCode: lockedFrequency,
+      blueprintMode: initialBlueprint?.blueprintMode ?? blueprintDefaults?.blueprintMode ?? "standalone",
       ChecklistCode: code,
       Title: title,
       MaintenanceReason: maintenanceReason,
       TradeId: trade,
       TradeName: trade,
       ExpectedHours: expectedHours,
-      Steps: steps,
+      Steps: steps.map((step) => ({ ...step, originFrequency: lockedFrequency, isInherited: false })),
       IsActive: initialBlueprint?.IsActive ?? true,
       Version: initialBlueprint ? initialBlueprint.Version + 1 : 1,
       CreatedAt: initialBlueprint?.CreatedAt || new Date().toISOString(),
@@ -99,8 +109,8 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <PMSuppressionFields value={suppression} onChange={setSuppression} />
-      {inheritedSteps.length > 0 && <details open className="rounded-xl border border-sky-300 bg-sky-50 p-4"><summary className="cursor-pointer font-semibold">Inherited from Lower Frequencies ({[...new Set(inheritedSteps.map((step) => step.originFrequency))].join(" / ")}) · read-only</summary>{inheritedSteps.map((step) => <p key={step.StepId} className="mt-2 text-sm"><span className="rounded bg-sky-100 px-2">{step.originFrequency}</span> {step.Title} {steps.some((item) => item.replacesStepId === step.StepId) && <strong className="text-amber-800"> · Replaced by higher frequency</strong>}</p>)}</details>}
+      <label className="block rounded border bg-sky-50 p-3 text-sm">Blueprint frequency (locked after creation)<select required disabled={!!initialBlueprint} className="ml-3 rounded border p-2" value={lockedFrequency ?? ""} onChange={(e) => setLockedFrequency(e.target.value as PMFrequencyCode)}><option value="" disabled>Select frequency</option>{(availableFrequencies ?? Object.keys(PM_FREQUENCY_RANKS)).map((item) => <option key={item}>{item}</option>)}</select><span className="ml-3">{initialBlueprint?.familyName ?? blueprintDefaults?.familyName ?? "Standalone inspection — never suppresses other blueprints"}</span></label>
+      {inheritedSteps.length > 0 && <details open className="rounded-xl border border-sky-300 bg-sky-50 p-4"><summary className="cursor-pointer font-semibold">Inherited from Lower Blueprints in Family ({[...new Set(inheritedSteps.map((step) => step.originFrequency))].join(" / ")}) · read-only</summary>{inheritedSteps.map((step) => <p key={step.StepId} className="mt-2 text-sm"><span className="rounded bg-sky-100 px-2">{step.originFrequency}</span> {step.Title} {steps.some((item) => item.replacesStepId === step.StepId) && <strong className="text-amber-800"> · Replaced by higher frequency</strong>}</p>)}</details>}
       {/* Header Fields */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
         <h2 className="text-2xl font-bold text-gray-900">{initialBlueprint ? "Edit" : "Create"} Checklist Blueprint</h2>
@@ -153,6 +163,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
               Trade *
             </label>
             <select
+              disabled={!!familyId}
               value={trade}
               onChange={(e) => setTrade(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -181,7 +192,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
       {/* Steps Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-xl font-bold text-gray-900">{frequencyCode ? `+${frequencyCode} Delta Steps Only` : "Checklist Steps"}</h3>
+          <h3 className="text-xl font-bold text-gray-900">{lockedFrequency || frequencyCode ? `+${lockedFrequency ?? frequencyCode} Delta Steps Only` : "Checklist Steps"}</h3>
           <button
             onClick={handleAddStep}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"

@@ -21,6 +21,8 @@ export const SuppressedPmOccurrenceSchema = z.object({
   suppressionGroupName: z.string().min(1), suppressedFrequency: PMFrequencyCodeSchema,
   dueDate: z.iso.date(), coveredByFrequency: PMFrequencyCodeSchema,
   coveredByWrId: z.string().min(1), createdAt: z.iso.datetime(),
+  suppressedPmsId: z.string().regex(/^(?!00000)\d{5}$/).optional(),
+  coveredByPmsId: z.string().regex(/^(?!00000)\d{5}$/).optional(),
 });
 export type SuppressedPmOccurrence = z.infer<typeof SuppressedPmOccurrenceSchema>;
 
@@ -85,8 +87,11 @@ export const PM_ScheduleStepSchema = z
     }
   });
 
-export const PM_ChecklistStandardSchema = z.object({
+export const PM_LegacyChecklistStandardSchema = z.object({
   ...PMSuppressionFields,
+  blueprintMode: z.enum(["family_ladder", "standalone"]).optional(),
+  familyId: z.string().min(1).optional(),
+  familyName: z.string().min(1).optional(),
   ChecklistCode: z.string().min(1),
   SiteId: SiteIdSchema.optional(),
   Title: z.string().min(1),
@@ -100,6 +105,8 @@ export const PM_ChecklistStandardSchema = z.object({
   CreatedAt: z.string().min(1).optional(),
   UpdatedAt: z.string().min(1).optional(),
 }).superRefine((checklist, context) => {
+  if (checklist.blueprintMode && !checklist.frequencyCode) context.addIssue({ code: "custom", path: ["frequencyCode"], message: "Every blueprint requires one locked frequency." });
+  if (checklist.blueprintMode === "family_ladder" && (!checklist.familyId || !checklist.familyName)) context.addIssue({ code: "custom", path: ["familyId"], message: "Family blueprints require a family ID and name." });
   const stepIds = new Set<string>();
   const sortOrders = new Set<number>();
   checklist.Steps.forEach((step, index) => {
@@ -122,9 +129,14 @@ export const PM_ChecklistStandardSchema = z.object({
   });
 });
 
-export const PM_ScheduleSchema = z
+export const PM_ChecklistStandardSchema = PM_LegacyChecklistStandardSchema.superRefine((blueprint, context) => {
+  if (!blueprint.frequencyCode || !blueprint.blueprintMode) context.addIssue({ code: "custom", path: ["frequencyCode"], message: "Every blueprint requires one locked frequency and a family/standalone mode." });
+});
+
+export const PM_LegacyScheduleSchema = z
   .object({
     ScheduleId: z.string().min(1),
+    anchorDate: z.iso.date().optional(),
     ...PMSuppressionFields,
     ChecklistCode: z.string().min(1),
     SiteId: SiteIdSchema,
@@ -185,6 +197,12 @@ export const PM_ScheduleSchema = z
       });
     }
   });
+
+export const PM_ScheduleSchema = PM_LegacyScheduleSchema.superRefine((schedule, context) => {
+  if (!/^(?!00000)\d{5}$/.test(schedule.ScheduleId)) context.addIssue({ code: "custom", path: ["ScheduleId"], message: "PMS IDs must be five-digit order numbers 00001–99999." });
+  if (schedule.EquipmentCodes.length !== 1) context.addIssue({ code: "custom", path: ["EquipmentCodes"], message: "Each PMS order links exactly one machine to one blueprint." });
+  if (!schedule.anchorDate) context.addIssue({ code: "custom", path: ["anchorDate"], message: "An equipment anchor date is required." });
+});
 
 export const PM_WorkRequestStepSchema = z
   .object({

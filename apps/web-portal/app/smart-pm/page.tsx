@@ -1,692 +1,247 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { ChecklistBuilder } from "@/components/modules/ChecklistBuilder";
-import type {
-  Building,
-  Floor,
-  PM_ChecklistStandard,
-  PM_Schedule,
-  Room,
-} from "@cafm/shared-schema";
+import React, { useState } from "react";
+import { CLASSICAL_TRADES, PM_FREQUENCY_RANKS, PM_ChecklistStandardSchema, blueprintLayers, compileBlueprintChecklist } from "@cafm/shared-schema";
+import type { PM_ChecklistStandard, PMFrequencyCode, PM_Schedule, PM_ScheduleStep } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
+import type { DemoData } from "@/lib/cafm-data";
+import { createPmOrder, changeFamilyAnchor, sharedFamilyAnchor, validateBlueprintFamilies } from "@/lib/pm-orders";
+import { frequencyOf, occurrenceKey, previewCycles, reconcileOpenPMs, resolveBlueprintSchedule } from "@/lib/pm-suppression";
 import { generatePMWorkRequests } from "@/lib/pm-generation";
-import { useApp } from "@/lib/hooks/useApp";
-import { PM_ScheduleSchema } from "@cafm/shared-schema";
+import { ChecklistBuilder } from "@/components/modules/ChecklistBuilder";
 import { CraftpersonShiftWorkspace } from "@/components/modules/CraftpersonShiftWorkspace";
-import { SuppressionWorkspace } from "@/components/modules/SuppressionWorkspace";
-import { PMSuppressionFields, suppressionConfig } from "@/components/common/PMSuppressionFields";
-import { compileChecklist } from "@/lib/pm-suppression";
+import { SuppressionLog } from "@/components/modules/SuppressionWorkspace";
+import { FrequencyPill } from "@/components/common/PmFrequency";
+import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 
-type TabType = "schedules" | "blueprints" | "generator" | "assignment" | "craftpeople" | "suppression";
+const tabs = ["1. Checklist Blueprints & Families", "2. Equipment PM Plans (PMS 00001+)", "3. All PM Schedules (00001+)", "4. WR Generator & Suppression Audit Log"];
+const button = "rounded-lg border bg-white px-3 py-2 text-sm font-semibold hover:bg-sky-50 disabled:opacity-40";
+const field = "rounded-lg border bg-white p-2 text-sm";
+const codes = Object.keys(PM_FREQUENCY_RANKS) as PMFrequencyCode[];
+const rank = (bp: PM_ChecklistStandard) => PM_FREQUENCY_RANKS[bp.frequencyCode!];
 
 export default function SmartPMPage() {
-  const [activeTab, setActiveTab] = useState<TabType>("schedules");
-  const { data, setData } = useCafmStore();
-  const { permissions } = useActiveUserPermissions();
-  const { activeSiteId, currentUser } = useSiteContext();
-  const { currentRole } = useApp();
-  const [editing, setEditing] = useState<PM_ChecklistStandard | undefined>();
-  const [builderVersion, setBuilderVersion] = useState(0);
-  const blueprints = data.blueprints.filter((item) => item.SiteId === activeSiteId);
-  const [generatorMode, setGeneratorMode] = useState<"single" | "selected" | "horizon">(
-    "horizon"
-  );
-  const [horizonDays, setHorizonDays] = useState(30);
-  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
-  const [editingSchedule, setEditingSchedule] = useState<PM_Schedule | null>(null);
-  const [scheduleSuppression, setScheduleSuppression] = useState(() => suppressionConfig());
-  const [selectedScheduleIds, setSelectedScheduleIds] = useState<string[]>([]);
-  const [scheduleChecklistCode, setScheduleChecklistCode] = useState("");
-  const [scheduleFrequency, setScheduleFrequency] =
-    useState<PM_Schedule["Frequency"]>("Monthly");
-  const [scheduleMeterType, setScheduleMeterType] = useState("");
-  const [scheduleMeterInterval, setScheduleMeterInterval] = useState(1);
-  const [scheduleDueDate, setScheduleDueDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
-  const [scheduleLeadTime, setScheduleLeadTime] = useState(3);
-  const [scheduleMarginWindow, setScheduleMarginWindow] = useState(5);
-  const [scheduleLocation, setScheduleLocation] = useState<{
-    building: Building | null;
-    floor: Floor | null;
-    room: Room | null;
-  }>({ building: null, floor: null, room: null });
-  const [scheduleEquipmentCodes, setScheduleEquipmentCodes] = useState<string[]>([]);
-  const [assignmentBlueprint, setAssignmentBlueprint] = useState("");
-  const [assignmentEquipmentCodes, setAssignmentEquipmentCodes] = useState<string[]>([]);
-  const [assignmentLocation, setAssignmentLocation] = useState<{ building: Building | null; floor: Floor | null; room: Room | null }>({
-    building: null, floor: null, room: null,
+  const { activeSiteId, activePerson } = useSiteContext();
+  return <SmartPMWorkspace key={activeSiteId} site={activeSiteId} actor={activePerson} />;
+}
+
+function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; actor: string }) {
+  const { data, commitSnapshot } = useCafmStore();
+  const { profile, permissions } = useActiveUserPermissions();
+  const [tab, setTab] = useState(0);
+  const [query, setQuery] = useState("");
+  const [equipmentQuery, setEquipmentQuery] = useState("");
+  const [selectedFamily, setSelectedFamily] = useState("");
+  const [selectedBlueprint, setSelectedBlueprint] = useState("");
+  const [selectedEquipment, setSelectedEquipment] = useState("");
+  const [creating, setCreating] = useState<Partial<PM_ChecklistStandard>>();
+  const [familyDialog, setFamilyDialog] = useState(false);
+  const [familyName, setFamilyName] = useState("");
+  const [familyTrade, setFamilyTrade] = useState<string>(CLASSICAL_TRADES[0]);
+  const [assign, setAssign] = useState<{ blueprintIds: string[]; equipmentIds: string[]; anchor: string }>();
+  const [assignmentQuery, setAssignmentQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [filters, setFilters] = useState({ blueprint: "", family: "", frequency: "", equipment: "" });
+  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+  const [horizon, setHorizon] = useState(365);
+  const [mode, setMode] = useState<"horizon" | "selected" | "single">("horizon");
+  const [open, setOpen] = useState<string>();
+  const canBlueprint = !!permissions?.canDefineChecklistPM;
+  const canAssign = !!permissions?.canAssignPMPToEQ && !!permissions?.canDefinePMSchedule;
+  const canGenerate = !!permissions?.canGeneratePM_WR;
+  const permittedTrade = (trade: string) => !profile?.vpaTrades.length || profile.vpaTrades.some((item) => item === trade);
+  const blueprints = data.blueprints.filter((item) => item.SiteId === site && item.IsActive && permittedTrade(item.TradeId));
+  const equipment = data.equipment.filter((item) => item.SiteId === site && (!profile?.vpaBuildingIds.length || profile.vpaBuildingIds.includes(item.bl_id)));
+  const orders = data.schedules.filter((item) => item.SiteId === site && item.IsActive && blueprints.some((bp) => bp.ChecklistCode === item.ChecklistCode) && equipment.some((asset) => item.EquipmentCodes.includes(asset.EquipmentCode)));
+  const families = [...new Set(blueprints.filter((bp) => bp.blueprintMode === "family_ladder").map((bp) => bp.familyId!))];
+  const family = selectedFamily || families[0];
+  const familyBlueprints = blueprints.filter((bp) => bp.blueprintMode === "family_ladder" && bp.familyId === family).sort((a, b) => rank(a) - rank(b));
+  const selected = blueprints.find((bp) => bp.ChecklistCode === selectedBlueprint) ?? familyBlueprints[0];
+  const asset = equipment.find((item) => item.EquipmentCode === selectedEquipment) ?? equipment[0];
+  const assetOrders = orders.filter((item) => item.EquipmentCodes.includes(asset?.EquipmentCode));
+  const lowerSteps = (bp: PM_ChecklistStandard): PM_ScheduleStep[] => blueprintLayers(bp, data.blueprints.filter((item) => item.SiteId === site))
+    .filter((item) => item.ChecklistCode !== bp.ChecklistCode).flatMap((item) => item.Steps.map((step) => ({ ...step, originFrequency: item.frequencyCode, isInherited: true })));
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true); setError(""); setNotice("");
+    try { await action(); } catch (problem) { setError(problem instanceof Error ? problem.message : "The operation could not be completed."); }
+    finally { setBusy(false); }
+  };
+  const persist = async (next: DemoData, message: string) => {
+    validateBlueprintFamilies(next.blueprints);
+    await commitSnapshot(data, next, { optimistic: true });
+    setNotice(message);
+  };
+  const saveBlueprint = (bp: PM_ChecklistStandard) => run(async () => {
+    if (!canBlueprint || !permittedTrade(bp.TradeId)) throw new Error("Permission required to define this blueprint.");
+    const parsed = PM_ChecklistStandardSchema.parse({ ...bp, SiteId: site });
+    const original = data.blueprints.find((item) => item.SiteId === site && item.ChecklistCode === bp.ChecklistCode);
+    if (creating && original) throw new Error("This blueprint code is already in use.");
+    if (original && original.frequencyCode !== parsed.frequencyCode) throw new Error("A blueprint frequency is locked. Create a new frequency blueprint instead.");
+    const nextBlueprints = [...data.blueprints.filter((item) => !(item.SiteId === site && item.ChecklistCode === parsed.ChecklistCode)), parsed];
+    const nextSchedules = data.schedules.map((order) => order.SiteId === site ? resolveBlueprintSchedule(order, nextBlueprints) : order);
+    await persist({ ...data, blueprints: nextBlueprints, schedules: nextSchedules }, "Blueprint saved. Every assigned machine now uses these rules for future work; executed WR snapshots are preserved.");
+    setCreating(undefined); setSelectedBlueprint(parsed.ChecklistCode); setSelectedFamily(parsed.familyId ?? "");
   });
-  useEffect(() => {
-    setScheduleModalOpen(false);
-    setEditingSchedule(null);
-    setSelectedScheduleIds([]);
-    setEditing(undefined);
-  }, [activeSiteId]);
-  const siteBuildings = useMemo(
-    () => data.buildings.filter((item) => item.SiteId === activeSiteId),
-    [data.buildings, activeSiteId],
-  );
-  const siteFloors = useMemo(
-    () => data.floors.filter((item) => item.SiteId === activeSiteId),
-    [data.floors, activeSiteId],
-  );
-  const siteRooms = useMemo(
-    () => data.rooms.filter((item) => item.SiteId === activeSiteId),
-    [data.rooms, activeSiteId],
-  );
-  const siteEquipment = useMemo(
-    () => data.equipment.filter((item) => item.SiteId === activeSiteId),
-    [data.equipment, activeSiteId],
-  );
-  const visibleSchedules = [
-    ...data.schedules
-      .filter((schedule) => schedule.SiteId === activeSiteId)
-      .map((schedule) => ({
-        scheduleId: schedule.ScheduleId,
-        checklistCode: schedule.ChecklistCode,
-        equipmentCodes: schedule.EquipmentCodes,
-        frequency: schedule.Frequency,
-        leadTimeDays: schedule.LeadTimeDays,
-        marginDays: schedule.MarginWindowDays,
-      })),
-  ];
-
-  const handleCreateSchedule = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!permissions?.canDefinePMSchedule) { alert("Permission required: Define PM Schedule."); return; }
-    if (!blueprints.some((blueprint) => blueprint.ChecklistCode === scheduleChecklistCode && blueprint.IsActive)) {
-      alert("Select an active blueprint at this site.");
-      return;
-    }
-    if (scheduleEquipmentCodes.length === 0 && !scheduleLocation.building) {
-      alert("Select equipment or a building, floor, or room target.");
-      return;
-    }
-    if (
-      scheduleFrequency === "Meter-based" &&
-      (!scheduleMeterType.trim() || scheduleMeterInterval <= 0)
-    ) {
-      alert("Meter-based schedules require a meter type and a positive interval.");
-      return;
-    }
-    const now = new Date().toISOString();
-    const schedule: PM_Schedule = {
-      ...editingSchedule,
-      ...scheduleSuppression,
-      ScheduleId: editingSchedule?.ScheduleId ?? `PMS-${crypto.randomUUID()}`,
-      ChecklistCode: scheduleChecklistCode.trim(),
-      SiteId: activeSiteId,
-      EquipmentCodes: scheduleEquipmentCodes,
-      bl_id: scheduleLocation.building?.bl_id,
-      LevelName: scheduleLocation.floor?.LevelName,
-      RoomCode: scheduleLocation.room?.RoomCode,
-      Frequency: scheduleFrequency,
-      FrequencyInterval: editingSchedule?.FrequencyInterval ?? 1,
-      ...(scheduleFrequency === "Meter-based"
-        ? {
-            MeterType: scheduleMeterType.trim(),
-            MeterInterval: scheduleMeterInterval,
-          }
-        : {}),
-      LeadTimeDays: scheduleLeadTime,
-      MarginWindowDays: scheduleMarginWindow,
-      NextDueDate: scheduleDueDate,
-      IsActive: editingSchedule?.IsActive ?? true,
-      CreatedBy: editingSchedule?.CreatedBy ?? currentUser?.UserId ?? "current-user",
-      CreatedAt: editingSchedule?.CreatedAt ?? now,
-      UpdatedAt: now,
-    };
-    const parsed = PM_ScheduleSchema.safeParse(schedule);
-    if (!parsed.success) {
-      alert(parsed.error.issues.map((issue) => issue.message).join("\n"));
-      return;
-    }
-    try {
-      const schedules = [...data.schedules.filter((item) => item.ScheduleId !== schedule.ScheduleId), parsed.data];
-      for (const rule of schedules.filter((item) => item.SiteId === activeSiteId && item.IsActive)) {
-        for (const code of rule.EquipmentCodes) compileChecklist(rule, code, schedules, data.blueprints);
-      }
-    } catch (problem) { alert(problem instanceof Error ? problem.message : "Invalid nested PM scope."); return; }
-    setData((current) => ({
-      ...current,
-      schedules: [...current.schedules.filter((item) => item.ScheduleId !== schedule.ScheduleId || item.SiteId !== activeSiteId), parsed.data],
-    }));
-    setScheduleModalOpen(false);
-    setScheduleChecklistCode("");
-    setScheduleEquipmentCodes([]);
-    setScheduleLocation({ building: null, floor: null, room: null });
+  const startNew = (inFamily: boolean) => {
+    if (!canBlueprint) { setError("Permission required to define blueprints."); return; }
+    const template = inFamily ? familyBlueprints[0] : undefined;
+    const available = codes.filter((code) => !inFamily || !familyBlueprints.some((bp) => bp.frequencyCode === code));
+    if (!available.length) { setError("This family already defines every frequency."); return; }
+    setCreating({ ChecklistCode: `${site}-BP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, SiteId: site, blueprintMode: inFamily ? "family_ladder" : "standalone",
+      familyId: template?.familyId, familyName: template?.familyName, TradeId: template?.TradeId ?? CLASSICAL_TRADES.find(permittedTrade),
+      frequencyCode: available[0] });
   };
-
-  const openSchedule = (schedule?: PM_Schedule) => {
-    if (!permissions?.canDefinePMSchedule) { alert("Permission required: Define PM Schedule."); return; }
-    setEditingSchedule(schedule ?? null);
-    setScheduleSuppression(suppressionConfig(schedule));
-    setScheduleChecklistCode(schedule?.ChecklistCode ?? "");
-    setScheduleFrequency(schedule?.Frequency ?? "Monthly");
-    setScheduleMeterType(schedule?.MeterType ?? "");
-    setScheduleMeterInterval(schedule?.MeterInterval ?? 1);
-    setScheduleDueDate(schedule?.NextDueDate ?? new Date().toISOString().slice(0, 10));
-    setScheduleLeadTime(schedule?.LeadTimeDays ?? 3);
-    setScheduleMarginWindow(schedule?.MarginWindowDays ?? 5);
-    setScheduleEquipmentCodes(schedule?.EquipmentCodes ?? []);
-    setScheduleLocation({
-      building: siteBuildings.find((item) => item.bl_id === schedule?.bl_id) ?? null,
-      floor: siteFloors.find((item) => item.bl_id === schedule?.bl_id && item.LevelName === schedule.LevelName) ?? null,
-      room: siteRooms.find((item) => item.bl_id === schedule?.bl_id && item.LevelName === schedule.LevelName && item.RoomCode === schedule.RoomCode) ?? null,
-    });
-    setScheduleModalOpen(true);
+  const openAssign = (ids: string[], assetId?: string) => {
+    setAssignmentQuery("");
+    setAssign({ blueprintIds: ids, equipmentIds: assetId ? [assetId] : [], anchor: new Date().toISOString().slice(0, 10) });
   };
-
-  const handleBlueprintSave = (blueprint: PM_ChecklistStandard) => {
-    if (!permissions?.canDefineChecklistPM) { alert("Permission required: Define PM Checklist."); return; }
-    if (!editing && data.blueprints.some((item) => item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)) {
-      alert("A blueprint with this code already exists at this site.");
-      return;
+  const assignOrders = () => run(async () => {
+    if (!canAssign || !assign?.blueprintIds.length || !assign.equipmentIds.length) throw new Error("Select at least one blueprint and machine, with assignment permission.");
+    const next = [...data.schedules];
+    let count = 0;
+    for (const id of assign.equipmentIds) for (const bpId of assign.blueprintIds) {
+      const machine = equipment.find((item) => item.EquipmentCode === id);
+      const bp = blueprints.find((item) => item.ChecklistCode === bpId);
+      if (!machine || !bp) throw new Error("A selected machine or blueprint is no longer available.");
+      if (next.some((item) => item.SiteId === site && item.IsActive && item.ChecklistCode === bpId && item.EquipmentCodes.includes(id))) continue;
+      next.push(createPmOrder(next, data.blueprints, bp, machine, assign.anchor, actor, data.pmsOrderHighWatermark)); count++;
     }
-    const nextBlueprints = [...data.blueprints.filter((item) => !(item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)), { ...blueprint, SiteId: activeSiteId }];
-    try {
-      for (const rule of data.schedules.filter((item) => item.SiteId === activeSiteId && item.IsActive)) {
-        for (const code of rule.EquipmentCodes) compileChecklist(rule, code, data.schedules, nextBlueprints);
-      }
-    } catch (problem) { alert(problem instanceof Error ? problem.message : "Invalid inherited checklist scope."); return; }
-    setData((current) => ({ ...current, blueprints: nextBlueprints }));
-    setEditing(undefined);
-    setBuilderVersion((version) => version + 1);
-  };
+    if (!count) throw new Error("All selected blueprints are already assigned to these machines.");
+    await persist({ ...data, schedules: next }, `Created ${count} five-digit PMS order(s). Existing family anchor dates were retained.`);
+    setAssign(undefined);
+  });
+  const changeAnchor = (order: PM_Schedule, anchor: string) => run(async () => {
+    if (!permissions?.canDefinePMSchedule) throw new Error("Permission required to change equipment anchors.");
+    await persist({ ...data, schedules: changeFamilyAnchor(data.schedules, data.blueprints, order, anchor) }, "Equipment anchor synchronized across this machine's family orders only.");
+  });
+  const remove = (order: PM_Schedule) => run(async () => {
+    if (!canAssign) throw new Error("Assignment permission required.");
+    await persist({ ...data, schedules: data.schedules.map((item) => item.ScheduleId === order.ScheduleId && item.SiteId === site ? { ...item, IsActive: false, UpdatedAt: new Date().toISOString() } : item) }, `PMS #${order.ScheduleId} removed from the active plan. Historical WR links are retained.`);
+  });
+  const reconcile = () => run(async () => {
+    if (!canGenerate) throw new Error("Permission required to generate/reconcile work.");
+    const result = reconcileOpenPMs(data.workRequests, orders, data.blueprints, data.suppressedPmOccurrences ?? [], new Date().toISOString());
+    await persist({ ...data, workRequests: result.workRequests, suppressedPmOccurrences: result.suppressedPmOccurrences }, `${result.suppressed} unstarted overlapping PM WR(s) suppressed. Executed work was preserved.`);
+  });
+  const generate = () => run(async () => {
+    if (!canGenerate) throw new Error("Generation permission required.");
+    const result = generatePMWorkRequests({ schedules: orders, blueprints: data.blueprints, equipment: data.equipment, workRequests: data.workRequests,
+      siteId: site, mode, selectedIds: selectedOrders, horizonDays: horizon, now: new Date(), craftspeople: data.craftspeople,
+      suppressedPmOccurrences: data.suppressedPmOccurrences, actor: { id: actor, name: actor, role: profile?.primaryRole ?? "TeamLeader" } });
+    const byId = new Map(result.schedules.map((item) => [item.ScheduleId, item]));
+    await persist({ ...data, workRequests: result.workRequests, suppressedPmOccurrences: result.suppressedPmOccurrences,
+      schedules: data.schedules.map((item) => byId.get(item.ScheduleId) ?? item) }, `Generated ${result.generated} WR(s); skipped ${result.skipped} duplicate cycle(s).`);
+  });
+  const currentWr = data.workRequests.find((wr) => wr.SiteId === site && wr.WR_ID === open);
+  const matching = (value: string, search: string) => value.toLowerCase().includes(search.toLowerCase().trim());
+  const showBlueprint = (bp: PM_ChecklistStandard) => { setSelectedBlueprint(bp.ChecklistCode); setSelectedFamily(bp.familyId ?? ""); setCreating(undefined); };
+  return <div className="mx-auto max-w-[1600px] space-y-4 p-4">
+    <h1 className="text-2xl font-bold">SmartPM · Blueprints &amp; Equipment Plans</h1>
+    <nav className="flex flex-wrap gap-2" aria-label="SmartPM sections">{tabs.map((name, i) => <button key={name} aria-current={tab === i ? "page" : undefined} className={`${button} ${tab === i ? "border-blue-600 bg-blue-50 text-blue-800" : ""}`} onClick={() => setTab(i)}>{name}</button>)}</nav>
+    {error && <p role="alert" className="rounded bg-rose-100 p-3 text-rose-900">{error}</p>}
+    {notice && <p role="status" className="rounded bg-emerald-50 p-3">{notice}</p>}
+    {busy && <p role="status">Saving…</p>}
+    {tab === 0 && <div className="flex flex-col items-start gap-4 md:flex-row">
+      <aside className="w-full shrink-0 space-y-3 rounded-xl border bg-white p-3 md:w-80"><input aria-label="Search blueprint families" className={`${field} w-full`} placeholder="Search blueprints & families" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <div className="flex flex-wrap gap-2"><button disabled={busy || !canBlueprint} className={button} onClick={() => { setError(""); setFamilyTrade(CLASSICAL_TRADES.find(permittedTrade) ?? ""); setFamilyDialog(true); }}>+ New Family</button><button disabled={busy || !canBlueprint} className={button} onClick={() => startNew(false)}>+ New Blueprint</button></div>
+        <h2 className="font-bold">Blueprint Families</h2>{families.map((id) => {
+          const items = blueprints.filter((bp) => bp.familyId === id).sort((a, b) => rank(a) - rank(b));
+          if (!matching(`${items[0].familyName} ${items.map((bp) => bp.Title).join(" ")}`, query)) return null;
+          const assigned = new Set(orders.filter((order) => items.some((bp) => bp.ChecklistCode === order.ChecklistCode)).flatMap((order) => order.EquipmentCodes)).size;
+          return <button key={id} className={`${button} w-full text-left ${selected?.familyId === id ? "border-blue-600 bg-blue-50" : ""}`} onClick={() => showBlueprint(items[0])}><strong>{items[0].familyName}</strong><p className="text-xs">{items.map((bp) => bp.frequencyCode).join(" → ")}</p><p className="text-xs font-normal">Assigned across {assigned} machines</p></button>;
+        })}
+        <h2 className="font-bold">Standalone Blueprints</h2>{blueprints.filter((bp) => bp.blueprintMode === "standalone" && matching(bp.Title, query)).map((bp) => <button key={bp.ChecklistCode} className={`${button} w-full text-left`} onClick={() => showBlueprint(bp)}>{bp.Title} <FrequencyPill code={bp.frequencyCode} /></button>)}
+      </aside>
+      <section className="min-w-0 flex-1 space-y-4">
+        {!creating && selected && <><header className="space-y-3 rounded-xl border bg-white p-4"><h2 className="text-xl font-bold">{selected.familyName ?? selected.Title}</h2><p>{selected.TradeName}</p>
+          <p className="rounded bg-sky-50 p-3 text-sm">{selected.blueprintMode === "family_ladder" ? "Any equipment assigned 2+ blueprints from this family automatically suppresses lower intervals on overlapping cycles and inherits their checklist steps." : "Standalone inspection: runs independently, never suppresses and is never suppressed."}</p>
+          <div className="flex flex-wrap gap-2">{selected.blueprintMode === "family_ladder" && <button className={button} disabled={!canBlueprint || busy} onClick={() => startNew(true)}>+ Add Frequency Blueprint to Family</button>}<button disabled={!canAssign || busy} className={button} onClick={() => openAssign(selected.familyId ? familyBlueprints.map((bp) => bp.ChecklistCode) : [selected.ChecklistCode])}>Assign Family / Blueprint to Equipment…</button></div>
+          <div className="flex flex-wrap gap-2">{(selected.familyId ? familyBlueprints : [selected]).map((bp, i) => <button key={bp.ChecklistCode} onClick={() => showBlueprint(bp)} className={`${button} ${selected.ChecklistCode === bp.ChecklistCode ? "border-blue-600 bg-blue-50" : ""}`}><span className="text-xs">X{i + 1} · {bp.ChecklistCode}</span><p><FrequencyPill code={bp.frequencyCode} /> · +{bp.Steps.length} steps →</p></button>)}</div>
+        </header></>}
+        {(creating || selected) ? <fieldset disabled={busy || !canBlueprint}><ChecklistBuilder key={creating ? `new:${creating.ChecklistCode}` : `${selected!.ChecklistCode}:${selected!.Version}`}
+          initialBlueprint={creating ? undefined : selected} blueprintDefaults={creating} frequencyCode={creating?.frequencyCode ?? selected?.frequencyCode}
+          allBlueprints={data.blueprints.filter((bp) => bp.SiteId === site)}
+          availableFrequencies={creating?.familyId ? codes.filter((code) => !blueprints.some((bp) => bp.familyId === creating.familyId && bp.frequencyCode === code)) : codes}
+          inheritedSteps={creating ? creating.familyId ? blueprints.filter((bp) => bp.familyId === creating.familyId && bp.frequencyCode && PM_FREQUENCY_RANKS[bp.frequencyCode] < PM_FREQUENCY_RANKS[creating.frequencyCode!]).flatMap((bp) => bp.Steps.map((step) => ({ ...step, originFrequency: bp.frequencyCode }))) : [] : lowerSteps(selected!)}
+          onSave={saveBlueprint} /></fieldset> : <p>Create a family or standalone blueprint to begin.</p>}
+        {creating && <button className={button} onClick={() => setCreating(undefined)}>Cancel new blueprint</button>}
+      </section>
+    </div>}
+    {tab === 1 && <div className="flex flex-col items-start gap-4 md:flex-row">
+      <aside className="w-full shrink-0 space-y-2 rounded-xl border bg-white p-3 md:w-80"><input aria-label="Search equipment PM plans" className={`${field} w-full`} placeholder="Equipment, building or room" value={equipmentQuery} onChange={(e) => setEquipmentQuery(e.target.value)} />
+        {equipment.filter((item) => matching(`${item.EquipmentCode} ${item.EquipmentName} ${item.bl_id} ${item.RoomCode}`, equipmentQuery)).map((item) => {
+          const assigned = orders.filter((order) => order.EquipmentCodes.includes(item.EquipmentCode));
+          const start = assigned[0]?.anchorDate ?? new Date().toISOString().slice(0, 10);
+          const count = assigned.length ? previewCycles(assigned, item.EquipmentCode, start, 12).winners.length : 0;
+          return <button key={item.EquipmentCode} className={`${button} w-full text-left ${asset?.EquipmentCode === item.EquipmentCode ? "border-blue-600" : ""}`} onClick={() => setSelectedEquipment(item.EquipmentCode)}>{item.EquipmentCode} · {item.EquipmentName}<p className="text-xs font-normal">{assigned.length} active PMS · <span className="rounded-full bg-emerald-100 px-2">{count} WRs/year</span></p></button>;
+        })}
+      </aside>
+      <section className="min-w-0 flex-1 space-y-4">{asset && <><header className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-4"><div><h2 className="text-xl font-bold">{asset.EquipmentCode} · {asset.EquipmentName}</h2><p>{asset.bl_id} / {asset.LevelName} / {asset.RoomCode}</p></div><button disabled={!canAssign || busy} className={button} onClick={() => openAssign([], asset.EquipmentCode)}>+ Assign Blueprint (New PMS)</button></header>
+        {[...new Set(assetOrders.map((order) => order.suppressionMode === "independent" ? `standalone:${order.ScheduleId}` : order.suppressionGroupKey!))].map((id) => {
+          const group = assetOrders.filter((order) => (order.suppressionMode === "independent" ? `standalone:${order.ScheduleId}` : order.suppressionGroupKey) === id);
+          return <section key={id} className="space-y-3 rounded-xl border bg-white p-4"><h3 className="font-bold">{group[0].suppressionGroupName} {group[0].suppressionMode === "independent" ? "· Standalone" : "· Family"}</h3>
+            <label className="text-sm">Equipment Anchor Date <input type="date" className={field} disabled={busy || !permissions?.canDefinePMSchedule} value={group[0].anchorDate ?? ""} onChange={(e) => { if (e.target.value) void changeAnchor(group[0], e.target.value); }} /></label>
+            <p className="text-xs text-slate-500">{group[0].suppressionMode === "independent" ? "This anchor belongs only to this standalone order." : "One shared date for all family orders on this machine. Other machines keep their own date."}</p>
+            <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr>{["PMS #", "Blueprint Name", "Locked Freq", "Compiled Steps", "Remove"].map((text) => <th key={text} className="p-2">{text}</th>)}</tr></thead><tbody>{group.map((order) => <tr className="border-t" key={order.ScheduleId}><td className="p-2 font-mono">{order.ScheduleId}</td><td>{blueprints.find((bp) => bp.ChecklistCode === order.ChecklistCode)?.Title}</td><td><FrequencyPill code={order.frequencyCode} /></td><td><CompiledPreview id={order.ChecklistCode} blueprints={data.blueprints.filter((bp) => bp.SiteId === site)} /></td><td><button className={button} disabled={!canAssign || busy} onClick={() => void remove(order)}>Remove</button></td></tr>)}</tbody></table></div>
+            <CycleStrip schedules={group} equipment={asset.EquipmentCode} />
+          </section>;
+        })}
+        {!assetOrders.length && <p>No blueprints assigned to this equipment.</p>}
+      </>}</section>
+    </div>}
+    {tab === 2 && <section className="space-y-3 rounded-xl border bg-white p-4">
+      <div className="flex flex-wrap gap-2"><select aria-label="Filter by blueprint" className={field} value={filters.blueprint} onChange={(e) => setFilters({ ...filters, blueprint: e.target.value })}><option value="">All Blueprints</option>{blueprints.map((bp) => <option key={bp.ChecklistCode} value={bp.ChecklistCode}>{bp.Title}</option>)}</select><select aria-label="Filter by family" className={field} value={filters.family} onChange={(e) => setFilters({ ...filters, family: e.target.value })}><option value="">All Families / Standalone</option><option value="standalone">Standalone</option>{families.map((id) => <option key={id} value={id}>{blueprints.find((bp) => bp.familyId === id)?.familyName}</option>)}</select><select aria-label="Filter frequency" className={field} value={filters.frequency} onChange={(e) => setFilters({ ...filters, frequency: e.target.value })}><option value="">All Frequencies</option>{codes.map((code) => <option key={code}>{code}</option>)}</select><input aria-label="Filter equipment" className={field} placeholder="Equipment" value={filters.equipment} onChange={(e) => setFilters({ ...filters, equipment: e.target.value })} /></div>
+      <p className="text-sm">Select orders here for the WR Generator. Frequency comes exclusively from the linked blueprint.</p>
+      <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr>{["Select", "PMS #", "Equipment", "Room", "Blueprint", "Family / Standalone", "Locked Freq", "Anchor Date", "Default Tech"].map((text) => <th key={text} className="p-2">{text}</th>)}</tr></thead><tbody>{orders.filter((order) => {
+        const bp = blueprints.find((item) => item.ChecklistCode === order.ChecklistCode)!;
+        const machine = equipment.find((item) => order.EquipmentCodes.includes(item.EquipmentCode));
+        return (!filters.blueprint || bp.ChecklistCode === filters.blueprint) && (!filters.family || (filters.family === "standalone" ? bp.blueprintMode === "standalone" : bp.familyId === filters.family)) && (!filters.frequency || bp.frequencyCode === filters.frequency) && matching(`${machine?.EquipmentCode} ${machine?.EquipmentName}`, filters.equipment);
+      }).map((order) => <tr className="border-t" key={order.ScheduleId}><td className="p-2"><input type="checkbox" aria-label={`Select PMS ${order.ScheduleId}`} checked={selectedOrders.includes(order.ScheduleId)} onChange={(e) => setSelectedOrders((current) => e.target.checked ? [...current, order.ScheduleId] : current.filter((id) => id !== order.ScheduleId))} /></td><td className="font-mono">{order.ScheduleId}</td><td><button className="text-blue-700 underline" onClick={() => { setSelectedEquipment(order.EquipmentCodes[0]); setTab(1); }}>{order.EquipmentCodes[0]}</button></td><td>{order.RoomCode}</td><td>{blueprints.find((bp) => bp.ChecklistCode === order.ChecklistCode)?.Title}</td><td>{order.suppressionMode === "independent" ? "Standalone" : order.suppressionGroupName}</td><td><FrequencyPill code={order.frequencyCode} /></td><td>{order.anchorDate}</td><td>{order.defaultTechnicianNames?.join(", ") || "Not set"}</td></tr>)}</tbody></table></div>
+    </section>}
+    {tab === 3 && <section className="space-y-4"><div className="flex flex-wrap items-end gap-3 rounded-xl border p-4"><label>Generation mode<select className={`ml-2 ${field}`} value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}><option value="horizon">All orders within horizon</option><option value="selected">Selected orders ({selectedOrders.length})</option><option value="single">Single selected order</option></select></label><label>Horizon days<input className={`${field} ml-2 w-24`} type="number" min={1} max={365} value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} /></label><button className={button} disabled={busy || !canGenerate} onClick={() => void generate()}>Generate PM WRs</button><button disabled={busy || !canGenerate} className={button} onClick={() => void reconcile()}>⚡ Reconcile &amp; Suppress Overlapping Open PMs</button></div>
+      <SuppressionLog entries={(data.suppressedPmOccurrences ?? []).filter((entry) => entry.siteId === site && equipment.some((item) => item.EquipmentCode === entry.equipmentCode))} onOpen={setOpen} />
+      <details className="rounded border p-3"><summary className="cursor-pointer font-semibold">Craftperson VPA &amp; Shift Management</summary><CraftpersonShiftWorkspace /></details>
+    </section>}
+    {familyDialog && <div role="dialog" aria-modal="true" aria-label="New blueprint family" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"><form className="space-y-4 rounded-xl bg-white p-5" onSubmit={(e) => {
+      e.preventDefault();
+      if (!canBlueprint || !familyName.trim()) { setError("A family name and blueprint definition permission are required."); return; }
+      if (!permittedTrade(familyTrade)) { setError("This trade is outside your VPA."); return; }
+      const id = `FAM-${site}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      setCreating({ ChecklistCode: `${site}-BP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, SiteId: site, familyId: id, familyName: familyName.trim(), TradeId: familyTrade, blueprintMode: "family_ladder", frequencyCode: "03M" });
+      setFamilyDialog(false); setTab(0);
+    }}><h2 className="font-bold">New Family · define its first frequency blueprint</h2>{error && <p role="alert" className="rounded bg-rose-100 p-2 text-rose-900">{error}</p>}<input required className={field} aria-label="Family name" placeholder="Family name" value={familyName} onChange={(e) => setFamilyName(e.target.value)} /><select aria-label="Family trade" className={field} value={familyTrade} onChange={(e) => setFamilyTrade(e.target.value)}>{CLASSICAL_TRADES.filter(permittedTrade).map((trade) => <option key={trade}>{trade}</option>)}</select><div className="flex gap-2"><button className={button}>Continue to Checklist</button><button type="button" className={button} onClick={() => setFamilyDialog(false)}>Cancel</button></div></form></div>}
+    {assign && <div role="dialog" aria-modal="true" aria-label="Assign blueprints to equipment" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"><div className="max-h-[90vh] w-full max-w-3xl space-y-3 overflow-auto rounded-xl bg-white p-5"><h2 className="text-lg font-bold">Assign Family / Blueprint to Equipment</h2><p className="text-sm">Choose blueprints and machines. Frequency and family rules are read-only; existing equipment-family anchors are retained.</p>
+      {error && <p role="alert" className="rounded bg-rose-100 p-2 text-rose-900">{error}</p>}
+      <div className="grid gap-3 md:grid-cols-2"><fieldset className="max-h-64 space-y-2 overflow-auto rounded border p-2"><legend>Checklist Blueprints</legend>{blueprints.map((bp) => <label key={bp.ChecklistCode} className="block text-sm"><input type="checkbox" checked={assign.blueprintIds.includes(bp.ChecklistCode)} onChange={(e) => setAssign({ ...assign, blueprintIds: e.target.checked ? [...assign.blueprintIds, bp.ChecklistCode] : assign.blueprintIds.filter((id) => id !== bp.ChecklistCode) })} /> {bp.Title} <FrequencyPill code={bp.frequencyCode} /><span className="block pl-5 text-xs text-slate-500">{bp.familyName ?? "Standalone"}</span></label>)}</fieldset>
+        <fieldset className="max-h-64 space-y-2 overflow-auto rounded border p-2"><legend>Equipment</legend><input className={field} placeholder="Search machines" aria-label="Search assignment machines" value={assignmentQuery} onChange={(e) => setAssignmentQuery(e.target.value)} />{equipment.filter((item) => matching(`${item.EquipmentCode} ${item.EquipmentName}`, assignmentQuery)).map((item) => <label key={item.EquipmentCode} className="block text-sm"><input type="checkbox" checked={assign.equipmentIds.includes(item.EquipmentCode)} onChange={(e) => setAssign({ ...assign, equipmentIds: e.target.checked ? [...assign.equipmentIds, item.EquipmentCode] : assign.equipmentIds.filter((id) => id !== item.EquipmentCode) })} /> {item.EquipmentCode} · {item.EquipmentName}</label>)}</fieldset></div>
+      {(() => {
+        const anchors = assign.equipmentIds.flatMap((id) => assign.blueprintIds.flatMap((bpId) => {
+          const bp = blueprints.find((item) => item.ChecklistCode === bpId);
+          const anchor = bp ? sharedFamilyAnchor(data.schedules, data.blueprints, id, bp) : undefined;
+          return anchor ? [{ id, anchor, family: bp!.familyName }] : [];
+        }));
+        const locked = assign.equipmentIds.length === 1 && assign.blueprintIds.length === 1 && anchors.length === 1;
+        return <><label>Anchor Date <input type="date" required className={field} disabled={locked} value={locked ? anchors[0].anchor : assign.anchor} onChange={(e) => setAssign({ ...assign, anchor: e.target.value })} /></label>{anchors.map((item, i) => <p key={`${item.id}-${i}`} className="text-xs text-blue-800">{item.id} · {item.family}: locked to {item.anchor}</p>)}</>;
+      })()}
+      <div className="flex gap-2"><button disabled={busy || !canAssign} className={button} onClick={() => void assignOrders()}>Create PMS Orders</button><button disabled={busy} className={button} onClick={() => setAssign(undefined)}>Cancel</button></div>
+    </div></div>}
+    {currentWr?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={currentWr} onClose={() => setOpen(undefined)} onNavigate={setOpen} onEscalateToLJ={() => setError("Create Long Jobs from the work request overview.")} />}
+  </div>;
+}
 
-  const handleGenerateWRs = () => {
-    if (!permissions?.canGeneratePM_WR) { alert("Permission required: Generate PM WR."); return; }
-    try {
-      const result = generatePMWorkRequests({ schedules: data.schedules, blueprints: data.blueprints,
-        equipment: data.equipment, workRequests: data.workRequests, siteId: activeSiteId, mode: generatorMode,
-        selectedIds: selectedScheduleIds, horizonDays, now: new Date(), craftspeople: data.craftspeople, suppressedPmOccurrences: data.suppressedPmOccurrences,
-        actor: { id: currentUser?.UserId ?? "current-user", name: currentUser?.DisplayName ?? "Current user", role: currentRole } });
-      setData((current) => ({ ...current, schedules: result.schedules, workRequests: result.workRequests, suppressedPmOccurrences: result.suppressedPmOccurrences }));
-      alert(`Generated ${result.generated} work request(s); skipped ${result.skipped} duplicate cycle(s). Meter-based schedules are excluded from horizon generation.`);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Could not generate work requests.");
-    }
-  };
+function CompiledPreview({ id, blueprints }: { id: string; blueprints: PM_ChecklistStandard[] }) {
+  const steps = compileBlueprintChecklist(id, blueprints);
+  return <details><summary className="cursor-pointer text-blue-700">{steps.length} steps · preview</summary><div className="max-h-64 space-y-2 overflow-auto rounded border p-2">{steps.map((step) => <p key={step.StepId} className="text-xs"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title}{step.replacesStepLabel && <span className="block text-amber-800">{step.replacesStepLabel}</span>}</p>)}</div></details>;
+}
 
-  const assignBlueprint = () => {
-    if (!permissions?.canAssignPMPToEQ) { alert("Permission required: Assign PMP to EQ."); return; }
-    const blueprint = blueprints.find((item) => item.ChecklistCode === assignmentBlueprint && item.IsActive);
-    if (!blueprint) { alert("Select an active checklist blueprint."); return; }
-    if (!assignmentEquipmentCodes.length) { alert("Select at least one equipment item."); return; }
-    const now = new Date().toISOString();
-    const assignedEquipment = siteEquipment.filter((item) => assignmentEquipmentCodes.includes(item.EquipmentCode));
-    const allSame = <K extends "bl_id" | "LevelName" | "RoomCode">(key: K) =>
-      assignedEquipment.length > 0 && assignedEquipment.every((item) => item[key] === assignedEquipment[0][key])
-        ? assignedEquipment[0][key]
-        : undefined;
-    const targetLocation = {
-      bl_id: assignmentLocation.building?.bl_id ?? allSame("bl_id"),
-      LevelName: assignmentLocation.floor?.LevelName ?? allSame("LevelName"),
-      RoomCode: assignmentLocation.room?.RoomCode ?? allSame("RoomCode"),
-    };
-    const selectedCodes = new Set(assignmentEquipmentCodes);
-    const existing = data.schedules.find((schedule) =>
-      schedule.SiteId === activeSiteId && schedule.ChecklistCode === blueprint.ChecklistCode &&
-      schedule.bl_id === targetLocation.bl_id &&
-      schedule.LevelName === targetLocation.LevelName &&
-      schedule.RoomCode === targetLocation.RoomCode &&
-      (schedule.EquipmentCodes.some((code) => selectedCodes.has(code)) || schedule.EquipmentCodes.length === 0));
-    const schedule: PM_Schedule = existing ? {
-      ...existing,
-      EquipmentCodes: Array.from(new Set([...existing.EquipmentCodes, ...assignmentEquipmentCodes])),
-      UpdatedAt: now,
-    } : {
-      ...suppressionConfig(blueprint),
-      ScheduleId: `PMS-${crypto.randomUUID()}`, ChecklistCode: blueprint.ChecklistCode, SiteId: activeSiteId,
-      EquipmentCodes: assignmentEquipmentCodes, ...targetLocation,
-      Frequency: "Monthly", FrequencyInterval: 1, LeadTimeDays: 3, MarginWindowDays: 5,
-      NextDueDate: new Date().toISOString().slice(0, 10), IsActive: true,
-      CreatedBy: currentUser?.UserId ?? "current-user", CreatedAt: now, UpdatedAt: now,
-    };
-    const parsed = PM_ScheduleSchema.safeParse(schedule);
-    if (!parsed.success) { alert(parsed.error.issues.map((issue) => issue.message).join("\n")); return; }
-    setData((current) => ({ ...current, schedules: existing
-      ? current.schedules.map((item) => item.SiteId === activeSiteId && item.ScheduleId === existing.ScheduleId ? parsed.data : item)
-      : [...current.schedules, parsed.data] }));
-    setAssignmentEquipmentCodes([]);
-    alert(`Assigned ${blueprint.ChecklistCode} to ${assignmentEquipmentCodes.length} equipment item(s).`);
-  };
-
-  return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className={activeTab === "craftpeople" ? "w-full max-w-none px-4" : "max-w-7xl mx-auto"}>
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-4xl font-bold text-gray-900">SmartPM Engine</h1>
-          <p className="text-gray-600 mt-2">
-            Preventive Maintenance Scheduling & Work Request Generation
-          </p>
-        </div>
-
-        {/* Tabs */}
-        <div className="bg-white rounded-t-lg border-b border-gray-200 mb-6">
-          <div className="px-6 py-4 flex flex-wrap gap-3">
-            <button onClick={() => setActiveTab("suppression")} className={`px-4 py-2 font-semibold border-b-2 ${activeTab === "suppression" ? "text-blue-600 border-blue-600" : "border-transparent text-gray-600"}`}>🔗 Suppression Groups &amp; Nested Cycles</button>
-            <button
-              onClick={() => setActiveTab("schedules")}
-              className={`px-4 py-2 font-semibold border-b-2 transition-colors ${
-                activeTab === "schedules"
-                  ? "text-blue-600 border-blue-600"
-                  : "text-gray-600 border-transparent hover:text-gray-900"
-              }`}
-            >
-              PM Schedules
-            </button>
-            <button
-              onClick={() => setActiveTab("blueprints")}
-              className={`px-4 py-2 font-semibold border-b-2 transition-colors ${
-                activeTab === "blueprints"
-                  ? "text-blue-600 border-blue-600"
-                  : "text-gray-600 border-transparent hover:text-gray-900"
-              }`}
-            >
-              Checklist Blueprints
-            </button>
-            <button
-              onClick={() => setActiveTab("generator")}
-              className={`px-4 py-2 font-semibold border-b-2 transition-colors ${
-                activeTab === "generator"
-                  ? "text-blue-600 border-blue-600"
-                  : "text-gray-600 border-transparent hover:text-gray-900"
-              }`}
-            >
-              WR Generator
-            </button>
-            <button onClick={() => setActiveTab("assignment")}
-              className={`px-4 py-2 font-semibold border-b-2 ${activeTab === "assignment" ? "text-blue-600 border-blue-600" : "text-gray-600 border-transparent hover:text-gray-900"}`}>
-              Assign PMP to EQ
-            </button>
-            <button onClick={() => setActiveTab("craftpeople")}
-              className={`px-4 py-2 font-semibold border-b-2 ${activeTab === "craftpeople" ? "text-blue-600 border-blue-600" : "text-gray-600 border-transparent hover:text-gray-900"}`}>
-              Manage Craftperson
-            </button>
-          </div>
-        </div>
-
-        {/* Tab Content */}
-        <div className="bg-white rounded-b-lg p-6">
-          {activeTab === "suppression" && <SuppressionWorkspace key={activeSiteId} />}
-          {(activeTab === "schedules" || activeTab === "blueprints") && <button className="mb-3 text-sm text-blue-700 underline" onClick={() => setActiveTab("suppression")}>Configure suppression mode, group, shared anchor and layered checklist steps →</button>}
-          {((activeTab === "schedules" && !permissions?.canDefinePMSchedule) || (activeTab === "blueprints" && !permissions?.canDefineChecklistPM) || (activeTab === "generator" && !permissions?.canGeneratePM_WR) || (activeTab === "assignment" && !permissions?.canAssignPMPToEQ)) && <p role="status" className="mb-3 rounded bg-amber-100 p-3 text-amber-900">Permission required: ask a site administrator to grant access to this action.</p>}
-          {activeTab === "schedules" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-gray-900">PM Schedules</h2>
-                <button
-                  type="button"
-                  disabled={!permissions?.canDefinePMSchedule}
-                  onClick={() => openSchedule()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Create PM Schedule
-                </button>
-              </div>
-              <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                <table className="w-full">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
-                        Schedule ID
-                      </th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
-                        Checklist
-                      </th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
-                        Equipment
-                      </th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
-                        Frequency
-                      </th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
-                        Lead Time
-                      </th>
-                      <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {visibleSchedules.map((schedule) => (
-                      <tr key={schedule.scheduleId} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm font-medium text-blue-600">
-                          {schedule.scheduleId}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {schedule.checklistCode}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {schedule.equipmentCodes.join(", ")}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                            {schedule.frequency}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {schedule.leadTimeDays} days
-                        </td>
-                        <td className="px-6 py-4 text-right space-x-2">
-                          <button disabled={!permissions?.canDefinePMSchedule} onClick={() => openSchedule(data.schedules.find((item) => item.ScheduleId === schedule.scheduleId && item.SiteId === activeSiteId))} className="text-blue-600 hover:text-blue-800 text-sm font-medium disabled:opacity-40">
-                            Edit
-                          </button>
-                          <button disabled={!permissions?.canDefinePMSchedule} onClick={() => {
-                            if (data.workRequests.some((wr) => wr.SiteId === activeSiteId && wr.ScheduleId === schedule.scheduleId)) {
-                              alert("Schedules with work requests cannot be deleted.");
-                              return;
-                            }
-                            if (confirm("Delete this schedule?")) setData((current) => ({ ...current,
-                              schedules: current.schedules.filter((item) => item.SiteId !== activeSiteId || item.ScheduleId !== schedule.scheduleId) }));
-                          }} className="text-red-600 hover:text-red-800 text-sm font-medium">
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "blueprints" && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold">Saved Blueprints</h2>
-              {blueprints.length === 0 && <p>No blueprints for this site.</p>}
-              {blueprints.map((blueprint) => (
-                <div key={blueprint.ChecklistCode} className="flex items-center justify-between border rounded p-3">
-                  <span>{blueprint.ChecklistCode} — {blueprint.Title}</span>
-                  <button disabled={!permissions?.canDefineChecklistPM} className="text-blue-600 disabled:opacity-40" onClick={() => { setEditing(blueprint); setBuilderVersion((version) => version + 1); }}>Edit</button>
-                </div>
-              ))}
-              <button disabled={!permissions?.canDefineChecklistPM} className="text-blue-600 disabled:opacity-40" onClick={() => { setEditing(undefined); setBuilderVersion((version) => version + 1); }}>New Blueprint</button>
-              {permissions?.canDefineChecklistPM && <ChecklistBuilder key={`${activeSiteId}-${builderVersion}`} initialBlueprint={editing} onSave={handleBlueprintSave} />}
-            </div>
-          )}
-
-          {activeTab === "generator" && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900">
-                Generate Work Requests
-              </h2>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-blue-900 mb-4">
-                  Generation Mode
-                </h3>
-                <div className="space-y-3">
-                  <label className="flex items-center gap-3 p-4 border-2 border-blue-300 rounded-lg cursor-pointer hover:bg-blue-100">
-                    <input
-                      type="radio"
-                      name="mode"
-                      value="single"
-                      checked={generatorMode === "single"}
-                      onChange={() => { setGeneratorMode("single"); setSelectedScheduleIds([]); }}
-                      className="w-5 h-5"
-                    />
-                    <div>
-                      <p className="font-semibold text-blue-900">Single Schedule</p>
-                      <p className="text-sm text-blue-700">
-                        Generate one WR from a single PM Schedule
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 p-4 border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="radio"
-                      name="mode"
-                      value="selected"
-                      checked={generatorMode === "selected"}
-                      onChange={() => { setGeneratorMode("selected"); setSelectedScheduleIds([]); }}
-                      className="w-5 h-5"
-                    />
-                    <div>
-                      <p className="font-semibold text-gray-900">Selected Schedules</p>
-                      <p className="text-sm text-gray-600">
-                        Generate WRs from multiple selected schedules at once
-                      </p>
-                    </div>
-                  </label>
-
-                  <label className="flex items-center gap-3 p-4 border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="radio"
-                      name="mode"
-                      value="horizon"
-                      checked={generatorMode === "horizon"}
-                      onChange={(e) => setGeneratorMode("horizon")}
-                      className="w-5 h-5"
-                    />
-                    <div>
-                      <p className="font-semibold text-gray-900">Horizon Generation</p>
-                      <p className="text-sm text-gray-600">
-                        Auto-generate all due WRs for the next X days
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {generatorMode === "horizon" && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Horizon Period (days)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="365"
-                    value={horizonDays}
-                    onChange={(e) => setHorizonDays(parseInt(e.target.value))}
-                    className="w-full max-w-xs px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-sm text-gray-600 mt-2">
-                    Default: 30 days. Prevents duplicate cycle WRs automatically.
-                  </p>
-                </div>
-              )}
-              {generatorMode !== "horizon" && <fieldset className="border rounded p-4 space-y-2">
-                <legend>Select schedules</legend>
-                {data.schedules.filter((schedule) => schedule.SiteId === activeSiteId && schedule.IsActive).map((schedule) =>
-                  <label key={schedule.ScheduleId} className="block">
-                    <input type={generatorMode === "single" ? "radio" : "checkbox"} name={generatorMode === "single" ? "schedule" : undefined}
-                      checked={selectedScheduleIds.includes(schedule.ScheduleId)} onChange={(event) => setSelectedScheduleIds(
-                        generatorMode === "single" ? [schedule.ScheduleId] : event.target.checked
-                          ? [...selectedScheduleIds, schedule.ScheduleId] : selectedScheduleIds.filter((id) => id !== schedule.ScheduleId))} />{" "}
-                    {schedule.ScheduleId} — {schedule.ChecklistCode} — due {schedule.NextDueDate}
-                  </label>)}
-              </fieldset>}
-
-              <button
-                onClick={handleGenerateWRs}
-                disabled={!permissions?.canGeneratePM_WR}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-lg"
-              >
-                Generate Work Requests
-              </button>
-
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-2">
-                <p className="font-semibold text-green-900">✓ Generation Features</p>
-                <ul className="text-sm text-green-800 space-y-1">
-                  <li>• Automatic duplicate cycle detection</li>
-                  <li>• Location hierarchy auto-resolution (Equipment → Room → Floor → Building)</li>
-                  <li>• Initial status set to 50% Issued</li>
-                  <li>• All PM_WorkRequestStep and PM_StepOption records instantiated</li>
-                  <li>• SLA and MarginDate auto-calculated</li>
-                </ul>
-              </div>
-            </div>
-          )}
-          {activeTab === "assignment" && <div className="space-y-5">
-            <div><h2 className="text-2xl font-bold">Assign PMP to EQ</h2><p className="text-sm text-slate-600">Assign one blueprint to selected equipment; an existing PM schedule is updated instead of duplicated.</p></div>
-            <label className="block text-sm font-medium">Checklist Blueprint
-              <select value={assignmentBlueprint} onChange={(event) => setAssignmentBlueprint(event.target.value)} className="mt-1 block w-full max-w-xl rounded border px-3 py-2">
-                <option value="">Select a blueprint</option>{blueprints.filter((item) => item.IsActive).map((item) => <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.ChecklistCode} — {item.Title}</option>)}
-              </select>
-            </label>
-            <LocationEquipmentPickerGroup buildings={siteBuildings} floors={siteFloors} rooms={siteRooms} equipment={siteEquipment}
-              selectedBuilding={assignmentLocation.building} selectedFloor={assignmentLocation.floor} selectedRoom={assignmentLocation.room}
-              selectedEquipmentCodes={assignmentEquipmentCodes} onLocationChange={setAssignmentLocation}
-              onEquipmentChange={setAssignmentEquipmentCodes} />
-            <p className="text-sm text-slate-600">Selected: {assignmentEquipmentCodes.length} equipment item(s).</p>
-            <button type="button" disabled={!permissions?.canAssignPMPToEQ} onClick={assignBlueprint} className="rounded bg-blue-700 px-5 py-3 font-semibold text-white disabled:opacity-40">Assign selected equipment</button>
-          </div>}
-          {activeTab === "craftpeople" && <CraftpersonShiftWorkspace key={activeSiteId} />}
-        </div>
-      </div>
-      {scheduleModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <form
-            onSubmit={handleCreateSchedule}
-            className="w-full max-w-3xl max-h-[92vh] overflow-y-auto bg-white rounded-xl shadow-xl"
-          >
-            <header className="px-6 py-4 border-b flex items-center justify-between">
-              <h2 className="text-xl font-bold">{editingSchedule ? "Edit" : "Create"} PM Schedule</h2>
-              <button
-                type="button"
-                onClick={() => setScheduleModalOpen(false)}
-                aria-label="Close PM Schedule modal"
-                className="p-2"
-              >
-                ✕
-              </button>
-            </header>
-            <div className="p-6 space-y-4">
-              <label className="block text-sm font-medium">
-                Checklist Code
-                <select
-                  required
-                  value={scheduleChecklistCode}
-                  onChange={(event) => {
-                    setScheduleChecklistCode(event.target.value);
-                    if (!editingSchedule) setScheduleSuppression(suppressionConfig(blueprints.find((item) => item.ChecklistCode === event.target.value)));
-                  }}
-                  className="mt-1 w-full px-3 py-2 border rounded"
-                ><option value="">Select a blueprint</option>{blueprints.filter((item) => item.IsActive).map((item) =>
-                  <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.ChecklistCode} — {item.Title}</option>)}</select>
-              </label>
-              <LocationEquipmentPickerGroup
-                buildings={siteBuildings}
-                floors={siteFloors}
-                rooms={siteRooms}
-                equipment={siteEquipment}
-                selectedBuilding={scheduleLocation.building}
-                selectedFloor={scheduleLocation.floor}
-                selectedRoom={scheduleLocation.room}
-                selectedEquipmentCodes={scheduleEquipmentCodes}
-                onLocationChange={setScheduleLocation}
-                onEquipmentChange={setScheduleEquipmentCodes}
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label className="block text-sm font-medium">
-                  Frequency
-                  <select
-                    value={scheduleFrequency}
-                    onChange={(event) =>
-                      setScheduleFrequency(event.target.value as PM_Schedule["Frequency"])
-                    }
-                    className="mt-1 w-full px-3 py-2 border rounded"
-                  >
-                    {["Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Meter-based"].map(
-                      (frequency) => (
-                        <option key={frequency} value={frequency}>
-                          {frequency}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-                <label className="block text-sm font-medium">
-                  Next Due Date
-                  <input
-                    type="date"
-                    required
-                    value={scheduleDueDate}
-                    onChange={(event) => setScheduleDueDate(event.target.value)}
-                    className="mt-1 w-full px-3 py-2 border rounded"
-                  />
-                </label>
-                <label className="block text-sm font-medium">
-                  Lead Time Days
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={scheduleLeadTime}
-                    onChange={(event) => setScheduleLeadTime(Number(event.target.value))}
-                    className="mt-1 w-full px-3 py-2 border rounded"
-                  />
-                </label>
-                <label className="block text-sm font-medium">
-                  Margin Window Days
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={scheduleMarginWindow}
-                    onChange={(event) =>
-                      setScheduleMarginWindow(Number(event.target.value))
-                    }
-                    className="mt-1 w-full px-3 py-2 border rounded"
-                  />
-                </label>
-                {scheduleFrequency === "Meter-based" && (
-                  <>
-                    <label className="block text-sm font-medium">
-                      Meter Type
-                      <input
-                        required
-                        value={scheduleMeterType}
-                        onChange={(event) => setScheduleMeterType(event.target.value)}
-                        className="mt-1 w-full px-3 py-2 border rounded"
-                      />
-                    </label>
-                    <label className="block text-sm font-medium">
-                      Meter Interval
-                      <input
-                        type="number"
-                        required
-                        min="0.01"
-                        step="any"
-                        value={scheduleMeterInterval}
-                        onChange={(event) =>
-                          setScheduleMeterInterval(Number(event.target.value))
-                        }
-                        className="mt-1 w-full px-3 py-2 border rounded"
-                      />
-                    </label>
-                  </>
-                )}
-                <PMSuppressionFields value={scheduleSuppression} onChange={setScheduleSuppression} />
-              </div>
-            </div>
-            <footer className="px-6 py-4 border-t flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setScheduleModalOpen(false)}
-                className="px-4 py-2 bg-gray-200 text-gray-800 rounded"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                {editingSchedule ? "Save Schedule" : "Create Schedule"}
-              </button>
-            </footer>
-          </form>
-        </div>
-      )}
-    </div>
-  );
+function CycleStrip({ schedules, equipment }: { schedules: PM_Schedule[]; equipment: string }) {
+  const from = schedules[0].anchorDate!;
+  const preview = previewCycles(schedules, equipment, from, 12);
+  return <div className="space-y-2"><p className="rounded bg-emerald-50 p-2 text-sm font-semibold">Result: {preview.winners.length} WRs/year instead of {preview.winners.length + preview.suppressed.length} — {preview.suppressed.length} duplicates prevented</p><div className="flex max-h-64 flex-wrap gap-2 overflow-auto">{preview.winners.map((item) => {
+    const lower = preview.suppressed.filter((entry) => occurrenceKey(entry.coveredBy) === occurrenceKey(item));
+    return <article key={occurrenceKey(item)} className="rounded border p-2 text-xs"><strong>{item.dueDate} · PMS #{item.schedule.ScheduleId}</strong><p><FrequencyPill code={frequencyOf(item.schedule)} /></p>{lower.length > 0 && <p className="text-amber-800">Suppresses {lower.map((entry) => `PMS #${entry.occurrence.schedule.ScheduleId} (${frequencyOf(entry.occurrence.schedule)})`).join(", ")}</p>}</article>;
+  })}</div></div>;
 }

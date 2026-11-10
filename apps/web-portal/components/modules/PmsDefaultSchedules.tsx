@@ -7,14 +7,12 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { addDays, calendarDate } from "@/lib/dispatch";
 import { RECURRENCE_PATTERNS, WEEKDAY_LABELS, applyPmsAutoSchedule, frequencyLabel, isAutoScheduleReady, nextScheduledDate, timeWindowLabel } from "@/lib/pms-auto-schedule";
 import { reconcileOpenPMs } from "@/lib/pm-suppression";
+import { createPmOrder } from "@/lib/pm-orders";
+import { FrequencyPill } from "../common/PmFrequency";
 
 type Pattern = (typeof RECURRENCE_PATTERNS)[number];
 const input = "rounded border bg-white px-1 py-0.5 text-xs";
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50";
-const FREQUENCY_FOR: Record<Pattern, { Frequency: PM_Schedule["Frequency"]; FrequencyInterval: number }> = {
-  Daily: { Frequency: "Daily", FrequencyInterval: 1 }, Weekly: { Frequency: "Weekly", FrequencyInterval: 1 },
-  Biweekly: { Frequency: "Weekly", FrequencyInterval: 2 }, Monthly: { Frequency: "Monthly", FrequencyInterval: 1 }, Quarterly: { Frequency: "Quarterly", FrequencyInterval: 1 },
-};
 
 export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) => void }) {
   const { data, commitSnapshot } = useCafmStore();
@@ -42,8 +40,12 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
 
   const save = async (next: PM_Schedule[], message: string, workRequests = data.workRequests) => {
     if (!canEdit) { onNotice("Scheduling permission is required to change PMS default schedules."); return; }
-    await commitSnapshot(data, { ...data, schedules: next, workRequests }, { optimistic: true });
-    onNotice(message);
+    try {
+      await commitSnapshot(data, { ...data, schedules: next, workRequests }, { optimistic: true });
+      onNotice(message);
+    } catch (problem) {
+      onNotice(problem instanceof Error ? problem.message : "Could not save PMS default schedule.");
+    }
   };
   const patch = (id: string, changes: Partial<PM_Schedule>, message = "PMS default schedule saved.") =>
     save(data.schedules.map((item) => item.ScheduleId === id ? { ...item, ...changes, UpdatedAt: new Date().toISOString() } : item), message);
@@ -59,16 +61,16 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
     const equipment = data.equipment.find((item) => item.SiteId === activeSiteId && item.EquipmentCode === draft.equipmentCode);
     if (!draft.title.trim() || !blueprint || !equipment) { onNotice("Enter a title and choose a checklist blueprint and equipment."); return; }
     const anchor = calendarDate(new Date());
+    let order: PM_Schedule;
+    try { order = createPmOrder(data.schedules, data.blueprints, blueprint, equipment, anchor, activePerson, data.pmsOrderHighWatermark); }
+    catch (problem) { onNotice(problem instanceof Error ? problem.message : "Could not create PMS order."); return; }
     const rule: PM_Schedule = {
-      ScheduleId: `${activeSiteId.slice(-2) === "01" ? "S01" : `S${activeSiteId.slice(-2)}`}-PMS-R${Date.now().toString(36).toUpperCase()}`,
-      ChecklistCode: blueprint.ChecklistCode, SiteId: activeSiteId, EquipmentCodes: [equipment.EquipmentCode],
-      bl_id: equipment.bl_id, LevelName: equipment.LevelName, RoomCode: equipment.RoomCode,
-      ...FREQUENCY_FOR[draft.pattern], LeadTimeDays: 7, MarginWindowDays: 3, NextDueDate: anchor, IsActive: true, CreatedBy: activePerson,
+      ...order,
       Title: draft.title.trim(), autoScheduleEnabled: false, defaultRecurrencePattern: draft.pattern,
       defaultWeekdays: draft.pattern === "Daily" ? [1, 2, 3, 4, 5] : draft.pattern === "Weekly" || draft.pattern === "Biweekly" ? [1] : undefined,
       defaultDayOfMonth: draft.pattern === "Monthly" || draft.pattern === "Quarterly" ? 1 : undefined,
       defaultStartTime: "08:00", defaultDurationHours: 1, defaultAnchorDate: anchor,
-    } as PM_Schedule;
+    };
     void save([...data.schedules, rule], `Recurring tour "${rule.Title}" created. Choose a technician and switch Auto-Schedule on.`);
     setCreating(false);
   };
@@ -85,7 +87,7 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
       <datalist id="pms-title-suggestions"><option value="Daily Technical Plant Tour" /><option value="Weekly Chiller & AHU Inspection" /><option value="Weekly Backup Generator Check" /><option value="Monthly Boiler Safety Check" /></datalist>
       <label className="grid gap-0.5">Checklist blueprint<select className={input} value={draft.checklistCode} onChange={(e) => setDraft({ ...draft, checklistCode: e.target.value })}><option value="">Select…</option>{blueprints.map((item) => <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.Title}</option>)}</select></label>
       <label className="grid gap-0.5">Equipment<select className={input} value={draft.equipmentCode} onChange={(e) => setDraft({ ...draft, equipmentCode: e.target.value })}><option value="">Select…</option>{data.equipment.filter((item) => item.SiteId === activeSiteId && item.IsInstallation).map((item) => <option key={item.EquipmentCode} value={item.EquipmentCode}>{item.EquipmentCode} · {item.EquipmentName}</option>)}</select></label>
-      <label className="grid gap-0.5">Frequency<select className={input} value={draft.pattern} onChange={(e) => setDraft({ ...draft, pattern: e.target.value as Pattern })}>{RECURRENCE_PATTERNS.map((item) => <option key={item}>{item}</option>)}</select></label>
+      <label className="grid gap-0.5">Execution slot pattern (not blueprint frequency)<select className={input} value={draft.pattern} onChange={(e) => setDraft({ ...draft, pattern: e.target.value as Pattern })}>{RECURRENCE_PATTERNS.map((item) => <option key={item}>{item}</option>)}</select></label>
       <button type="button" className={button} onClick={create}>Create rule</button>
     </div>}
     <div className="grid gap-2 lg:grid-cols-2">
@@ -100,7 +102,7 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
         return <section key={pms.ScheduleId} className={`space-y-2 rounded border p-2 ${pms.autoScheduleEnabled ? "border-blue-400 bg-blue-50/40" : "bg-white"}`}>
           <div className="flex flex-wrap items-center gap-2">
             <strong>{pms.Title ?? `${pms.ChecklistCode} · ${pms.EquipmentCodes.join(", ")}`}</strong>
-            <span className="rounded bg-slate-100 px-1">{pms.ScheduleId}</span>
+            <span className="rounded bg-slate-100 px-1">PMS #{pms.ScheduleId}</span><FrequencyPill code={blueprints.find((bp) => bp.ChecklistCode === pms.ChecklistCode)?.frequencyCode} />
             <span className="rounded bg-slate-100 px-1">{tradeOf(pms) || "—"}</span>
             <span className="text-slate-600">{openCount} open PM WR(s)</span>
             <button type="button" role="switch" aria-checked={!!pms.autoScheduleEnabled} aria-label={`Auto-Schedule ${pms.ScheduleId}`} disabled={!canEdit}
@@ -121,7 +123,7 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
               <div className="flex flex-wrap items-center gap-1">
                 <select aria-label="Frequency" className={input} disabled={!canEdit} value={pms.defaultRecurrencePattern ?? ""} onChange={(e) => {
                   const next = e.target.value as Pattern;
-                  patch(pms.ScheduleId, { defaultRecurrencePattern: next, ...FREQUENCY_FOR[next],
+                  patch(pms.ScheduleId, { defaultRecurrencePattern: next,
                     defaultWeekdays: next === "Daily" ? [1, 2, 3, 4, 5] : next === "Weekly" || next === "Biweekly" ? (pms.defaultWeekdays?.length ? [pms.defaultWeekdays[0]] : [1]) : pms.defaultWeekdays,
                     defaultDayOfMonth: pms.defaultDayOfMonth ?? 1 });
                 }}><option value="">Select…</option>{RECURRENCE_PATTERNS.map((item) => <option key={item}>{item}</option>)}</select>

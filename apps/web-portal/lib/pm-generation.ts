@@ -3,7 +3,7 @@ import { applyAllPmsAutoSchedules } from "./pms-auto-schedule";
 import type { Craftsperson } from "./pms-auto-schedule";
 import type { BaseWorkRequest, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId } from "@cafm/shared-schema";
 import type { SuppressedPmOccurrence } from "@cafm/shared-schema";
-import { collisionWindow, compileChecklist, frequencyOf, isUnstarted, mergeSuppressionLogs, nextTickOnOrAfter, occurrenceKey, orderedFrequencies, planOccurrences, reconcileOpenPMs, sameLadder, shiftDays, suppressionLog, withCompiledScope } from "./pm-suppression";
+import { collisionWindow, compileChecklist, frequencyOf, isUnstarted, mergeSuppressionLogs, nextTickOnOrAfter, occurrenceKey, orderedFrequencies, planOccurrences, reconcileOpenPMs, resolveBlueprintSchedule, sameLadder, shiftDays, suppressionLog, withCompiledScope } from "./pm-suppression";
 import type { PmOccurrence } from "./pm-suppression";
 
 type Actor = { id: string; name: string; role: string };
@@ -47,6 +47,7 @@ function nextDue(schedule: PM_Schedule, due: string): string {
 }
 
 export function generatePMWorkRequests(input: GenerationInput): { workRequests: BaseWorkRequest[]; schedules: PM_Schedule[]; generated: number; skipped: number; suppressedPmOccurrences: SuppressedPmOccurrence[] } {
+  input = { ...input, schedules: input.schedules.map((item) => resolveBlueprintSchedule(item, input.blueprints)) };
   if (!Number.isInteger(input.horizonDays) || input.horizonDays < 1 || input.horizonDays > 365) throw new Error("Horizon must be between 1 and 365 days.");
   if (input.mode !== "horizon" && (input.selectedIds.length === 0 || (input.mode === "single" && input.selectedIds.length !== 1))) {
     throw new Error(input.mode === "single" ? "Select one schedule." : "Select at least one schedule.");
@@ -199,7 +200,7 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
         };
         const scoped = withCompiledScope(request, schedule, input.schedules, input.blueprints);
         const absorbed = occurrence ? plan.suppressed.filter((entry) => occurrenceKey(entry.coveredBy) === occurrenceKey(occurrence)).map((entry) => frequencyOf(entry.occurrence.schedule)!) : [];
-        scoped.absorbedFrequencies = orderedFrequencies(absorbed);
+        scoped.absorbedFrequencies = orderedFrequencies([...(scoped.absorbedFrequencies ?? []), ...absorbed]);
         scoped.StepAuditLogs = scoped.ChecklistSteps?.map((step) => ({ AuditLogId: crypto.randomUUID(), StepInstanceId: `${wrId}:${step.StepId}`, WR_ID: wrId, ActorId: input.actor.id, Action: "created", NewValue: structuredClone(step), OccurredAt: timestamp }));
         requests.push(scoped);
         if (occurrence) coveredIds.set(occurrenceKey(occurrence), wrId);

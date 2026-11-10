@@ -28,6 +28,9 @@ export interface ExtractedDesk {
   isPermanent: boolean;
 }
 export interface DemoData {
+  pmModelVersion?: 60;
+  pmMigrationNotes?: string[];
+  pmsOrderHighWatermark?: number;
   sites: SiteId[];
   buildings: Building[];
   floors: Floor[];

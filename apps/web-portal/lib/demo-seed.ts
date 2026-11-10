@@ -4,6 +4,7 @@ import type { DemoData } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
 import { expandSeededWorkRequests } from "./expanded-seed";
 import { seedNestedPM } from "./nested-pm-seed";
+import { migratePmState } from "./pm-orders";
 import { addDays, calendarDate } from "./dispatch";
 import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
@@ -21,6 +22,7 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
 export function scopeData(data: DemoData, site: SiteId): DemoData {
+  data = migratePmState(data);
   return {
     ...data,
     sites: [site],

@@ -248,6 +248,7 @@ export const BaseWorkRequestSchema = z.object({
   ActualCostEur: z.number().nonnegative().optional(),
   ParentPM_WR_ID: z.string().min(1).optional(),
   pmFrequency: z.string().optional(),
+  pmsId: z.string().regex(/^(?!00000)\d{5}$/).optional(),
   absorbedFrequencies: z.array(z.string()).optional(),
   suppressionGroupName: z.string().optional(),
   suppressedByWrId: z.string().optional(),

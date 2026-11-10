@@ -13,5 +13,5 @@ export function FrequencyPill({ code, inherited = false }: { code?: string; inhe
 }
 export function PmScope({ wr }: { wr: BaseWorkRequest }) {
   if (wr.WR_Type !== "PM" || !wr.pmFrequency) return null;
-  return <div className="rounded-lg border bg-slate-50 p-2 text-sm"><FrequencyPill code={wr.pmFrequency} /> Maintenance{wr.absorbedFrequencies?.length ? ` · Absorbed: ${wr.absorbedFrequencies.join(" + ")}` : ""} · {wr.ChecklistSteps?.length ?? wr.ChecklistInstances?.length ?? 0} steps total{wr.suppressionGroupName && <p className="text-xs text-slate-600">{wr.suppressionGroupName}</p>}{wr.suppressedByWrId && <p>Suppressed — covered by WR #{wr.suppressedByWrId}</p>}</div>;
+  return <div className="rounded-lg border bg-slate-50 p-2 text-sm"><FrequencyPill code={wr.pmFrequency} /> Maintenance{wr.pmsId ? ` · PMS #${wr.pmsId}` : ""}{wr.absorbedFrequencies?.length ? ` · Absorbed: ${wr.absorbedFrequencies.join(" + ")}` : ""} · {wr.ChecklistSteps?.length ?? wr.ChecklistInstances?.length ?? 0} steps total{wr.suppressionGroupName && <p className="text-xs text-slate-600">{wr.suppressionGroupName}</p>}{wr.suppressedByWrId && <p>Suppressed — covered by WR #{wr.suppressedByWrId}</p>}</div>;
 }

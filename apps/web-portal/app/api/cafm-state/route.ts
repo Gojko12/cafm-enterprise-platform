@@ -10,7 +10,8 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { PMSuppressionFields, SuppressedPmOccurrenceSchema } from "@cafm/shared-schema";
+import { PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema } from "@cafm/shared-schema";
+import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -121,6 +122,7 @@ const technicianFieldUpdateSchema = z.object({
 });
 const workRequestRecord = z.object({
   WR_ID: z.string().min(1),
+  pmsId: z.string().regex(/^(?!00000)\d{5}$/).optional(),
   ParentPM_WR_ID: z.string().min(1).optional(),
   ParentWR_ID: z.string().min(1).optional(),
   parentWrId: z.string().min(1).optional(),
@@ -142,14 +144,17 @@ const workRequestRecord = z.object({
 }).catchall(z.unknown()).refine((wr) => !wr.technicianFieldUpdates?.some((update) => update.wrId !== wr.WR_ID), { path: ["technicianFieldUpdates"], message: "Field update WR ID must match its work request." })
   .refine((wr) => !wr.qaTeamLeaderChallenges?.some((challenge) => challenge.wrId !== wr.WR_ID), { path: ["qaTeamLeaderChallenges"], message: "Challenge WR ID must match its work request." });
 const stateSchema = z.object({
+  pmModelVersion: z.literal(60).optional(),
+  pmMigrationNotes: z.array(z.string()).optional(),
+  pmsOrderHighWatermark: z.number().int().min(0).max(99999).optional(),
   sites: z.array(z.string().min(1)),
   buildings: records,
   floors: records,
   rooms: records,
   desks: records,
   equipment: records,
-  blueprints: z.array(z.object(PMSuppressionFields).catchall(z.unknown())),
-  schedules: z.array(z.object(PMSuppressionFields).catchall(z.unknown())),
+  blueprints: z.array(PM_LegacyChecklistStandardSchema),
+  schedules: z.array(PM_LegacyScheduleSchema),
   suppressedPmOccurrences: z.array(SuppressedPmOccurrenceSchema).optional(),
   craftspeople: records,
   userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
@@ -168,16 +173,23 @@ const stateSchema = z.object({
   auditTemplates: z.array(AuditTemplateSchema).optional(),
   auditImports: z.array(AuditImportSchema).optional(),
   workRequests: z.array(workRequestRecord),
-  deletedWorkRequests: records.optional(),
+  deletedWorkRequests: z.array(workRequestRecord).optional(),
   users: records,
   tradeRoleMappings: records,
   siteRoleMappings: records,
   mobileMutationIds: z.array(z.string().min(1)).optional(),
-}).strict();
+}).strict().transform((state, context) => {
+  try { return migratePmState(state); }
+  catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
+});
 const payloadSchema = z.object({ revision: z.number().int().nonnegative(), state: stateSchema });
 const envelopeSchema = z.object({ revision: z.number().int().positive(), state: stateSchema });
 const databaseSchema = z.object({
   sites: z.partialRecord(siteSchema, envelopeSchema),
+}).transform((database) => {
+  const entries = Object.entries(database.sites).sort(([a], [b]) => a.localeCompare(b));
+  const states = uniquePmsOrdersAcrossSites(entries.map(([, entry]) => entry.state));
+  return { sites: Object.fromEntries(entries.map(([site, entry], index) => [site, { ...entry, state: states[index] }])) };
 });
 type Database = z.infer<typeof databaseSchema>;
 type Backend = { kind: "supabase"; url: string; key: string } | { kind: "disk" | "temporary"; directory: string; filename: string; lockFile: string };
@@ -347,7 +359,9 @@ export async function GET(request: Request) {
   try {
     const storage = await backend();
     const { database } = await load(storage);
-    const response = reply(request, database.sites[site] ?? { revision: 0, state: null });
+    const current = database.sites[site];
+    const highWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => entry.state.schedules.map((order) => Number(order.ScheduleId))));
+    const response = reply(request, current ? { ...current, state: { ...current.state, pmsOrderHighWatermark: highWatermark } } : { revision: 0, state: null });
     response.headers.set("X-CAFM-Storage", storage.kind);
     return response;
   } catch (error) {
@@ -392,6 +406,15 @@ export async function POST(request: Request) {
     const duplicate = parsed.data.state.workRequests.find((wr) => typeof wr.OriginatingWR_ID === "string" && !existing.has(wr.WR_ID) && otherIds.has(wr.WR_ID));
     if (duplicate) return reply(request, { error: `Follow-up work request ID ${String(duplicate.WR_ID)} is already in use at another site.` }, 409);
     const forceReset = new URL(request.url).searchParams.get("reset") === "1" || (json as { forceReset?: unknown } | null)?.forceReset === true;
+    const otherOrders = new Set(Object.entries(database.sites).filter(([id]) => id !== site).flatMap(([, entry]) => entry.state.schedules.map((order) => order.ScheduleId)));
+    const existingOrders = new Set(current?.state.schedules.map((order) => order.ScheduleId) ?? []);
+    const collision = parsed.data.state.schedules.find((order) => !existingOrders.has(order.ScheduleId) && otherOrders.has(order.ScheduleId));
+    if (collision) return reply(request, { error: `PMS #${collision.ScheduleId} was allocated at another site. Refresh site data and retry the assignment.` }, 409);
+    if (!forceReset && current) {
+      const changed = parsed.data.state.blueprints.find((bp) => current.state.blueprints.some((old) =>
+        old.ChecklistCode === bp.ChecklistCode && old.SiteId === bp.SiteId && old.frequencyCode !== bp.frequencyCode));
+      if (changed) return reply(request, { error: `Blueprint ${changed.ChecklistCode} has a locked frequency. Create a new blueprint instead.` }, 400);
+    }
     const merged = forceReset || !current ? parsed.data.state : mergeNewerWorkRequests(current.state, parsed.data.state);
     const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(merged) };
     database.sites[site] = next;

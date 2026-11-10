@@ -1,1 +1,1 @@
-export const MOBILE_APP_VERSION = 'V9';
+export const MOBILE_APP_VERSION = 'V10';

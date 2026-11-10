@@ -12,6 +12,7 @@ import type { MobileAppDB, OfflinePhotoQueueEntry, SyncQueueEntry } from "./db";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema } from "../../../web-portal/lib/audit-assurance-types";
 import { AuditAssuranceSchema, EquipmentInspectionSheetSchema, completeEquipmentInspection, defaultKmisConfig } from "../../../web-portal/lib/equipment-inspection";
 import { seedSiteData } from "../../../web-portal/lib/demo-seed";
+import { migratePmState } from "../../../web-portal/lib/pm-orders";
 
 const workRequestSchema = z.custom<BaseWorkRequest>((value) => BaseWorkRequestSchema.safeParse(value).success);
 const stateSchema = z.object({
@@ -34,7 +35,10 @@ const stateSchema = z.object({
   auditSettings: AuditSettingsSchema.optional(),
   auditTemplates: z.array(AuditTemplateSchema).optional(),
   auditAssurance: AuditAssuranceSchema.optional(),
-}).passthrough();
+}).passthrough().transform((state, context) => {
+  try { return migratePmState(state); }
+  catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid PM blueprint family state." }); return z.NEVER; }
+});
 const responseSchema = z.object({ revision: z.number().int().nonnegative(), state: stateSchema.nullable() });
 const stepSchema = z.object({
   AuditId: z.string().min(1), StepId: z.string().min(1), WR_ID: z.string().min(1),
