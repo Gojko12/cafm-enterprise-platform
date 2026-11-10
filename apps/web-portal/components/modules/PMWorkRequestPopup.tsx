@@ -1,4 +1,5 @@
 "use client";
+import { FrequencyPill, PmScope } from "../common/PmFrequency";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -617,6 +618,7 @@ export function PMWorkRequestPopup({
         </nav>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <PmScope wr={workRequest} />
           {wrFreezes.length > 0 && <div className="mb-3"><FreezeBadge freezes={wrFreezes} /></div>}          {activeTab === "Work request details" && <div className="space-y-4">
             <WRDetailsEditor workRequest={workRequest} />
             {renderGroup("Work Request",
@@ -905,8 +907,10 @@ export function PMWorkRequestPopup({
                   const shownValue = answer
                     ? Array.isArray(answer.value) ? answer.value.join(", ") : String(answer.value)
                     : "—";
-                  return <tr key={step.StepId} className="border-t">
-                    <td className="p-3">{index + 1}</td><td className="p-3">{step.Title}</td>
+                  const originSteps = checklistSteps.filter((item) => item.originFrequency === step.originFrequency);
+                  const sectionStart = originSteps[0]?.StepId === step.StepId;
+                  return <React.Fragment key={step.StepId}>{sectionStart && step.originFrequency && <tr className="bg-slate-100"><th colSpan={7} className="p-3"><FrequencyPill code={step.originFrequency} /> {step.isInherited ? "Included routine checks (inherited)" : "Additional maintenance checks"} · {originSteps.length} steps</th></tr>}<tr className="border-t">
+                    <td className="p-3">{index + 1}</td><td className="p-3"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title}{step.replacesStepLabel && <p className="text-xs text-amber-800">{step.replacesStepLabel}</p>}</td>
                     <td className="p-3">{step.Unit ? `${step.MinThreshold ?? "—"}–${step.MaxThreshold ?? "—"} ${step.Unit}` : step.Unit ?? "—"}</td>
                     <td className="p-3">{shownValue}</td><td className="p-3">{finding ? "Yes" : "No"}</td>
                     <td className="p-3">{answer?.comment ?? "—"}</td>
@@ -916,7 +920,7 @@ export function PMWorkRequestPopup({
                       </span>}
                       {answer?.photoPaths?.map((photo) => <img key={photo} src={photo} alt={`Failure evidence for ${step.Title}`} className="mt-2 max-h-20 max-w-32 rounded object-cover" />)}
                     </td>
-                  </tr>;
+                  </tr></React.Fragment>;
                 })}
                 {!checklistSteps.length && <tr><td colSpan={7} className="p-5 text-center text-slate-500">No checklist steps are available.</td></tr>}
               </tbody></table>

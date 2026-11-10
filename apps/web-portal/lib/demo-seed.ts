@@ -3,6 +3,7 @@ import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserA
 import type { DemoData } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
 import { expandSeededWorkRequests } from "./expanded-seed";
+import { seedNestedPM } from "./nested-pm-seed";
 import { addDays, calendarDate } from "./dispatch";
 import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
@@ -30,6 +31,7 @@ export function scopeData(data: DemoData, site: SiteId): DemoData {
     equipment: data.equipment.filter((item) => item.SiteId === site).map((item) => ({ ...item, Status: EquipmentStatusSchema.default("In Service").parse(normalizeEquipmentStatus(item.Status)) })),
     blueprints: data.blueprints.filter((item) => !item.SiteId || item.SiteId === site),
     schedules: data.schedules.filter((item) => item.SiteId === site),
+    suppressedPmOccurrences: (data.suppressedPmOccurrences ?? []).filter((item) => item.siteId === site),
     workRequests: data.workRequests.filter((item) => item.SiteId === site).map((item) => {
       if (item.QA_AuditStatus === "SelectedForAudit") return { ...item, QA_AuditStatus: "ToBeInspected" as const };
       if (["QA_Staged_Pass", "QA_Staged_Fail"].includes(item.QA_AuditStatus ?? "") &&
@@ -125,7 +127,7 @@ export function seedData(): DemoData {
     UserId: `${site}-${role}`, DisplayName: `${ROLE_LABELS[role]} (${site})`,
     SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
   })));
-  const seeded = expandSeededWorkRequests(section20Seed(sites), sites);
+  const seeded = seedNestedPM(expandSeededWorkRequests(section20Seed(sites), sites), sites);
   const freezeToday = calendarDate(new Date());
   const result: DemoData = {
     sites,

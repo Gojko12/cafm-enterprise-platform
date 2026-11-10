@@ -3,6 +3,10 @@ import React, { useEffect, useState } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 
 export interface PM_StepDefinition {
+  originFrequency?: string;
+  isInherited?: boolean;
+  replacesStepId?: string;
+  replacesStepLabel?: string;
   StepId: string;
   StepNumber: number;
   StepTitle: string;

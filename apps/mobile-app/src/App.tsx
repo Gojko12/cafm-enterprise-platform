@@ -322,6 +322,7 @@ export default function App() {
       const sourceSteps = wr.ChecklistSteps?.length ? wr.ChecklistSteps : wr.ChecklistInstances ?? [];
       setChecklistSteps([...sourceSteps].sort((a, b) => a.SortOrder - b.SortOrder).map((step) => ({
         StepId: step.StepId, StepNumber: step.SortOrder, StepTitle: step.Title, InputType: step.InputType,
+        originFrequency: step.originFrequency, isInherited: step.isInherited, replacesStepId: step.replacesStepId, replacesStepLabel: step.replacesStepLabel,
         favourableBoolean: step.favourableBoolean, MinThreshold: step.MinThreshold, MaxThreshold: step.MaxThreshold, Unit: step.Unit,
         RequiresPhotoOnFailure: step.RequiresPhotoOnFailure, RequiresCommentOnFailure: step.RequiresCommentOnFailure,
         IsRequired: "IsRequired" in step ? step.IsRequired : true,

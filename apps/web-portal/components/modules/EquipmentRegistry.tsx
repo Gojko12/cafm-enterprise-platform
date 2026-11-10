@@ -10,6 +10,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { resolveEquipmentLocation } from "@/lib/equipment-locator";
 import { equipmentChangeDescriptions } from "@/lib/equipment-activity";
 import { newestFirst } from "@/lib/history-order";
+import { SuppressionLog } from "./SuppressionWorkspace";
 import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "./FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
@@ -220,7 +221,8 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
       <label className="block text-xs">Power / Technical Specs (JSON)<textarea value={specifications} onChange={(event) => setSpecifications(event.target.value)} rows={5} className="block w-full rounded border p-2 font-mono" /></label>
       <button disabled={!permissions?.canManageEquipment} onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save</button></div>}
     {tab === "WRs" && <div className="space-y-2"><div className="flex gap-2">{(["All", "PM", "FJ", "LJ"] as const).map((value) => <button key={value} aria-pressed={type === value} onClick={() => setType(value)} className="rounded border px-2">{value}</button>)}</div>
-      <OverviewTable preferenceKey="equipment-work-requests" columns={requestColumns} rows={requests.filter((wr) => type === "All" || wr.WR_Type === type)} rowKey={(wr) => wr.WR_ID} /></div>}
+      <OverviewTable preferenceKey="equipment-work-requests" columns={requestColumns} rows={requests.filter((wr) => type === "All" || wr.WR_Type === type)} rowKey={(wr) => wr.WR_ID} />
+      <h3 className="font-semibold">Suppressed Cycles · Compliance History</h3><SuppressionLog entries={(data.suppressedPmOccurrences ?? []).filter((entry) => entry.siteId === item.SiteId && entry.equipmentCode === item.EquipmentCode)} onOpen={(id) => setOpenWR(data.workRequests.find((wr) => wr.SiteId === item.SiteId && wr.WR_ID === id) ?? null)} /></div>}
     {tab === "Attached Documents" && <div className="space-y-2">
       <label className="text-sm">Upload document<input type="file" className="block" onChange={(event) => {
         const file = event.target.files?.[0]; if (!file) return;

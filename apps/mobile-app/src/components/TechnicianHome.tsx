@@ -1,5 +1,6 @@
 import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
+import { FrequencyPill } from "../../../web-portal/components/common/PmFrequency";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 import type { LocationFreeze } from "@cafm/shared-schema";
 import { formatFreezePeriodWindow, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
@@ -115,6 +116,8 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
         <span className={`${pill} bg-slate-800 text-white`}>{wr.WR_Type}</span>
         <span className={`${pill} bg-blue-100 text-blue-800`}>{wr.Percentage}%</span>
         <span className="shrink-0 text-xs font-bold">{wr.WR_ID}</span>
+        <FrequencyPill code={wr.pmFrequency} />
+        {!!wr.absorbedFrequencies?.length && <span className="text-xs text-violet-800">+{wr.absorbedFrequencies.join(",")}</span>}
         {wr.CraftpersonAssignments?.some((item) => item.autoScheduledFromPmsId) && <span className={`${pill} bg-violet-100 text-violet-800`}>🔁 Auto-PMS</span>}
         <span className="min-w-0 flex-1 truncate text-xs text-slate-700">{wr.Description}</span>
         {activeTab === "unassigned" && onClaimWR
@@ -192,6 +195,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
               <div key={wr.WR_ID} className={`relative ${activeTab === "my-wrs" && overdue(wr) ? "mb-3 rounded-lg border-2 border-rose-500 bg-rose-50" : ""}`}>
                 {activeTab === "my-wrs" && overdue(wr) && <div className="rounded-t border-2 border-rose-500 bg-rose-50 p-2 text-sm text-rose-900"><strong>⏰ SHOULD BE DONE BY {formatShortDateTime(scheduledSlot(wr, technician)?.assignedEndDateTime ?? wr.StartDate_DateToPerform)} — Still Open ({wr.Percentage}%)</strong><button className="ml-2 underline" onClick={() => onReport(wr.WR_ID)}>🚩 Explain Delay / Push to Team Leader</button></div>}
                 {activeTab === "my-wrs" && !overdue(wr) && dateOf(wr) && (() => { const slot = scheduledSlot(wr, technician); const today = dateOf(wr) === currentDate; const inTodaySection = today && agenda !== "all"; const range = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime, new Date(now)) : dateOf(wr); const prefix = today ? (inTodaySection ? "\ud83d\udd50 " : "\ud83d\udd50 Planned Today: ") : "\ud83d\udd50 Can start early anytime: "; return <div className="rounded-t bg-blue-50 p-2 text-sm text-blue-900">{prefix}{range}</div>; })()}
+                {wr.pmFrequency && <div className="flex flex-wrap gap-1 p-2"><FrequencyPill code={wr.pmFrequency} />{!!wr.absorbedFrequencies?.length && <span className="text-xs text-violet-800">Absorbed: {wr.absorbedFrequencies.join(" + ")}</span>}</div>}
                 {wr.CraftpersonAssignments?.some((item) => item.autoScheduledFromPmsId) && <div className="rounded-t bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-800">🔁 Auto-PMS · scheduled automatically by its PMS rule</div>}
                 <WRPreviewCard
                   wr={wr}

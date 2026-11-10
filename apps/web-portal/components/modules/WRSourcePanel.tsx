@@ -1,4 +1,5 @@
 "use client";
+import { FrequencyPill } from "../common/PmFrequency";
 
 import React, { useEffect, useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
@@ -94,7 +95,7 @@ export function WRSourcePanel({ requests, people, buildings, freezes, now, onOpe
     (!from || !!wr.DueDate && wr.DueDate.slice(0, 10) >= from) && (!to || !!wr.DueDate && wr.DueDate.slice(0, 10) <= to) &&
     Object.values(values(wr)).some((value) => value.toLowerCase().includes(search.toLowerCase())))
     .sort((a, b) => values(a)[sort].localeCompare(values(b)[sort], undefined, { numeric: true }) * (descending ? -1 : 1));
-  const cell = (wr: BaseWorkRequest, field: Field) => field === "trade" ? <span className={`rounded border px-1 ${tradeColor(wr.TradeName)}`}>{values(wr)[field] || "—"}</span> : values(wr)[field] || "—";
+  const cell = (wr: BaseWorkRequest, field: Field) => field === "id" ? <>{wr.WR_ID} <FrequencyPill code={wr.pmFrequency} /> {!!wr.absorbedFrequencies?.length && <span className="text-xs">+{wr.absorbedFrequencies.join(",")}</span>}</> : field === "trade" ? <span className={`rounded border px-1 ${tradeColor(wr.TradeName)}`}>{values(wr)[field] || "—"}</span> : values(wr)[field] || "—";
   const toggle = <T,>(set: React.Dispatch<React.SetStateAction<T[]>>, value: T, checked: boolean) => set((old) => checked ? [...old, value] : old.filter((item) => item !== value));
   return <aside className={`order-2 shrink-0 rounded border bg-white p-2 ${expanded ? "w-96 min-w-[20rem] max-w-[70vw] resize-x overflow-auto" : "w-12"}`}>
     <button className={button} onClick={() => setExpanded(!expanded)}>{expanded ? "▶ Pool" : "◀"}</button>

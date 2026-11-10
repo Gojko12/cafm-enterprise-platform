@@ -68,7 +68,7 @@ function SchedulerContent() {
   const [error, setError] = useState("");
   const [spotlight, setSpotlight] = useState<TimelineSpotlight | null>(null);
   const [showChoices, setShowChoices] = useState<string | null>(null);
-  const siteRequests = data.workRequests.filter((wr) => wr.SiteId === activeSiteId);
+  const siteRequests = data.workRequests.filter((wr) => wr.SiteId === activeSiteId && !wr.suppressedByWrId);
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setDate(calendarDate(new Date()));

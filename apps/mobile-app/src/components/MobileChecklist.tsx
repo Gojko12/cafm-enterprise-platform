@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { FrequencyPill, PmScope } from "../../../web-portal/components/common/PmFrequency";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import type { PM_StepDefinition } from "./ChecklistExecutor";
 
@@ -75,7 +76,9 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
     const val = result?.value;
     const optionClass = (selected: boolean) => `flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left ${selected ? "border-2 border-blue-700 bg-blue-600 font-semibold text-white shadow-sm" : "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"}`;
     return <article key={step.StepId} className="space-y-3 rounded border bg-white p-4"><fieldset disabled={leaving || !editable} className="space-y-3">
+      <FrequencyPill code={step.originFrequency} inherited={step.isInherited} />
       <h3 className="font-semibold">{step.StepNumber}. {step.StepTitle}</h3>
+      {step.replacesStepLabel && <p className="rounded bg-amber-50 p-2 text-xs text-amber-900">{step.replacesStepLabel}</p>}
       {step.Instruction && <p className="whitespace-pre-wrap text-sm text-slate-600">{step.Instruction}</p>}
       {step.InputType === "Boolean" && (todoMode ? <button type="button" aria-pressed={val !== undefined && val !== ""} className={optionClass(val !== undefined && val !== "")} onClick={() => change(step, { value: val !== undefined && val !== "" ? "" : "true", passed: result?.passed ?? true })}><span>☑ Completed</span><span>{val !== undefined && val !== "" ? "✓ Selected" : "○"}</span></button> : <div className="grid gap-2">{([true, false] as const).map((value) => <button type="button" key={String(value)} aria-pressed={val === String(value)} className={optionClass(val === String(value))} onClick={() => change(step, { value: String(value), passed: value === (step.favourableBoolean ?? true) })}><span>{value ? "Yes" : "No"}</span><span>{val === String(value) ? "● Selected" : "○"}</span></button>)}</div>)}
       {step.InputType === "Numeric" && <label>Measurement {step.Unit} <span className="text-xs text-slate-500">(min: {step.MinThreshold ?? "—"}, max: {step.MaxThreshold ?? "—"})</span><input type="number" className="block rounded border p-2" value={typeof val === "number" ? val : ""} onChange={(e) => { if (!e.target.value) { change(step, { value: "", passed: true }); return; } const number = Number(e.target.value); if (Number.isFinite(number)) change(step, { value: number, passed: (step.MinThreshold === undefined || number >= step.MinThreshold) && (step.MaxThreshold === undefined || number <= step.MaxThreshold) }); }} /></label>}
@@ -93,7 +96,11 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
     {!timerRunning && !review && <p role="alert" className="rounded bg-amber-50 p-2 text-amber-900">Your timer is no longer running. Return to the work request and start timing to continue.</p>}
     {!steps.length && todoMode && <div className="rounded border bg-white p-4"><p>No checklist steps have been defined by the Team Leader for this Work Request.</p><button disabled={leaving} className="mt-2 text-blue-700 underline" onClick={() => leaveSafely(exit)}>← Exit to WR Overview</button></div>}
     <fieldset disabled={leaving} className="space-y-3">
-      {all ? steps.map(renderStep) : steps[index] ? renderStep(steps[index]) : !todoMode && <p>No checklist steps available.</p>}
+      <PmScope wr={wr} />
+      {all ? [...new Set(steps.map((step) => step.originFrequency))].map((code) => {
+        const group = steps.filter((step) => step.originFrequency === code);
+        return <section key={code ?? "other"} className="space-y-2">{code && <h2 className="rounded bg-slate-100 p-2 font-semibold"><FrequencyPill code={code} /> {group[0].isInherited ? "Included routine checks (inherited)" : "Additional maintenance checks"} · {group.length} steps</h2>}{group.map(renderStep)}</section>;
+      }) : steps[index] ? renderStep(steps[index]) : !todoMode && <p>No checklist steps available.</p>}
       {!all && steps.length > 0 && <div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex(index - 1)}>← Previous</button><button disabled={index >= steps.length - 1} onClick={() => setIndex(index + 1)}>Next →</button></div>}
       {complete && !review && timerRunning && steps.length > 0 && (all || index === steps.length - 1) && <button className="rounded bg-blue-800 px-3 py-2 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}
     </fieldset>

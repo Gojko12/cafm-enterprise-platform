@@ -10,6 +10,7 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
+import { PMSuppressionFields, SuppressedPmOccurrenceSchema } from "@cafm/shared-schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,6 +130,10 @@ const workRequestRecord = z.object({
   originatingChecklistStepId: z.string().min(1).optional(),
   originatingChecklistStepLabel: z.string().min(1).optional(),
   updatedAt: z.string().optional(),
+  pmFrequency: z.string().optional(),
+  absorbedFrequencies: z.array(z.string()).optional(),
+  suppressionGroupName: z.string().optional(),
+  suppressedByWrId: z.string().optional(),
   QA_AuditStatus: z.enum(["None", "SelectedForAudit", "ToBeInspected", "QA_Staged_Pass", "QA_Staged_Fail", "QA_Passed", "QA_Failed_ActionRequired", "QA_Corrected", "QA_Verified"]).optional(),
   qaStagedVerdict: qaStagedVerdictSchema.optional(),
   qaTeamLeaderChallenges: z.array(qaChallengeSchema).optional(),
@@ -143,8 +148,9 @@ const stateSchema = z.object({
   rooms: records,
   desks: records,
   equipment: records,
-  blueprints: records,
-  schedules: records,
+  blueprints: z.array(z.object(PMSuppressionFields).catchall(z.unknown())),
+  schedules: z.array(z.object(PMSuppressionFields).catchall(z.unknown())),
+  suppressedPmOccurrences: z.array(SuppressedPmOccurrenceSchema).optional(),
   craftspeople: records,
   userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
   roleDefinitions: z.array(roleDefinitionSchema).optional(),
@@ -212,6 +218,10 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   const scoped = ["buildings", "floors", "rooms", "desks", "equipment", "schedules", "craftspeople", "siteRoleAssignments", "workRequests", "tradeRoleMappings", "siteRoleMappings"] as const;
   if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
   if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
+  if (state.suppressedPmOccurrences?.some((item) => item.siteId !== site ||
+      !state.equipment.some((asset) => asset.EquipmentCode === item.equipmentCode && asset.SiteId === site) ||
+      !state.workRequests.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site) &&
+      !state.deletedWorkRequests?.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site))) return false;
   if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
   if (state.qaAuditReports?.some((item) => item.siteId !== site)) return false;
   if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;

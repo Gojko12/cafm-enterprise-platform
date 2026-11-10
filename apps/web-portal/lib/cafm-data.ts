@@ -1,6 +1,7 @@
 import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, QAAuditReport, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
 import type { AuditCampaign, AuditFinding, AuditInspection, AuditSettings, AuditTemplate, AuditImport } from "./audit-assurance-types";
 import type { AuditAssurance } from "./equipment-inspection";
+import type { SuppressedPmOccurrence } from "@cafm/shared-schema";
 
 type AssignmentRole = "ESA_TM" | "ESA_CCM" | "TRADE_TM" | "TRADE_CM" | "ESA_TO" | "ESA_LJM" | "ESA_DO" | "ESA_IM";
 export interface TradeRoleMapping {
@@ -35,6 +36,7 @@ export interface DemoData {
   equipment: Equipment[];
   blueprints: PM_ChecklistStandard[];
   schedules: PM_Schedule[];
+  suppressedPmOccurrences?: SuppressedPmOccurrence[];
   workRequests: BaseWorkRequest[];
   deletedWorkRequests?: BaseWorkRequest[];
   users: UserAccess[];

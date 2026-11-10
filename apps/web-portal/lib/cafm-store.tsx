@@ -13,7 +13,7 @@ export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from 
 
 export { ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS, seedSiteData } from "./demo-seed";
 import { scopeData, withAccessProfileDefaults, seedData, SITE_ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES } from "./demo-seed";
-const STORAGE_KEY = "cafm-demo-data-v19";
+const STORAGE_KEY = "cafm-demo-data-v20";
 const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v16", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
@@ -133,7 +133,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        initial = scopeData(withAccessProfileDefaults({ ...defaults, auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
+        initial = scopeData(withAccessProfileDefaults({ ...defaults, suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople,
           userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site), site);
@@ -158,7 +158,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
             throw new Error("Invalid server state.");
           }
-          const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+          const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
             roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
             userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
           initial = scopeData(withAccessProfileDefaults(remoteData, site), site);
@@ -228,7 +228,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
               throw new Error("Invalid server state.");
             }
-            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
+            const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
               roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
@@ -263,7 +263,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           const result = await stateRequest(site, personRef.current, "GET");
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
-            const remoteData = { ...seedData(), auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...result.state,
+            const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...result.state,
               roleDefinitions: "roleDefinitions" in result.state ? result.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in result.state ? result.state.userAccessProfiles : undefined } as DemoData;
             const next = scopeData(withAccessProfileDefaults(remoteData, site), site);

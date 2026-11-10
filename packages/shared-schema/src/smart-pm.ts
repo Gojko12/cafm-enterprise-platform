@@ -1,6 +1,29 @@
 import { z } from "zod";
 import { SiteIdSchema } from "./locations.js";
 
+export const PM_FREQUENCY_RANKS = { "01D": 1, "01W": 2, "02W": 3, "01M": 4, "03M": 5, "06M": 6, "01Y": 7, "02Y": 8, "05Y": 9 } as const;
+export const PMFrequencyCodeSchema = z.enum(["01D", "01W", "02W", "01M", "03M", "06M", "01Y", "02Y", "05Y"]);
+export type PMFrequencyCode = z.infer<typeof PMFrequencyCodeSchema>;
+export const PMSuppressionFields = {
+  frequencyCode: PMFrequencyCodeSchema.optional(),
+  suppressionMode: z.enum(["suppress_and_inherit", "independent"]).optional(),
+  suppressionGroupKey: z.string().min(1).optional(),
+  suppressionGroupName: z.string().min(1).optional(),
+  sharedAnchorDate: z.iso.date().optional(),
+  collisionWindowDays: z.number().int().min(0).max(366).optional(),
+};
+export const PMStepOriginFields = {
+  originFrequency: z.string().optional(), isInherited: z.boolean().optional(),
+  replacesStepId: z.string().min(1).optional(), replacesStepLabel: z.string().optional(),
+};
+export const SuppressedPmOccurrenceSchema = z.object({
+  id: z.string().min(1), siteId: SiteIdSchema, equipmentCode: z.string().min(1),
+  suppressionGroupName: z.string().min(1), suppressedFrequency: PMFrequencyCodeSchema,
+  dueDate: z.iso.date(), coveredByFrequency: PMFrequencyCodeSchema,
+  coveredByWrId: z.string().min(1), createdAt: z.iso.datetime(),
+});
+export type SuppressedPmOccurrence = z.infer<typeof SuppressedPmOccurrenceSchema>;
+
 export const PM_Frequency = z.enum([
   "Daily",
   "Weekly",
@@ -29,6 +52,7 @@ export const PM_StepOptionSchema = z.object({
 export const PM_ScheduleStepSchema = z
   .object({
     StepId: z.string().min(1),
+    ...PMStepOriginFields,
     Title: z.string().min(1),
     Instructions: z.string().optional(),
     SortOrder: z.number().int().nonnegative(),
@@ -62,6 +86,7 @@ export const PM_ScheduleStepSchema = z
   });
 
 export const PM_ChecklistStandardSchema = z.object({
+  ...PMSuppressionFields,
   ChecklistCode: z.string().min(1),
   SiteId: SiteIdSchema.optional(),
   Title: z.string().min(1),
@@ -100,6 +125,7 @@ export const PM_ChecklistStandardSchema = z.object({
 export const PM_ScheduleSchema = z
   .object({
     ScheduleId: z.string().min(1),
+    ...PMSuppressionFields,
     ChecklistCode: z.string().min(1),
     SiteId: SiteIdSchema,
     EquipmentCodes: z.array(z.string().min(1)).default([]),
@@ -163,6 +189,7 @@ export const PM_ScheduleSchema = z
 export const PM_WorkRequestStepSchema = z
   .object({
     StepInstanceId: z.string().min(1),
+    ...PMStepOriginFields,
     WR_ID: z.string().min(1),
     ScheduleId: z.string().min(1),
     ChecklistCode: z.string().min(1),

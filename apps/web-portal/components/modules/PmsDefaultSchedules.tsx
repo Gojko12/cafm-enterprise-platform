@@ -6,6 +6,7 @@ import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { addDays, calendarDate } from "@/lib/dispatch";
 import { RECURRENCE_PATTERNS, WEEKDAY_LABELS, applyPmsAutoSchedule, frequencyLabel, isAutoScheduleReady, nextScheduledDate, timeWindowLabel } from "@/lib/pms-auto-schedule";
+import { reconcileOpenPMs } from "@/lib/pm-suppression";
 
 type Pattern = (typeof RECURRENCE_PATTERNS)[number];
 const input = "rounded border bg-white px-1 py-0.5 text-xs";
@@ -26,6 +27,17 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
   const tradeOf = (pms: PM_Schedule) => blueprints.find((item) => item.ChecklistCode === pms.ChecklistCode)?.TradeName ?? "";
   const schedules = data.schedules.filter((item) => item.SiteId === activeSiteId && (trades.length === 0 || trades.includes(tradeOf(item) as never)));
   const [creating, setCreating] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const reconcile = async () => {
+    if (!permissions?.canGeneratePM_WR || reconciling) return;
+    setReconciling(true);
+    try {
+      const result = reconcileOpenPMs(data.workRequests, schedules, data.blueprints, data.suppressedPmOccurrences ?? [], new Date().toISOString());
+      await commitSnapshot(data, { ...data, workRequests: result.workRequests, suppressedPmOccurrences: result.suppressedPmOccurrences }, { optimistic: true });
+      onNotice(`Reconciled PM queue: ${result.suppressed} unstarted overlapping work requests suppressed.`);
+    } catch (problem) { onNotice(problem instanceof Error ? problem.message : "Could not reconcile PM queue."); }
+    finally { setReconciling(false); }
+  };
   const [draft, setDraft] = useState({ title: "Daily Technical Plant Tour", checklistCode: "", equipmentCode: "", pattern: "Daily" as Pattern });
 
   const save = async (next: PM_Schedule[], message: string, workRequests = data.workRequests) => {
@@ -64,6 +76,7 @@ export function PmsDefaultSchedules({ onNotice }: { onNotice: (message: string) 
   return <div className="space-y-2" data-testid="pms-default-schedules">
     <div className="flex flex-wrap items-center gap-2 rounded border bg-white p-2">
       <strong>🔁 PMS Default Schedules &amp; Auto-Assign</strong>
+      <button disabled={reconciling || !permissions?.canGeneratePM_WR} className={button} onClick={() => void reconcile()}>Reconcile Nested PMs</button>
       <span className="text-slate-600">{schedules.length} PM schedule(s){trades.length ? ` · filtered by your VPA trades: ${trades.join(", ")}` : ""}</span>
       <button type="button" className={`${button} ml-auto`} disabled={!canEdit} onClick={() => setCreating((value) => !value)}>+ Create Recurring Tour / PMS Rule</button>
     </div>

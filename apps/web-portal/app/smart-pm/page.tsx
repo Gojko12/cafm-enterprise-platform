@@ -16,8 +16,11 @@ import { generatePMWorkRequests } from "@/lib/pm-generation";
 import { useApp } from "@/lib/hooks/useApp";
 import { PM_ScheduleSchema } from "@cafm/shared-schema";
 import { CraftpersonShiftWorkspace } from "@/components/modules/CraftpersonShiftWorkspace";
+import { SuppressionWorkspace } from "@/components/modules/SuppressionWorkspace";
+import { PMSuppressionFields, suppressionConfig } from "@/components/common/PMSuppressionFields";
+import { compileChecklist } from "@/lib/pm-suppression";
 
-type TabType = "schedules" | "blueprints" | "generator" | "assignment" | "craftpeople";
+type TabType = "schedules" | "blueprints" | "generator" | "assignment" | "craftpeople" | "suppression";
 
 export default function SmartPMPage() {
   const [activeTab, setActiveTab] = useState<TabType>("schedules");
@@ -34,6 +37,7 @@ export default function SmartPMPage() {
   const [horizonDays, setHorizonDays] = useState(30);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<PM_Schedule | null>(null);
+  const [scheduleSuppression, setScheduleSuppression] = useState(() => suppressionConfig());
   const [selectedScheduleIds, setSelectedScheduleIds] = useState<string[]>([]);
   const [scheduleChecklistCode, setScheduleChecklistCode] = useState("");
   const [scheduleFrequency, setScheduleFrequency] =
@@ -111,6 +115,8 @@ export default function SmartPMPage() {
     }
     const now = new Date().toISOString();
     const schedule: PM_Schedule = {
+      ...editingSchedule,
+      ...scheduleSuppression,
       ScheduleId: editingSchedule?.ScheduleId ?? `PMS-${crypto.randomUUID()}`,
       ChecklistCode: scheduleChecklistCode.trim(),
       SiteId: activeSiteId,
@@ -139,6 +145,12 @@ export default function SmartPMPage() {
       alert(parsed.error.issues.map((issue) => issue.message).join("\n"));
       return;
     }
+    try {
+      const schedules = [...data.schedules.filter((item) => item.ScheduleId !== schedule.ScheduleId), parsed.data];
+      for (const rule of schedules.filter((item) => item.SiteId === activeSiteId && item.IsActive)) {
+        for (const code of rule.EquipmentCodes) compileChecklist(rule, code, schedules, data.blueprints);
+      }
+    } catch (problem) { alert(problem instanceof Error ? problem.message : "Invalid nested PM scope."); return; }
     setData((current) => ({
       ...current,
       schedules: [...current.schedules.filter((item) => item.ScheduleId !== schedule.ScheduleId || item.SiteId !== activeSiteId), parsed.data],
@@ -152,6 +164,7 @@ export default function SmartPMPage() {
   const openSchedule = (schedule?: PM_Schedule) => {
     if (!permissions?.canDefinePMSchedule) { alert("Permission required: Define PM Schedule."); return; }
     setEditingSchedule(schedule ?? null);
+    setScheduleSuppression(suppressionConfig(schedule));
     setScheduleChecklistCode(schedule?.ChecklistCode ?? "");
     setScheduleFrequency(schedule?.Frequency ?? "Monthly");
     setScheduleMeterType(schedule?.MeterType ?? "");
@@ -174,10 +187,13 @@ export default function SmartPMPage() {
       alert("A blueprint with this code already exists at this site.");
       return;
     }
-    setData((current) => ({
-      ...current,
-      blueprints: [...current.blueprints.filter((item) => !(item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)), { ...blueprint, SiteId: activeSiteId }],
-    }));
+    const nextBlueprints = [...data.blueprints.filter((item) => !(item.SiteId === activeSiteId && item.ChecklistCode === blueprint.ChecklistCode)), { ...blueprint, SiteId: activeSiteId }];
+    try {
+      for (const rule of data.schedules.filter((item) => item.SiteId === activeSiteId && item.IsActive)) {
+        for (const code of rule.EquipmentCodes) compileChecklist(rule, code, data.schedules, nextBlueprints);
+      }
+    } catch (problem) { alert(problem instanceof Error ? problem.message : "Invalid inherited checklist scope."); return; }
+    setData((current) => ({ ...current, blueprints: nextBlueprints }));
     setEditing(undefined);
     setBuilderVersion((version) => version + 1);
   };
@@ -187,9 +203,9 @@ export default function SmartPMPage() {
     try {
       const result = generatePMWorkRequests({ schedules: data.schedules, blueprints: data.blueprints,
         equipment: data.equipment, workRequests: data.workRequests, siteId: activeSiteId, mode: generatorMode,
-        selectedIds: selectedScheduleIds, horizonDays, now: new Date(), craftspeople: data.craftspeople,
+        selectedIds: selectedScheduleIds, horizonDays, now: new Date(), craftspeople: data.craftspeople, suppressedPmOccurrences: data.suppressedPmOccurrences,
         actor: { id: currentUser?.UserId ?? "current-user", name: currentUser?.DisplayName ?? "Current user", role: currentRole } });
-      setData((current) => ({ ...current, schedules: result.schedules, workRequests: result.workRequests }));
+      setData((current) => ({ ...current, schedules: result.schedules, workRequests: result.workRequests, suppressedPmOccurrences: result.suppressedPmOccurrences }));
       alert(`Generated ${result.generated} work request(s); skipped ${result.skipped} duplicate cycle(s). Meter-based schedules are excluded from horizon generation.`);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Could not generate work requests.");
@@ -224,6 +240,7 @@ export default function SmartPMPage() {
       EquipmentCodes: Array.from(new Set([...existing.EquipmentCodes, ...assignmentEquipmentCodes])),
       UpdatedAt: now,
     } : {
+      ...suppressionConfig(blueprint),
       ScheduleId: `PMS-${crypto.randomUUID()}`, ChecklistCode: blueprint.ChecklistCode, SiteId: activeSiteId,
       EquipmentCodes: assignmentEquipmentCodes, ...targetLocation,
       Frequency: "Monthly", FrequencyInterval: 1, LeadTimeDays: 3, MarginWindowDays: 5,
@@ -252,7 +269,8 @@ export default function SmartPMPage() {
 
         {/* Tabs */}
         <div className="bg-white rounded-t-lg border-b border-gray-200 mb-6">
-          <div className="px-6 py-4 flex gap-8">
+          <div className="px-6 py-4 flex flex-wrap gap-3">
+            <button onClick={() => setActiveTab("suppression")} className={`px-4 py-2 font-semibold border-b-2 ${activeTab === "suppression" ? "text-blue-600 border-blue-600" : "border-transparent text-gray-600"}`}>🔗 Suppression Groups &amp; Nested Cycles</button>
             <button
               onClick={() => setActiveTab("schedules")}
               className={`px-4 py-2 font-semibold border-b-2 transition-colors ${
@@ -296,6 +314,8 @@ export default function SmartPMPage() {
 
         {/* Tab Content */}
         <div className="bg-white rounded-b-lg p-6">
+          {activeTab === "suppression" && <SuppressionWorkspace key={activeSiteId} />}
+          {(activeTab === "schedules" || activeTab === "blueprints") && <button className="mb-3 text-sm text-blue-700 underline" onClick={() => setActiveTab("suppression")}>Configure suppression mode, group, shared anchor and layered checklist steps →</button>}
           {((activeTab === "schedules" && !permissions?.canDefinePMSchedule) || (activeTab === "blueprints" && !permissions?.canDefineChecklistPM) || (activeTab === "generator" && !permissions?.canGeneratePM_WR) || (activeTab === "assignment" && !permissions?.canAssignPMPToEQ)) && <p role="status" className="mb-3 rounded bg-amber-100 p-3 text-amber-900">Permission required: ask a site administrator to grant access to this action.</p>}
           {activeTab === "schedules" && (
             <div className="space-y-6">
@@ -546,7 +566,10 @@ export default function SmartPMPage() {
                 <select
                   required
                   value={scheduleChecklistCode}
-                  onChange={(event) => setScheduleChecklistCode(event.target.value)}
+                  onChange={(event) => {
+                    setScheduleChecklistCode(event.target.value);
+                    if (!editingSchedule) setScheduleSuppression(suppressionConfig(blueprints.find((item) => item.ChecklistCode === event.target.value)));
+                  }}
                   className="mt-1 w-full px-3 py-2 border rounded"
                 ><option value="">Select a blueprint</option>{blueprints.filter((item) => item.IsActive).map((item) =>
                   <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.ChecklistCode} — {item.Title}</option>)}</select>
@@ -643,6 +666,7 @@ export default function SmartPMPage() {
                     </label>
                   </>
                 )}
+                <PMSuppressionFields value={scheduleSuppression} onChange={setScheduleSuppression} />
               </div>
             </div>
             <footer className="px-6 py-4 border-t flex justify-end gap-2">

@@ -4,13 +4,16 @@ import React, { useState } from "react";
 import { Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import type { PM_ChecklistStandard, PM_ScheduleStep } from "@cafm/shared-schema";
 import { CLASSICAL_TRADES, PM_ChecklistStandardSchema } from "@cafm/shared-schema";
+import { PMSuppressionFields, suppressionConfig } from "../common/PMSuppressionFields";
 
 interface ChecklistBuilderProps {
   onSave?: (checklist: PM_ChecklistStandard) => void;
   initialBlueprint?: PM_ChecklistStandard;
+  inheritedSteps?: PM_ScheduleStep[];
+  frequencyCode?: string;
 }
 
-export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderProps) {
+export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = [], frequencyCode }: ChecklistBuilderProps) {
   const [code, setCode] = useState(initialBlueprint?.ChecklistCode || "");
   const [title, setTitle] = useState(initialBlueprint?.Title || "");
   const [maintenanceReason, setMaintenanceReason] = useState(initialBlueprint?.MaintenanceReason || "");
@@ -18,6 +21,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
   const [expectedHours, setExpectedHours] = useState(initialBlueprint?.ExpectedHours || 0);
   const [steps, setSteps] = useState<PM_ScheduleStep[]>(initialBlueprint?.Steps || []);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
+  const [suppression, setSuppression] = useState(() => suppressionConfig(initialBlueprint));
 
   const handleAddStep = () => {
     const newStep: PM_ScheduleStep = {
@@ -70,6 +74,8 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
     }
 
     const checklist: PM_ChecklistStandard = {
+      ...initialBlueprint,
+      ...suppression,
       ChecklistCode: code,
       Title: title,
       MaintenanceReason: maintenanceReason,
@@ -93,6 +99,8 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <PMSuppressionFields value={suppression} onChange={setSuppression} />
+      {inheritedSteps.length > 0 && <details open className="rounded-xl border border-sky-300 bg-sky-50 p-4"><summary className="cursor-pointer font-semibold">Inherited from Lower Frequencies ({[...new Set(inheritedSteps.map((step) => step.originFrequency))].join(" / ")}) · read-only</summary>{inheritedSteps.map((step) => <p key={step.StepId} className="mt-2 text-sm"><span className="rounded bg-sky-100 px-2">{step.originFrequency}</span> {step.Title} {steps.some((item) => item.replacesStepId === step.StepId) && <strong className="text-amber-800"> · Replaced by higher frequency</strong>}</p>)}</details>}
       {/* Header Fields */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
         <h2 className="text-2xl font-bold text-gray-900">{initialBlueprint ? "Edit" : "Create"} Checklist Blueprint</h2>
@@ -173,7 +181,7 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
       {/* Steps Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-xl font-bold text-gray-900">Checklist Steps</h3>
+          <h3 className="text-xl font-bold text-gray-900">{frequencyCode ? `+${frequencyCode} Delta Steps Only` : "Checklist Steps"}</h3>
           <button
             onClick={handleAddStep}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -219,6 +227,10 @@ export function ChecklistBuilder({ onSave, initialBlueprint }: ChecklistBuilderP
               {/* Step Details */}
               {expandedStep === step.StepId && (
                 <div className="px-4 py-4 border-t border-gray-200 space-y-4 bg-white">
+                  {inheritedSteps.length > 0 && <label className="block text-sm">Replaces lower-frequency step<select className="ml-2 rounded border p-2" value={step.replacesStepId ?? ""} onChange={(event) => {
+                    const lower = inheritedSteps.find((item) => item.StepId === event.target.value);
+                    handleUpdateStep(step.StepId, { replacesStepId: lower?.StepId, replacesStepLabel: lower ? `Replaces ${lower.originFrequency}: ${lower.Title}` : undefined });
+                  }}><option value="">Additive (does not replace a step)</option>{inheritedSteps.map((lower) => <option key={lower.StepId} value={lower.StepId}>{lower.originFrequency}: {lower.Title}</option>)}</select></label>}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Step Title *

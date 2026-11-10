@@ -4,6 +4,7 @@ import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import type { SignalTab } from "@/lib/wr-signals";
+import { FrequencyPill } from "../common/PmFrequency";
 
 export function WRSignals({ wr, onOpen }: { wr: BaseWorkRequest; onOpen: (wr: BaseWorkRequest, tab?: SignalTab) => void }) {
   const { data } = useCafmStore();
@@ -12,6 +13,8 @@ export function WRSignals({ wr, onOpen }: { wr: BaseWorkRequest; onOpen: (wr: Ba
   const parent = getParentPM(wr, data.workRequests);
   const badge = "rounded-lg border px-2 py-1 text-left text-xs font-semibold";
   return <div className="flex flex-wrap gap-1" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+    <FrequencyPill code={wr.pmFrequency} />
+    {!!wr.absorbedFrequencies?.length && <span className="text-xs text-violet-800">Absorbed: {wr.absorbedFrequencies.join(" + ")}</span>}
     {count > 0 && <button type="button" className={`${badge} border-rose-300 bg-rose-100 text-rose-900`} onClick={() => onOpen(wr, "Checklist - Smart PM")}>⚠ {count} Unfavourable →</button>}
     {followUps.length > 0 && <button type="button" className={`${badge} border-indigo-300 bg-indigo-100 text-indigo-900`} onClick={() => onOpen(wr, "PM Follow-up")}>🔧 {followUps.length} Follow-Up FJ →</button>}
     {parent && <button type="button" className={`${badge} border-indigo-300 bg-indigo-50 text-indigo-900`} onClick={() => onOpen(parent)}>🔗 Follow-up of PM #{parent.WR_ID}</button>}
