@@ -17,6 +17,8 @@ import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import { WorkRequestLabor, laborRows } from "@/components/modules/WorkRequestLabor";
 import { assignPerson } from "@/lib/dispatch";
+import { FreezeBadge, FreezeSafetyGate } from "@/components/modules/FreezeSafetyGate";
+import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "@/lib/location-freezes";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { hasOpenQARework } from "@/lib/qa-settings";
@@ -66,6 +68,8 @@ export function PMWorkRequestPopup({
   const [checklistHistoryOpen, setChecklistHistoryOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [executorOpen, setExecutorOpen] = useState(false);
+  const [executorUnlocked, setExecutorUnlocked] = useState(false);
+  const [pendingFreezeStatus, setPendingFreezeStatus] = useState<StatusChoice | null>(null);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [craftFilter, setCraftFilter] = useState("");
   const [documentFilter, setDocumentFilter] = useState("");
@@ -102,6 +106,10 @@ export function PMWorkRequestPopup({
       item.EquipmentCode === code && item.SiteId === workRequest.SiteId,
     ))
     .filter((item) => item !== undefined);
+  const wrFreezes = getWorkRequestFreezes(workRequest, data.locationFreezes ?? [], localNowIso());
+  const stampFreezeAcknowledgment = () => updateWorkRequest((current) => ({
+    ...current, freezeAcknowledged: buildFreezeAcknowledgment(wrFreezes, actorName),
+  }), `Freeze period safety acknowledgment confirmed by ${actorName}`);
   const linkedFastJobs = data.workRequests.filter((item) =>
     (item.WR_Type === "FJ" || item.WR_Type === "LJ") &&
     item.ParentPM_WR_ID === workRequest.WR_ID &&
@@ -184,8 +192,12 @@ export function PMWorkRequestPopup({
     details,
   });
 
-  const applyStatus = (choice: StatusChoice) => {
+  const applyStatus = (choice: StatusChoice, skipFreezeGate = false) => {
     if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
+    if (choice.percentage === 78 && !skipFreezeGate && wrFreezes.length > 0 && !workRequest.freezeAcknowledged) {
+      setPendingFreezeStatus(choice);
+      return;
+    }
     if (choice.percentage === 100 && hasOpenQARework(workRequest)) {
       window.alert("QA rework must be verified before closing.");
       return;
@@ -591,7 +603,7 @@ export function PMWorkRequestPopup({
         </nav>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-          {activeTab === "Work request details" && <div className="space-y-4">
+          {wrFreezes.length > 0 && <div className="mb-3"><FreezeBadge freezes={wrFreezes} /></div>}          {activeTab === "Work request details" && <div className="space-y-4">
             <WRDetailsEditor workRequest={workRequest} />
             {renderGroup("Work Request",
               <>
@@ -1010,9 +1022,15 @@ export function PMWorkRequestPopup({
         </section>
       </div>}
 
-      {executorOpen && <ChecklistExecutor isOpen workRequestId={workRequest.WR_ID}
+      {pendingFreezeStatus && <FreezeSafetyGate freezes={wrFreezes} unlockLabel="Confirm & Set to 78%" backLabel="Cancel"
+        onBack={() => setPendingFreezeStatus(null)}
+        onUnlock={() => { const choice = pendingFreezeStatus; setPendingFreezeStatus(null); stampFreezeAcknowledgment(); applyStatus(choice, true); }} />}
+      {executorOpen && wrFreezes.length > 0 && !executorUnlocked && <FreezeSafetyGate freezes={wrFreezes}
+        onBack={() => setExecutorOpen(false)}
+        onUnlock={() => { stampFreezeAcknowledgment(); setExecutorUnlocked(true); }} />}
+      {executorOpen && (wrFreezes.length === 0 || executorUnlocked) && <ChecklistExecutor isOpen workRequestId={workRequest.WR_ID}
         steps={checklistSteps} initialResults={workRequest.ChecklistResults}
-        onClose={() => setExecutorOpen(false)}
+        onClose={() => { setExecutorOpen(false); setExecutorUnlocked(false); }}
         onProgress={(result) => updateChecklistResult(result, result.stepId)}
         onClear={(stepId) => updateChecklistResult(null, stepId)}
         onComplete={finishChecklist} />}

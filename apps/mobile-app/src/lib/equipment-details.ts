@@ -42,6 +42,14 @@ function readCache(): CacheEntry[] {
   }
 }
 
+export function getEquipmentCacheCount(): number {
+  return readCache().length;
+}
+
+export function clearEquipmentDetailCache() {
+  try { localStorage.removeItem(EQ_DETAIL_CACHE_KEY); } catch { /* storage unavailable */ }
+}
+
 function writeCache(entries: CacheEntry[]) {
   let list = entries;
   while (list.length) {

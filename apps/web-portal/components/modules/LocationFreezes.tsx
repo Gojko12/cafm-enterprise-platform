@@ -6,7 +6,7 @@ import type { LocationFreeze } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { freezeLocations } from "@/lib/location-freezes";
+import { formatHumanDateTime, freezeLocations } from "@/lib/location-freezes";
 
 export function LocationFreezes() {
   const { data, setData } = useCafmStore();
@@ -31,8 +31,8 @@ export function LocationFreezes() {
     { id: "room", label: "Room", value: (item: LocationFreeze) => freezeLocations(item).rooms.join(", ") },
     { id: "description", label: "Description", value: (item: LocationFreeze) => item.description },
     { id: "responsible", label: "Responsible", value: (item: LocationFreeze) => item.responsiblePerson },
-    { id: "start", label: "Start", value: (item: LocationFreeze) => item.startDateTime },
-    { id: "end", label: "End", value: (item: LocationFreeze) => item.endDateTime },
+    { id: "start", label: "Start", value: (item: LocationFreeze) => formatHumanDateTime(item.startDateTime) },
+    { id: "end", label: "End", value: (item: LocationFreeze) => formatHumanDateTime(item.endDateTime) },
     ...(["PM", "FJ", "LJ"] as const).map((type) => ({ id: type, label: `Allow ${type}`, value: (item: LocationFreeze) => item[`allow${type}`] ? "Yes" : "No" })),
     { id: "action", label: "Actions", value: () => "Edit Delete", render: (item: LocationFreeze) => <span className="space-x-2"><button disabled={!permissions?.canManageLocationFreezes} onClick={() => setEditing(item)} className="text-blue-700 underline disabled:opacity-40">Edit</button><button disabled={!permissions?.canManageLocationFreezes} onClick={() => remove(item)} className="text-red-700 underline disabled:opacity-40">Delete</button></span> },
   ];

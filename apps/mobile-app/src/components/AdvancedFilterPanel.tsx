@@ -17,6 +17,8 @@ interface AdvancedFilterPanelProps {
   defaultSubstatuses: number[];
   workType: "All" | "PM" | "FJ" | "LJ";
   onWorkTypeChange: (type: "All" | "PM" | "FJ" | "LJ") => void;
+  schedule: "agenda" | "overdue" | "today" | "upcoming" | "all";
+  onScheduleChange: (value: "agenda" | "overdue" | "today" | "upcoming" | "all") => void;
   resultCount: number;
 }
 
@@ -34,6 +36,8 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   defaultSubstatuses,
   workType,
   onWorkTypeChange,
+  schedule,
+  onScheduleChange,
   resultCount,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -68,7 +72,7 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
   const selectedPercents = currentFilters.selectedSubstatuses ?? [];
   const isDefaultSubstatus = selectedPercents.length === defaultSubstatuses.length && defaultSubstatuses.every((value) => selectedPercents.includes(value));
   const togglePercent = (value: number) => set({ selectedSubstatuses: selectedPercents.includes(value) ? selectedPercents.filter((item) => item !== value) : [...selectedPercents, value].sort((a, b) => a - b) });
-  const activeCount = Object.entries(currentFilters).filter(([key, value]) => key === "selectedSubstatuses" ? !isDefaultSubstatus : (value instanceof Set ? value.size > 0 : Boolean(value))).length;
+  const activeCount = Object.entries(currentFilters).filter(([key, value]) => key === "selectedSubstatuses" ? !isDefaultSubstatus : (value instanceof Set ? value.size > 0 : Boolean(value))).length + (workType !== "All" ? 1 : 0) + (schedule === "overdue" || schedule === "today" ? 1 : 0);
   const otherCount = [currentFilters.startDateFrom, currentFilters.startDateTo, currentFilters.marginDateFrom, currentFilters.marginDateTo, currentFilters.dueDateFrom, currentFilters.dueDateTo].filter(Boolean).length;
   const otherFields = {
     start: ["startDateFrom", "startDateTo"],
@@ -114,6 +118,16 @@ export const AdvancedFilterPanel: React.FC<AdvancedFilterPanelProps> = ({
                 onLocationChange={({ building, floor, room }) => set({ bl_id: building?.bl_id, levelName: floor?.LevelName, roomCode: room?.RoomCode })}
                 onEquipmentChange={(codes) => set({ selectedEquipmentCodes: codes })}
               />
+
+              <div>
+                <span className={labelClass}>Schedule</span>
+                <div role="group" aria-label="Schedule" className="grid grid-cols-3 gap-0.5 rounded-xl bg-slate-100 p-0.5">
+                  {([["All", "agenda"], ["Overdue", "overdue"], ["Today", "today"]] as const).map(([label, value]) => {
+                    const active = value === "agenda" ? schedule === "agenda" || schedule === "all" : schedule === value;
+                    return <button key={value} type="button" aria-pressed={active} onClick={() => onScheduleChange(value)} className={`rounded-lg py-1.5 text-xs font-medium ${active ? "bg-white text-blue-700 shadow-sm" : "text-slate-600"}`}>{label}</button>;
+                  })}
+                </div>
+              </div>
 
               <div>
                 <span className={labelClass}>Work Type</span>

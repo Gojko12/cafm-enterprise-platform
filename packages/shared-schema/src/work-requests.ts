@@ -240,6 +240,7 @@ export const BaseWorkRequestSchema = z.object({
   FreezeStartDate: CalendarDateSchema.optional(),
   FreezeEndDate: CalendarDateSchema.optional(),
   FreezeReason: z.string().optional(),
+  freezeAcknowledged: z.object({ by: z.string().min(1), at: z.string().min(1), freezeTitle: z.string(), freezeWindow: z.string() }).optional(),
   // Financial & Escalation Fields (for Phase 6)
   EstimatedCostEur: z.number().nonnegative().optional(),
   CostType: CostTypeSchema.optional(),

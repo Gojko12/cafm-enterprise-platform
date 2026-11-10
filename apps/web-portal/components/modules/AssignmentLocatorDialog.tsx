@@ -5,6 +5,7 @@ import type { BaseWorkRequest } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
 import { intervalFor } from "../../lib/dispatch";
 import { tradeColor } from "../../lib/trade-colors";
+import { formatFreezePeriodWindow } from "../../lib/location-freezes";
 
 export function AssignmentLocatorDialog({ request, people, onSelect, onClose }: {
   request: BaseWorkRequest; people: DemoData["craftspeople"]; onSelect: (id: string) => void; onClose: () => void;
@@ -14,7 +15,7 @@ export function AssignmentLocatorDialog({ request, people, onSelect, onClose }: 
       const interval = intervalFor(request, id);
       if (!interval) return null;
       const person = people.find((item) => item.id === id);
-      return <button key={id} className="block w-full rounded border p-2 text-left" onClick={() => onSelect(id)}>{person ? `${person.Name} ${person.LastName}` : id} · <span className={`rounded border px-1 ${tradeColor(person?.Trade)}`}>{person?.Trade ?? "Unknown trade"}</span> · {interval.assignedStartDateTime.replace("T", " ")} – {interval.assignedEndDateTime.replace("T", " ")}</button>;
+      return <button key={id} className="block w-full rounded border p-2 text-left" onClick={() => onSelect(id)}>{person ? `${person.Name} ${person.LastName}` : id} · <span className={`rounded border px-1 ${tradeColor(person?.Trade)}`}>{person?.Trade ?? "Unknown trade"}</span> · {formatFreezePeriodWindow(interval.assignedStartDateTime, interval.assignedEndDateTime)}</button>;
     })}
     <button className="rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100" onClick={onClose}>Cancel</button>
   </div></div>;

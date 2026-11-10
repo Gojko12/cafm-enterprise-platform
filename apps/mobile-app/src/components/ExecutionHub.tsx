@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { WR_Statuses } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Equipment, LocationFreeze } from "@cafm/shared-schema";
 import { laborFor, MobileExecutionTools, startTechnicianTimer, stopTechnicianTimer } from "./MobileExecutionTools";
-import { getCurrentLocationFreezes } from "../../../web-portal/lib/location-freezes";
-import { fromWallMinutes } from "../../../web-portal/lib/dispatch";
+import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
+import { FreezeAckPanel, FreezeBadge } from "./FreezeSafetyGate";
 import { completeChecklistInstances } from "../../../web-portal/lib/checklist-completion";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
 import { formatHumanDateTimeRange, formatPlannedRange } from "../lib/human-time";
@@ -38,6 +38,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [lockedNotice, setLockedNotice] = useState(false);
+  const [freezeGate, setFreezeGate] = useState(false);
   useEffect(() => {
     navigationRef.current = () => {
       if (busy) { setError("Wait for the current operation to finish before navigating."); return false; }
@@ -48,11 +49,12 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
   }, [navigationRef, busy, dialog, correction]);
   const execute = async (fn: () => Promise<void>, success?: string) => { setBusy(true); setError(""); setNotice(""); try { await fn(); if (success) setNotice(success); return true; } catch (problem) { setError(problem instanceof Error ? problem.message : "Could not save changes."); return false; } finally { setBusy(false); } };
   const completionOpened = useRef(false);
-  const beginCompletion = async () => {
+  const beginCompletion = async (skipFreezeGate = false) => {
     if (!canComplete) { setError("You do not have permission to complete this work request."); return; }
     const missing = incompleteStepIndexes();
     if (missing.length) { setPrecheck(missing); return; }
     setPrecheck(null);
+    if (!skipFreezeGate && activeFreezes.length > 0 && !wr.freezeAcknowledged) { setFreezeGate(true); return; }
     await execute(async () => {
       await save((current) => stopTechnicianTimer(current, technician, person), "Prepared completion time confirmation; any active personal timer was stopped.");
       setTimeMode("measured");
@@ -66,7 +68,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
       void beginCompletion();
     }
   }, [openCompletion]);
-  const activeFreezes = getCurrentLocationFreezes(wr, freezes, fromWallMinutes(Math.floor(Date.now() / 60000) - new Date().getTimezoneOffset()));
+  const activeFreezes = getWorkRequestFreezes(wr, freezes, localNowIso());
   const activeTimer = (wr.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt);
   const steps = wr.WR_Type === "PM" ? wr.ChecklistSteps ?? wr.ChecklistInstances ?? [] : wr.todoSteps ?? [];
   const done = wr.WR_Type === "PM" ? (wr.ChecklistResults ?? []).filter((item) => steps.some((step) => "StepId" in step && step.StepId === item.stepId) && !(typeof item.value === "string" && !item.value.trim()) && !(Array.isArray(item.value) && !item.value.length)).length : (wr.todoSteps ?? []).filter((item) => item.completed).length;
@@ -92,8 +94,6 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
     if (coworkers.some((item) => !item.id || !item.minutes.trim() || !Number.isInteger(Number(item.minutes)) || Number(item.minutes) < 0)) throw new Error("Select each co-worker and enter non-negative whole minutes.");
     if (new Set(coworkers.map((item) => item.id)).size !== coworkers.length || coworkers.some((item) => item.id === technician || !people.some((p) => p.id === item.id))) throw new Error("Choose a different valid craftsperson for each co-worker.");
     await save((current) => {
-      const currentFreezes = getCurrentLocationFreezes(current, freezes, fromWallMinutes(Math.floor(Date.now() / 60000) - new Date().getTimezoneOffset()));
-      if (current.IsFrozen || currentFreezes.some((freeze) => !({ PM: freeze.allowPM, FJ: freeze.allowFJ, LJ: freeze.allowLJ })[current.WR_Type])) throw new Error("Resolve the active work or location freeze before completion.");
       if ((current.timeSessions ?? []).some((session) => session.craftpersonId === technician && !session.endedAt)) throw new Error("Stop your running timer before completion.");
       if (current.Percentage !== 50 && current.Percentage !== 55) throw new Error("Only work in execution at 50% or 55% can be completed.");
       if (current.WR_Type === "LJ" && current.ProcessTrack === "RFQ") throw new Error("The long job must be on the RFW execution track before completion.");
@@ -142,7 +142,8 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
     <div className="sticky top-0 z-30 flex flex-wrap items-center gap-2 rounded border bg-white p-2"><button disabled={busy} onClick={back} className="text-blue-700">← Back to WRs</button><strong>{wr.WR_ID}</strong><span className="rounded bg-blue-100 px-2">{wr.WR_Type}</span><span className="rounded bg-slate-100 px-2">{wr.Percentage}%</span></div>
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}{notice && <p role="status" className="rounded bg-emerald-50 p-2 text-emerald-700">{notice}</p>}
     {wr.QA_AuditStatus === "QA_Failed_ActionRequired" && <div className="space-y-2 rounded bg-rose-50 p-3"><strong>⚠ QA REWORK REQUIRED</strong><p>{wr.QA_IssueDescription}</p><textarea className="w-full rounded border p-2" placeholder="Correction performed" value={correction} onChange={(e) => setCorrection(e.target.value)} /><button className="rounded bg-rose-700 px-3 py-1 text-white" disabled={busy || !correction.trim()} onClick={() => void execute(async () => { await save((current) => { if (current.QA_AuditStatus !== "QA_Failed_ActionRequired") throw new Error("This audit no longer requires correction."); return { ...current, QA_AuditStatus: "QA_Corrected", QA_CorrectionComment: correction.trim(), QA_CorrectedDate: new Date().toISOString() }; }, `QA correction submitted: ${correction.trim()}`); setCorrection(""); }, "Correction submitted for verification.")}>Submit correction</button></div>}
-    {(wr.IsFrozen || activeFreezes.length > 0) && <div className="rounded bg-cyan-50 p-3"><strong>❄ Location Freeze Warning</strong><p>{wr.FreezeReason || wr.ActiveFreezeName || activeFreezes.map((item) => item.title).join(", ")}</p></div>}
+    {activeFreezes.length > 0 ? <FreezeBadge freezes={activeFreezes} /> : wr.IsFrozen && <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900"><strong>❄ Freeze Period</strong><p>{wr.FreezeReason || wr.ActiveFreezeName}</p></div>}
+    {freezeGate && <FreezeAckPanel freezes={activeFreezes} busy={busy} confirmLabel="Confirm & Continue to 78%" backLabel="Cancel" onBack={() => setFreezeGate(false)} onConfirm={() => void execute(async () => { await save((current) => ({ ...current, freezeAcknowledged: buildFreezeAcknowledgment(activeFreezes, technicianName) }), `Freeze period safety acknowledgment confirmed by ${technicianName}`); setFreezeGate(false); await beginCompletion(true); })} />}
     <section className="space-y-1 rounded border bg-white p-4"><h1 className="text-lg font-bold">{wr.Description}</h1><p>{wr.bl_id} / {wr.LevelName ?? "—"} / {wr.RoomCode ?? "—"}</p><p>Equipment: {wr.EquipmentCodes.map((code) => `${code} ${equipment.find((item) => item.EquipmentCode === code)?.EquipmentName ?? ""}`).join(", ") || "—"}</p><p>Trade: {wr.TradeName ?? wr.TradeId ?? "—"} · Priority: {wr.Urgency ?? "—"}</p><p>Due: {wr.DueDate ?? "—"} · Margin: {wr.MarginDate ?? "—"}</p><p>Schedule: {planned}</p></section>
     <div className="rounded bg-blue-50 p-3 text-sm"><p>Planned Schedule: {planned}</p><p>Recorded Timer: {recorded}m · Technician Opinion: {wr.laborEntries?.find((item) => item.craftpersonId === technician)?.technicianOpinionMinutes === undefined ? "Not provided" : `${wr.laborEntries.find((item) => item.craftpersonId === technician)!.technicianOpinionMinutes}m`}</p>{ahead && <p className="font-semibold text-emerald-700">⚡ Starting ahead of scheduled slot: {planned}</p>}</div>
     {(wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === technician && item.teamLeaderReply).map((item) => <p key={item.id} className="rounded bg-blue-50 p-2">💬 Team Leader ({item.status}): {item.teamLeaderReply}</p>)}
@@ -155,6 +156,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
       <div className="flex items-start justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-base font-bold">{dialog === "completion" ? "Complete Work Request (78%)" : "Comments & Photos"}</h2>{dialog === "completion" && <p className="text-xs text-slate-500">Time &amp; Team Confirmation</p>}</div><button type="button" disabled={busy} aria-label="Close" className="text-lg leading-none text-slate-500" onClick={() => setDialog(null)}>✕</button></div>
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
       {dialog === "completion" ? <>
+        {activeFreezes.length > 0 && <p className="rounded-lg bg-blue-50 p-2 text-xs text-blue-800">Completing under confirmed Freeze Period responsibility</p>}
         <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-2.5 text-sm">
           <div><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Planned</p><p className="font-medium">{planned}</p></div>
           <div><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Timer Recorded</p><p className="font-medium">{recorded} min · {sessionCount} session{sessionCount === 1 ? "" : "s"}</p></div>

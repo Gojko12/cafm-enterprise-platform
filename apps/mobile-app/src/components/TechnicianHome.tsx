@@ -1,6 +1,8 @@
 import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
+import type { LocationFreeze } from "@cafm/shared-schema";
+import { formatFreezePeriodWindow, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
 import { WRPreviewCard } from "./WRPreviewCard";
 import { isOverdue, localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
 import { wallMinutes } from "../../../web-portal/lib/dispatch";
@@ -15,15 +17,23 @@ interface TechnicianHomeProps {
   technician: string;
   now: number;
   filterControl?: React.ReactNode;
-  substatusChip?: React.ReactNode;
   resetSignal?: number;
   menuButton?: React.ReactNode;
   type?: WorkType;
   onTypeChange?: (type: WorkType) => void;
   onTabChange?: (tab: "my-wrs" | "unassigned") => void;
+  agenda?: Agenda;
+  onAgendaChange?: (agenda: Agenda) => void;
+  freezes?: LocationFreeze[];
+  viewMode?: "card" | "compact";
 }
 
+export type Agenda = "agenda" | "overdue" | "today" | "upcoming" | "all";
 export type WorkType = "All" | "PM" | "FJ" | "LJ";
+export const WR_VIEW_MODE_KEY = "cafm_mobile_wr_view_mode";
+export function readWrViewMode(): "card" | "compact" {
+  try { return localStorage.getItem(WR_VIEW_MODE_KEY) === "compact" ? "compact" : "card"; } catch { return "card"; }
+}
 
 export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   myWRs,
@@ -34,12 +44,15 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   technician,
   now,
   filterControl,
-  substatusChip,
   resetSignal = 0,
   menuButton,
   type: typeProp,
   onTypeChange,
   onTabChange,
+  agenda: agendaProp,
+  onAgendaChange,
+  freezes = [],
+  viewMode = "card",
 }) => {
   const [activeTab, setActiveTabState] = useState<"my-wrs" | "unassigned">("my-wrs");
   const [typeState, setTypeState] = useState<WorkType>("All");
@@ -48,7 +61,9 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   const setActiveTab = (next: "my-wrs" | "unassigned") => { setActiveTabState(next); onTabChange?.(next); };
   const [showClaimToast, setShowClaimToast] = useState(false);
   const [claimMessage, setClaimMessage] = useState("");
-  const [agenda, setAgenda] = useState<"agenda" | "overdue" | "today" | "upcoming" | "all">("agenda");
+  const [agendaState, setAgendaState] = useState<Agenda>("agenda");
+  const agenda = agendaProp ?? agendaState;
+  const setAgenda = (next: Agenda) => { setAgendaState(next); onAgendaChange?.(next); };
   useEffect(() => { if (resetSignal) { setAgenda("agenda"); setType("All"); } }, [resetSignal]);
 
   const handleClaimWR = async (wrId: string) => {
@@ -86,6 +101,29 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   for (const wr of sorted) { const key = activeTab === "my-wrs" && agenda !== "all" ? group(wr) : ""; groups.set(key, [...(groups.get(key) ?? []), wr]); }
   const orderedGroups = [...groups.entries()].sort(([a], [b]) => (a.startsWith("🚨") ? -1 : b.startsWith("🚨") ? 1 : a.startsWith("📂") ? 1 : b.startsWith("📂") ? -1 : 0));
   const isEmptyState = displayWRs.length === 0;
+  const freezesFor = (wr: BaseWorkRequest) => getWorkRequestFreezes(wr, freezes, localNowIso());
+  const compactRow = (wr: BaseWorkRequest) => {
+    const slot = scheduledSlot(wr, technician);
+    const late = activeTab === "my-wrs" && overdue(wr);
+    const frozen = freezesFor(wr).length > 0;
+    const due = slot ? formatShortDateTime(slot.assignedEndDateTime) : wr.StartDate_DateToPerform ? formatShortDateTime(wr.StartDate_DateToPerform) : "Unscheduled";
+    const time = slot ? slot.assignedStartDateTime.slice(11, 16) : "";
+    const pill = "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold";
+    return <div key={wr.WR_ID} role="button" tabIndex={0} onClick={() => onOpenWR?.(wr.WR_ID || "")} onKeyDown={(event) => { if (event.key === "Enter") onOpenWR?.(wr.WR_ID || ""); }} className={`mb-1.5 cursor-pointer rounded-xl border bg-white px-3 py-2 shadow-2xs ${late ? "border-rose-300" : "border-slate-200"}`}>
+      <div className="flex items-center gap-1.5">
+        <span className={`${pill} bg-slate-800 text-white`}>{wr.WR_Type}</span>
+        <span className={`${pill} bg-blue-100 text-blue-800`}>{wr.Percentage}%</span>
+        <span className="shrink-0 text-xs font-bold">{wr.WR_ID}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-700">{wr.Description}</span>
+        {activeTab === "unassigned" && onClaimWR
+          ? <button type="button" aria-label={`Claim ${wr.WR_ID}`} onClick={(event) => { event.stopPropagation(); void handleClaimWR(wr.WR_ID || ""); }} className="shrink-0 rounded-lg bg-green-600 px-2 py-0.5 text-[11px] font-bold text-white">Claim</button>
+          : late ? <span className={`${pill} bg-rose-100 text-rose-800`}>Overdue</span>
+          : frozen ? <span className={`${pill} bg-sky-100 text-sky-800`}>Freeze</span>
+          : time ? <span className="shrink-0 text-[11px] font-medium text-slate-600">{time}</span> : null}
+      </div>
+      <p className="mt-0.5 truncate text-[11px] text-slate-500">{[[wr.bl_id, wr.RoomCode].filter(Boolean).join(" / "), wr.EquipmentCodes?.[0], wr.TradeName, due].filter(Boolean).join(" · ")}</p>
+    </div>;
+  };
 
   return (
     <div className="flex flex-col h-full mobile-technician-home">
@@ -117,8 +155,8 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
           </button>
           <div className="ml-auto">{filterControl}</div>
         </div>
-        <div className="flex gap-2 overflow-x-auto bg-white px-4 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">{substatusChip}<button className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${agenda === "all" ? "bg-blue-600 text-white" : "bg-slate-100"}`} onClick={() => { setAgenda("all"); setType("All"); }}>All</button><button className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${agenda === "overdue" ? "bg-blue-600 text-white" : "bg-slate-100"}`} onClick={() => setAgenda("overdue")}>🚨 Overdue</button><button className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${agenda === "today" ? "bg-blue-600 text-white" : "bg-slate-100"}`} onClick={() => setAgenda("today")}>📅 Today</button>{(["PM", "FJ", "LJ"] as const).map((item) => <button key={item} aria-pressed={type === item} onClick={() => setType(item)} className={`rounded-full px-3 py-1 text-sm ${type === item ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>{item}</button>)}</div>
       </div>
+
 
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-20">
@@ -146,7 +184,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
           </div>
         ) : (
           <div className="space-y-0">
-            {orderedGroups.map(([label, requests]) => <section key={label}>{label && <h3 className="mb-2 mt-3 font-bold">{label}</h3>}{requests.map((wr) => (
+            {orderedGroups.map(([label, requests]) => <section key={label}>{label && <h3 className="mb-2 mt-3 font-bold">{label}</h3>}{requests.map((wr) => viewMode === "compact" ? compactRow(wr) : (
               <div key={wr.WR_ID} className={`relative ${activeTab === "my-wrs" && overdue(wr) ? "mb-3 rounded-lg border-2 border-rose-500 bg-rose-50" : ""}`}>
                 {activeTab === "my-wrs" && overdue(wr) && <div className="rounded-t border-2 border-rose-500 bg-rose-50 p-2 text-sm text-rose-900"><strong>⏰ SHOULD BE DONE BY {formatShortDateTime(scheduledSlot(wr, technician)?.assignedEndDateTime ?? wr.StartDate_DateToPerform)} — Still Open ({wr.Percentage}%)</strong><button className="ml-2 underline" onClick={() => onReport(wr.WR_ID)}>🚩 Explain Delay / Push to Team Leader</button></div>}
                 {activeTab === "my-wrs" && !overdue(wr) && dateOf(wr) && (() => { const slot = scheduledSlot(wr, technician); const today = dateOf(wr) === currentDate; const inTodaySection = today && agenda !== "all"; const range = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime, new Date(now)) : dateOf(wr); const prefix = today ? (inTodaySection ? "\ud83d\udd50 " : "\ud83d\udd50 Planned Today: ") : "\ud83d\udd50 Can start early anytime: "; return <div className="rounded-t bg-blue-50 p-2 text-sm text-blue-900">{prefix}{range}</div>; })()}
@@ -154,6 +192,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                   wr={wr}
                   onClick={() => onOpenWR?.(wr.WR_ID || "")}
                 />
+                {freezesFor(wr).length > 0 && <div className="mb-2 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900"><strong>❄ Freeze Period</strong> · {freezesFor(wr)[0].title} · {formatFreezePeriodWindow(freezesFor(wr)[0].startDateTime, freezesFor(wr)[0].endDateTime, new Date(now))}</div>}
                 {(wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === technician && item.teamLeaderReply).map((item) => <p key={item.id} className="mb-2 rounded bg-blue-50 p-2 text-sm">💬 Team Leader ({item.status}): {item.teamLeaderReply}</p>)}
 
                 {/* Claim Button for Unassigned */}

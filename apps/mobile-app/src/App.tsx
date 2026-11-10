@@ -30,7 +30,9 @@ import { applyFilters, useFilterStore } from "./lib/store";
 import { classifyEquipmentWRs } from "./lib/equipment-wrs";
 import type { FilterCriteria } from "./lib/store";
 import { MobileChecklist } from "./components/MobileChecklist";
-import type { WorkType } from "./components/TechnicianHome";
+import { readWrViewMode, WR_VIEW_MODE_KEY } from "./components/TechnicianHome";
+import type { WorkType, Agenda } from "./components/TechnicianHome";
+import { ProfileSettings } from "./components/ProfileSettings";
 import { ExecutionHub } from "./components/ExecutionHub";
 import { TimerCard, TimersPage, timerClock } from "./components/RunningTimers";
 import { FieldUpdateModal } from "./components/FieldUpdateModal";
@@ -38,6 +40,8 @@ import { fieldReasonLabels, urgencyLabels } from "../../web-portal/lib/field-upd
 import { stable } from "./lib/portal-sync";
 import { AuditInspection } from "./components/AuditInspection";
 import { PhoneShare } from "../../web-portal/components/common/PhoneShare";
+import { FreezeChecklistGate } from "./components/FreezeSafetyGate";
+import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "../../web-portal/lib/location-freezes";
 
 type AppView = "home" | "hub" | "checklist" | "scanner" | "inspection" | "qa-spot-check" | "timers" | "audit-assurance" | "settings";
 const siteContextSchema = z.object({
@@ -122,6 +126,9 @@ export default function App() {
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const [resetSignal, setResetSignal] = useState(0);
   const [pctOpen, setPctOpen] = useState(false);
+  const [wrViewMode, setWrViewMode] = useState<"card" | "compact">(readWrViewMode);
+  const [lastSyncAt, setLastSyncAt] = useState<Date>();
+  const [agenda, setAgenda] = useState<Agenda>("agenda");
   const substatusInitSite = useRef<string | null>(null);
   const [workType, setWorkType] = useState<WorkType>("All");
   const [homeTab, setHomeTab] = useState<"my-wrs" | "unassigned">("my-wrs");
@@ -156,22 +163,9 @@ export default function App() {
     setAppliedFilters(base);
     setPctOpen(false);
     setWorkType("All");
+    setAgenda("agenda");
     setResetSignal((value) => value + 1);
   };
-  const setPercents = (values: number[]) => {
-    useFilterStore.getState().setFilter("selectedSubstatuses", values);
-    setAppliedFilters((current) => ({ ...current, selectedSubstatuses: values }));
-  };
-  const appliedPercents = effectivePercents;
-  const percentChip = existingPercents.length ? (
-    <>
-      <button type="button" aria-expanded={pctOpen} onClick={() => setPctOpen((open) => !open)} className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">{appliedPercents.length ? appliedPercents.map((value) => `${value}%`).join(", ") : "All %"} {"\u25be"}</button>
-      {pctOpen && <>
-        <button type="button" onClick={() => setPercents([])} className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs ${appliedPercents.length === 0 ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>All %</button>
-        {substatusOptions.map((option) => <button type="button" key={option.value} onClick={() => setPercents(appliedPercents.includes(option.value) ? appliedPercents.filter((value) => value !== option.value) : [...appliedPercents, option.value].sort((a, b) => a - b))} className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs ${appliedPercents.includes(option.value) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>{option.value}% ({option.count})</button>)}
-      </>}
-    </>
-  ) : null;
 
   const refreshData = useCallback(async () => {
     const db = await getDB();
@@ -290,6 +284,7 @@ export default function App() {
   const handleSyncNow = async () => {
     if (!engine) throw new Error("The offline engine is not ready.");
     const result = await engine.syncAfterChanges();
+    setLastSyncAt(new Date());
     await refreshData();
     setSyncNotice(result.pending ? `Synchronized ${result.synced} changes; ${result.pending} remain queued.` : `Synchronization complete. ${result.synced} changes sent.`);
     return result;
@@ -524,12 +519,19 @@ export default function App() {
 
   const offlineNow = isSimulatedOffline || !browserOnline || !apiReachable;
   const menuButton = <MenuButton onClick={() => setMenuOpen(true)} badge={offlineNow ? "offline" : pendingCount > 0 ? "pending" : null} />;
-  const pageTitles: Partial<Record<AppView, string>> = { scanner: "Scan QR", timers: "Timers", "audit-assurance": "Audit & Assurance", settings: "Profile" };
+  const changeTechnician = (id: string) => { if ((currentView !== "home" && currentView !== "settings") || fieldWR) { notify("Close the editor before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); };
+  const changeSite = (site: SiteId) => {
+    if ((currentView !== "home" && currentView !== "settings") || fieldWR) { notify("Close the editor before switching sites."); return; }
+    setLoadedSite(null); setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setSiteEquipment([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
+  };
+  const saveApiBase = () => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } };
+  const pageTitles: Partial<Record<AppView, string>> = { scanner: "Scan QR", timers: "Timers", "audit-assurance": "Audit & Assurance", settings: "Profile & Settings" };
   const pageTitle = pageTitles[currentView];
+  const checklistFreezes = selectedWR ? getWorkRequestFreezes(selectedWR, freezes, localNowIso()) : [];
 
   // Render based on current view
   const renderContent = () => {
-    if (currentView === "settings") return <section className="space-y-4 p-4 pb-32"><div className="flex items-start justify-between"><span className="text-sm text-slate-500">Profile &amp; Settings</span><span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-400">{MOBILE_APP_VERSION}</span></div><div className="rounded-xl border bg-white p-3"><strong>{technicianName || "Select technician"}</strong><p>{activeSiteId} · {access?.primaryRole ?? "Technician"}</p><p className="text-sm">VPA trades: {vpaTrades.join(", ") || "None"}</p></div><button className="rounded border bg-white p-3" onClick={() => handleToggleOfflineMode(!isSimulatedOffline)}>{isSimulatedOffline ? "🟢 Resume online" : "📴 Simulate offline"}</button><div className="rounded-xl border bg-white p-3"><strong>Field reports</strong><p>{siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} submitted updates</p></div><button className="rounded border bg-white p-3" onClick={() => setShareOpen(true)}>📱 Share / Open on Phone (QR &amp; URL)</button><details className="rounded-xl border bg-white p-3"><summary>Advanced Developer Options</summary><label className="block">API base URL (blank uses same origin)<input className="block w-full border p-2" value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://example.com" /></label>{settingsError && <p role="alert" className="text-red-700">{settingsError}</p>}<button className="rounded border bg-white p-2" onClick={() => { try { const value = apiBase.trim(); if (value) { const url = new URL(value, window.location.origin); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || (window.location.protocol === "https:" && url.protocol !== "https:")) throw new Error("Enter an HTTP(S) base URL without credentials, query or fragment; HTTPS apps require HTTPS."); localStorage.setItem("cafm_api_base_url", value); } else localStorage.removeItem("cafm_api_base_url"); setSettingsError(""); setSyncNotice("API base saved. Use Sync Now to reconnect."); } catch (error) { setSettingsError(error instanceof Error ? error.message : "Could not save API base URL."); } }}>Save API base</button></details><p className="text-sm">Offline refresh requires a previously installed production build over HTTPS or localhost.</p><div className="flex items-center justify-between text-[11px] text-slate-400"><span>CAFM Mobile · {MOBILE_APP_VERSION}</span><button className="underline" onClick={() => { void (async () => { try { const regs = await navigator.serviceWorker?.getRegistrations?.() ?? []; await Promise.all(regs.map((reg) => reg.unregister())); if ("caches" in window) await Promise.all((await caches.keys()).map((key) => caches.delete(key))); } finally { window.location.reload(); } })(); }}>↻ Force App Reload</button></div></section>;
+    if (currentView === "settings") return <ProfileSettings technicianName={technicianName} technicianId={currentTechnicianId} technicians={technicians} siteId={activeSiteId} role={access?.primaryRole ?? "Technician"} vpaTrades={vpaTrades} onSiteChange={changeSite} onTechnicianChange={changeTechnician} viewMode={wrViewMode} onViewModeChange={(mode) => { setWrViewMode(mode); try { localStorage.setItem(WR_VIEW_MODE_KEY, mode); } catch { /* storage unavailable */ } }} phoneFrame={phoneFrame} onPhoneFrameChange={setPhoneFrame} offline={offlineNow} simulatedOffline={isSimulatedOffline} onToggleOffline={handleToggleOfflineMode} pendingCount={pendingCount} lastSync={lastSyncAt} onSync={handleSyncNow} submittedUpdates={siteWRs.flatMap((wr) => wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === currentTechnicianId).length} onShare={() => setShareOpen(true)} apiBase={apiBase} onApiBaseChange={setApiBase} onSaveApiBase={saveApiBase} settingsError={settingsError} version={MOBILE_APP_VERSION} />;
     switch (currentView) {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
@@ -630,11 +632,14 @@ export default function App() {
               defaultSubstatuses={defaultSubstatuses}
               workType={workType}
               onWorkTypeChange={setWorkType}
+              schedule={agenda}
+              onScheduleChange={setAgenda}
             />}
-              substatusChip={percentChip}
               resetSignal={resetSignal}
               menuButton={menuButton}
               type={workType}
+              agenda={agenda}
+              onAgendaChange={setAgenda}
               onTypeChange={setWorkType}
               onTabChange={setHomeTab}
               myWRs={applyFilters(myWRs, effectiveFilters)}
@@ -652,7 +657,6 @@ export default function App() {
 
   return (
     <>
-    <button className="desktop-frame-toggle" onClick={() => setPhoneFrame((value) => !value)}>{phoneFrame ? "🖥️ Full Width" : "📱 Phone Frame (390×844)"}</button>
     <div className={`fixed inset-0 bg-gray-50 mobile-app ${phoneFrame ? "phone-frame" : ""}`}>
       {/* Drawer */}
       <MobileDrawer
@@ -668,14 +672,8 @@ export default function App() {
         currentView={currentView}
         onNavigate={(view) => { setMenuOpen(false); navigateSafely(() => { setSelectedWR(null); setCurrentView(view); }); }}
         onToggleOffline={handleToggleOfflineMode}
-        onTechnicianChange={(id) => { if ((currentView !== "home" && currentView !== "settings") || fieldWR) { notify("Close the editor before switching technicians."); return; } setMyWRs([]); setUnassignedWRs([]); setCurrentTechnicianId(id); }}
-        onSiteChange={(site) => {
-          if ((currentView !== "home" && currentView !== "settings") || fieldWR) {
-            notify("Close the editor before switching sites.");
-            return;
-          }
-          setLoadedSite(null); setMyWRs([]); setUnassignedWRs([]); setSiteWRs([]); setSiteEquipment([]); setTechnicians([]); setProfiles([]); setFreezes([]); setCurrentTechnicianId(""); setActiveSiteId(site);
-        }}
+        onTechnicianChange={changeTechnician}
+        onSiteChange={changeSite}
         onSyncNow={handleSyncNow}
         isSimulatedOffline={isSimulatedOffline}
         isOffline={offlineNow}
@@ -690,7 +688,9 @@ export default function App() {
       {timerStorageError && <p role="alert" className="bg-rose-100 px-3 py-1 text-xs text-rose-800">{timerStorageError}</p>}
       {timerStorageError && <p role="alert" className="bg-rose-100 text-xs text-rose-800">{timerStorageError}</p>}
       {/* Main Content */}
-      <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{renderContent()}</main>
+      <main className="h-screen overflow-y-auto flex flex-col">{fieldNotice && <p role="status" className="bg-amber-50 p-2 text-sm">{fieldNotice}<button className="ml-2 underline" onClick={() => setFieldNotice("")}>Dismiss</button></p>}{currentView === "checklist" && selectedWR && checklistFreezes.length > 0
+        ? <FreezeChecklistGate key={selectedWR.WR_ID} freezes={checklistFreezes} onBack={() => setCurrentView("hub")} acknowledge={() => saveSelected((current) => ({ ...current, freezeAcknowledged: buildFreezeAcknowledgment(checklistFreezes, technicianName) }), `Freeze period safety acknowledgment confirmed by ${technicianName}`)}>{renderContent()}</FreezeChecklistGate>
+        : renderContent()}</main>
       {fieldWR && <FieldUpdateModal key={fieldWR} wrId={fieldWR} submit={submitFieldUpdate} close={() => setFieldWR(null)} />}
       {followUpOpen && selectedWR && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"><div role="dialog" aria-modal="true" aria-label="Create Follow-Up FJ" className="w-full max-w-lg space-y-3 rounded bg-white p-4"><h2 className="font-bold">Create Follow-Up FJ</h2><p>{selectedWR.bl_id} / {selectedWR.LevelName ?? "—"} / {selectedWR.RoomCode ?? "—"} · {selectedWR.EquipmentCodes.join(", ")}</p><textarea aria-label="Follow-up description" className="w-full rounded border p-2" value={followUpDescription} onChange={(e) => setFollowUpDescription(e.target.value)} />{followUpError && <p role="alert" className="text-rose-700">{followUpError}</p>}<div className="flex gap-2"><button disabled={creatingFollowUp} className="rounded bg-green-700 p-2 text-white disabled:opacity-50" onClick={() => { setCreatingFollowUp(true); setFollowUpError(""); void createFollowUp().catch((error: unknown) => setFollowUpError(error instanceof Error ? error.message : "Could not create follow-up.")).finally(() => setCreatingFollowUp(false)); }}>Create Follow-Up FJ</button><button disabled={creatingFollowUp} className="rounded border p-2" onClick={() => setFollowUpOpen(false)}>Cancel</button></div></div></div>}
 

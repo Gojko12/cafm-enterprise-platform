@@ -2,6 +2,8 @@ import { CLASSICAL_TRADES, EquipmentStatusSchema, LocationFreezeSchema, normaliz
 import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
+import { expandSeededWorkRequests } from "./expanded-seed";
+import { addDays, calendarDate } from "./dispatch";
 import { resolveAbsencePerson } from "./absence-identity";
 import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles } from "./access-profiles";
@@ -123,7 +125,8 @@ export function seedData(): DemoData {
     UserId: `${site}-${role}`, DisplayName: `${ROLE_LABELS[role]} (${site})`,
     SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
   })));
-  const seeded = section20Seed(sites);
+  const seeded = expandSeededWorkRequests(section20Seed(sites), sites);
+  const freezeToday = calendarDate(new Date());
   const result: DemoData = {
     sites,
     mobileMutationIds: [],
@@ -135,7 +138,7 @@ export function seedData(): DemoData {
       title: number === 1 ? "Mission Operations Freeze" : "Technical Plant Shutdown",
       description: number === 1 ? "Operational activities are restricted during mission preparations." : "Isolated plant equipment is undergoing safety certification.",
       responsiblePerson: number === 1 ? "Thomas" : "Yvonne",
-      startDateTime: "2026-11-06T08:00", endDateTime: "2026-11-12T18:00",
+      startDateTime: `${addDays(freezeToday, -4)}T08:00`, endDateTime: `${addDays(freezeToday, 2)}T18:00`,
       allowPM: number === 2, allowFJ: false, allowLJ: false,
     }))),
     craftpersonAbsences: sites.flatMap((site) => [

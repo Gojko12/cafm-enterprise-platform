@@ -6,6 +6,8 @@ import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
 import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { TechnicianTodoList } from "@/components/modules/TechnicianTodoList";
 import { assignPerson } from "@/lib/dispatch";
+import { FreezeBadge } from "@/components/modules/FreezeSafetyGate";
+import { getWorkRequestFreezes, localNowIso } from "@/lib/location-freezes";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
@@ -119,7 +121,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           className={`min-w-0 flex-1 truncate rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}>{item}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        {tab === "Work request details" && <div className="space-y-4">
+        {(() => { const frozen = getWorkRequestFreezes(workRequest, data.locationFreezes ?? [], localNowIso()); return frozen.length > 0 ? <div className="mb-3"><FreezeBadge freezes={frozen} /></div> : null; })()}        {tab === "Work request details" && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
           {group("Fast Job Details", <>
             {field("WR ID", workRequest.WR_ID)}{field("Job ID", workRequest.JobID)}

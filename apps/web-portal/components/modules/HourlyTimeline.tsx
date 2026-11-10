@@ -5,7 +5,7 @@ import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest, CraftpersonAbsence, LocationFreeze } from "@cafm/shared-schema";
 import type { DemoData } from "../../lib/cafm-data";
 import { absenceInterval, dailyCapacity, fromWallMinutes, intervalFor, wallMinutes } from "../../lib/dispatch";
-import { describeLocationFreeze, freezeLocationLabel, getActiveFreezeConflictsForWR } from "../../lib/location-freezes";
+import { describeLocationFreeze, formatFreezePeriodWindow, freezeLocationLabel, getActiveFreezeConflictsForWR } from "../../lib/location-freezes";
 import { tradeColor } from "../../lib/trade-colors";
 import { startRequestDrag } from "../../lib/drag-preview";
 import { getEffectiveCraftpersonShift, shiftSegments } from "../../lib/craftperson-shifts";
@@ -102,7 +102,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
           const left = freeze ? Math.max(start, wallMinutes(freeze.startDateTime)) : start;
           const right = freeze ? Math.min(end, wallMinutes(freeze.endDateTime)) : start;
           const allowed = freeze ? (["PM", "FJ", "LJ"] as const).filter((type) => freeze[`allow${type}`]).join(", ") || "none" : "";
-          const detail = freeze ? `What is happening: ${freeze.description}\nResponsible person: ${freeze.responsiblePerson}\nLocations: ${freezeLocationLabel(freeze)}\n${freeze.startDateTime} – ${freeze.endDateTime}\nAllowed: ${allowed}` : "";
+          const detail = freeze ? `What is happening: ${freeze.description}\nResponsible person: ${freeze.responsiblePerson}\nLocations: ${freezeLocationLabel(freeze)}\n${formatFreezePeriodWindow(freeze.startDateTime, freeze.endDateTime)}\nAllowed: ${allowed}` : "";
           return <td key={day} className="border-l"><div className="relative h-7" style={{ width }}>{freeze && right > left && <button type="button" title={detail} aria-label={`Location freeze ${freeze.title}: ${detail}`} onMouseEnter={() => setHoverFreeze(freeze.id)} onMouseLeave={() => setHoverFreeze(null)} onFocus={() => setHoverFreeze(freeze.id)} onBlur={() => setHoverFreeze(null)} onClick={() => setSelectedFreeze((current) => current === freeze.id ? null : freeze.id)} className="absolute top-0 h-7 truncate rounded border border-cyan-400 bg-cyan-100/90 px-2 text-left text-[11px] font-medium text-cyan-950" style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH }}>❄ {freeze.title} ({freezeLocationLabel(freeze)}) • Allowed: {allowed}</button>}</div></td>;
         })}
       </tr>)}</thead>
@@ -148,7 +148,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 if (!interval) return null;
                 const left = Math.max(start, wallMinutes(interval.assignedStartDateTime)), right = Math.min(end, wallMinutes(interval.assignedEndDateTime));
                 const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
-                const title = `${wr.WR_ID} ${wr.Description}\n${interval.assignedStartDateTime} – ${interval.assignedEndDateTime}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
+                const title = `${wr.WR_ID} ${wr.Description}\n${formatFreezePeriodWindow(interval.assignedStartDateTime, interval.assignedEndDateTime)}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
                 const editable = ![27, 78, 100].includes(wr.Percentage);
                 const highlighted = spotlight?.id === wr.WR_ID && spotlight.person === person.id && spotlight.day === day;
                 const affected = !!focusFreeze && getActiveFreezeConflictsForWR({ ...wr, AssignedCraftpersonIds: [person.id], CraftpersonAssignments: [interval], StartDate_DateToPerform: undefined }, [focusFreeze]).length > 0;
@@ -167,7 +167,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
         </tr>)}
       </React.Fragment>)}</tbody></table>
     {selectedFreeze && visibleFreezes.filter((freeze) => freeze.id === selectedFreeze).map((freeze) => <div key={freeze.id} role="status" className="sticky bottom-0 left-0 z-30 w-fit max-w-full rounded border border-cyan-400 bg-cyan-50 p-2 text-cyan-950">
-      <strong>❄ {freeze.title}</strong> · {freeze.description} · Responsible: {freeze.responsiblePerson} · Locations: {freezeLocationLabel(freeze)} · {freeze.startDateTime} – {freeze.endDateTime} · Allowed: {(["PM", "FJ", "LJ"] as const).filter((type) => freeze[`allow${type}`]).join(", ") || "none"}
+      <strong>❄ {freeze.title}</strong> · {freeze.description} · Responsible: {freeze.responsiblePerson} · Locations: {freezeLocationLabel(freeze)} · {formatFreezePeriodWindow(freeze.startDateTime, freeze.endDateTime)} · Allowed: {(["PM", "FJ", "LJ"] as const).filter((type) => freeze[`allow${type}`]).join(", ") || "none"}
       <button type="button" className="ml-2 underline" onClick={() => setSelectedFreeze(null)}>Close</button>
     </div>)}
   </div>;

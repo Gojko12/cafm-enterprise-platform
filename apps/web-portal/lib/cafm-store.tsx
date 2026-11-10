@@ -13,8 +13,8 @@ export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from 
 
 export { ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS, seedSiteData } from "./demo-seed";
 import { scopeData, withAccessProfileDefaults, seedData, SITE_ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES } from "./demo-seed";
-const STORAGE_KEY = "cafm-demo-data-v17";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v18";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v16", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 function safeStorageSet(key: string, value: string): boolean {

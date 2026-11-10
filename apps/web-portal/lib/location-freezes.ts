@@ -34,8 +34,60 @@ export function getActiveFreezeConflictsForWR(wr: BaseWorkRequest, freezes: Loca
 }
 
 export function describeLocationFreeze(freeze: LocationFreeze) {
-  return `${freeze.title} · ${freeze.responsiblePerson} · ${freezeLocationLabel(freeze)} · ${freeze.startDateTime} – ${freeze.endDateTime}`;
+  return `${freeze.title} · ${freeze.responsiblePerson} · ${freezeLocationLabel(freeze)} · ${formatFreezePeriodWindow(freeze.startDateTime, freeze.endDateTime)}`;
 }
+
+function parseLocalDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(value ?? "");
+  if (!match) return undefined;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] ?? 0), Number(match[5] ?? 0));
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayStamp = (value: Date) => value.getFullYear() * 10000 + value.getMonth() * 100 + value.getDate();
+const clock = (value: Date) => `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+const calendar = (value: Date) => `${value.getDate()} ${MONTHS[value.getMonth()]} ${value.getFullYear()}`;
+
+export function formatHumanDateTime(value: string | undefined, now: Date = new Date()) {
+  if (!value) return "";
+  const date = parseLocalDateTime(value);
+  if (!date) return value;
+  const label = dayStamp(date) === dayStamp(now) ? "Today" : calendar(date);
+  return /T\d{2}:\d{2}|\s\d{2}:\d{2}/.test(value) ? `${label}, ${clock(date)}` : label;
+}
+
+export function formatFreezePeriodWindow(startIso: string, endIso: string, now: Date = new Date()) {
+  const start = parseLocalDateTime(startIso), end = parseLocalDateTime(endIso);
+  if (!start || !end) return [startIso, endIso].filter(Boolean).join(" \u2013 ");
+  if (dayStamp(start) === dayStamp(end)) return `${dayStamp(start) === dayStamp(now) ? "Today" : calendar(start)}, ${clock(start)} \u2013 ${clock(end)}`;
+  return `${formatHumanDateTime(startIso, now)} \u2013 ${formatHumanDateTime(endIso, now)}`;
+}
+
+export function getWorkRequestFreezes(wr: BaseWorkRequest, freezes: LocationFreeze[], now: string) {
+  const merged = new Map<string, LocationFreeze>();
+  for (const freeze of [...getCurrentLocationFreezes(wr, freezes, now), ...getActiveFreezeConflictsForWR(wr, freezes)]) merged.set(freeze.id, freeze);
+  return [...merged.values()];
+}
+
+export function localNowIso(now: Date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+export const FREEZE_ACK_STATEMENTS = [
+  "Team Leader is aware I am performing this work during the freeze period",
+  "We are taking operational responsibility for executing this task",
+  "We will proceed with extra care and follow all freeze precautions",
+] as const;
+
+export function buildFreezeAcknowledgment(freezes: LocationFreeze[], person: string, at: string = new Date().toISOString()) {
+  return {
+    by: person, at,
+    freezeTitle: freezes.map((item) => item.title).join(", "),
+    freezeWindow: freezes.map((item) => formatFreezePeriodWindow(item.startDateTime, item.endDateTime)).join("; "),
+  };
+}
+
 
 export function getCurrentLocationFreezes(wr: BaseWorkRequest, freezes: LocationFreeze[], now: string) {
   return freezes.filter((freeze) => freeze.siteId === wr.SiteId && matchesFreezeLocation(wr, freeze) &&
