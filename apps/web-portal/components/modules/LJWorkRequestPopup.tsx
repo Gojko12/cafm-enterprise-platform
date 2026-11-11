@@ -17,6 +17,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { useApp } from "@/lib/hooks/useApp";
+import { LocateInBimButton } from "@/components/common/LocateInBim";
 
 const TABS = [
   "Work request details & Roles",
@@ -345,6 +346,11 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b bg-white px-5 py-3">
         <div><h2 className="text-xl font-bold">LJ Details Popup</h2></div>
         <div className="flex flex-wrap items-center gap-2">
+          {(() => {
+            const bimAsset = data.equipment.find((item) => item.SiteId === workRequest.SiteId && workRequest.EquipmentCodes.includes(item.EquipmentCode));
+            return <LocateInBimButton siteId={workRequest.SiteId} buildingId={workRequest.bl_id} bimBuildingId={bimAsset?.bimBuildingId}
+              equipmentCode={bimAsset?.EquipmentCode ?? workRequest.EquipmentCodes[0]} hasBimLink={!!bimAsset?.bimGlobalId} />;
+          })()}
           <button onClick={printYellowPage} className="rounded bg-amber-400 px-4 py-2 font-bold text-slate-950">Print Yellow Page</button>
           <button aria-label="Close LJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button>
         </div>

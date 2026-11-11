@@ -75,6 +75,12 @@ export const EquipmentSchema = z.object({
   PrimaryTradeId: z.string().min(1).optional(),
   ParentEquipmentCode: z.string().min(1).optional(),
   BIM_GlobalId: z.string().min(1).optional(),
+  // Lightweight OpenBIM linkage metadata written by the 3D BIM viewer (web-ifc).
+  bimGlobalId: z.string().min(1).optional(),
+  bimExpressId: z.number().int().nonnegative().optional(),
+  bimBuildingId: z.string().min(1).optional(),
+  bimCategory: z.string().min(1).optional(),
+  bimTypeName: z.string().min(1).optional(),
   QRCodeUrl: z.string().url().optional(),
   CreatedAt: z.string().min(1).optional(),
   UpdatedAt: z.string().min(1).optional(),

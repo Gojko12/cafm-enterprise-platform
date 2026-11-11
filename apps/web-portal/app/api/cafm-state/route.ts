@@ -182,6 +182,9 @@ const stateSchema = z.object({
   tradeRoleMappings: records,
   siteRoleMappings: records,
   mobileMutationIds: z.array(z.string().min(1)).optional(),
+  bimElementLinks: z.record(z.string(), z.object({
+    equipmentCode: z.string().min(1), buildingId: z.string().min(1), updatedAt: z.string().min(1), updatedBy: z.string().min(1),
+  })).optional(),
 }).strict().transform((state, context) => {
   try { return migratePmState(state); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
@@ -263,6 +266,8 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
       (item.floorId && !state.floors.some((floor) => floor.bl_id === item.buildingId && floor.LevelName === item.floorId)) ||
       (item.roomId && !state.rooms.some((room) => room.bl_id === item.buildingId && room.LevelName === item.floorId && room.RoomCode === item.roomId))))) return false;
   if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return false;
+  if (state.bimElementLinks && Object.entries(state.bimElementLinks).some(([key, link]) =>
+    !key.startsWith(`${link.buildingId}:`) || !state.equipment.some((asset) => asset.EquipmentCode === link.equipmentCode && asset.SiteId === site))) return false;
   return true;
 }
 

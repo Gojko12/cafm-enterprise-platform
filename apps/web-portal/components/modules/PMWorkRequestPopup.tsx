@@ -25,6 +25,7 @@ import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "@
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { hasOpenQARework } from "@/lib/qa-settings";
+import { LocateInBimButton } from "@/components/common/LocateInBim";
 
 const TABS = [
   "Work request details",
@@ -599,10 +600,14 @@ export function PMWorkRequestPopup({
             <h2 className="text-lg font-bold text-slate-900">WR Details Popup</h2>
             <p className="text-sm text-slate-600">{workRequest.WR_ID} · {workRequest.Description}</p>
           </div>
-          <button type="button" aria-label="Close WR Details Popup" onClick={onClose}
-            className="rounded px-3 py-2 text-xl leading-none text-slate-600 hover:bg-slate-100">×</button>
+          <div className="flex items-center gap-2">
+            <LocateInBimButton siteId={workRequest.SiteId} buildingId={workRequest.bl_id}
+              bimBuildingId={equipment[0]?.bimBuildingId} equipmentCode={equipment[0]?.EquipmentCode ?? workRequest.EquipmentCodes[0]}
+              hasBimLink={!!equipment[0]?.bimGlobalId} />
+            <button type="button" aria-label="Close WR Details Popup" onClick={onClose}
+              className="rounded px-3 py-2 text-xl leading-none text-slate-600 hover:bg-slate-100">×</button>
+          </div>
         </header>
-
         <FieldUpdateBadges wr={workRequest} />
         <nav aria-label="WR detail tabs" className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2">
           {TABS.map((tab) => (

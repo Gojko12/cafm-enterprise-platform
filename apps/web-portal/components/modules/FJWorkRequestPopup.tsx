@@ -20,6 +20,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
+import { LocateInBimButton } from "@/components/common/LocateInBim";
 
 type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA" | "Checklist - Smart PM";
 
@@ -120,7 +121,13 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
     <section role="dialog" aria-modal="true" aria-label="FJ Details Popup" className="flex h-[95vh] w-[96vw] max-w-[96vw] flex-col overflow-hidden rounded-xl bg-slate-100 shadow-2xl">
       <header className="flex items-center justify-between border-b bg-white px-5 py-3">
         <div><h2 className="text-xl font-bold">FJ Details Popup</h2><p className="text-sm text-slate-600">{workRequest.WR_ID} · {workRequest.Description}</p></div>
-        <div className="flex items-center gap-3"><span className="rounded bg-green-100 px-3 py-1 text-sm font-semibold">Fast Job · {workRequest.Percentage}%</span><button aria-label="Close FJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button></div>
+        <div className="flex items-center gap-3"><span className="rounded bg-green-100 px-3 py-1 text-sm font-semibold">Fast Job · {workRequest.Percentage}%</span>
+          {(() => {
+            const bimAsset = data.equipment.find((item) => item.SiteId === workRequest.SiteId && workRequest.EquipmentCodes.includes(item.EquipmentCode));
+            return <LocateInBimButton siteId={workRequest.SiteId} buildingId={workRequest.bl_id} bimBuildingId={bimAsset?.bimBuildingId}
+              equipmentCode={bimAsset?.EquipmentCode ?? workRequest.EquipmentCodes[0]} hasBimLink={!!bimAsset?.bimGlobalId} />;
+          })()}
+          <button aria-label="Close FJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button></div>
       </header>
       <FieldUpdateBadges wr={workRequest} />
       <nav className="flex shrink-0 gap-1 border-b bg-white px-3 pt-2" aria-label="Fast Job detail tabs">

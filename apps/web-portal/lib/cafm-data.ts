@@ -27,6 +27,12 @@ export interface ExtractedDesk {
   deskType: string;
   isPermanent: boolean;
 }
+export interface BimElementLink {
+  equipmentCode: string;
+  buildingId: string;
+  updatedAt: string;
+  updatedBy: string;
+}
 export interface DemoData {
   pmModelVersion?: 60;
   pmMigrationNotes?: string[];
@@ -63,5 +69,7 @@ export interface DemoData {
   auditTemplates?: AuditTemplate[];
   auditImports?: AuditImport[];
   auditAssurance?: AuditAssurance;
+  /** BIM linkage keyed by `${buildingId}:${ifcGlobalId}` — manual EQ ID assignments made in the 3D viewer. */
+  bimElementLinks?: Record<string, BimElementLink>;
   mobileMutationIds: string[];
 }

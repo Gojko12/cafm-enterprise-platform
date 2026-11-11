@@ -15,6 +15,7 @@ import { SuppressionLog } from "./SuppressionWorkspace";
 import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "./FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
+import { LocateInBimButton } from "@/components/common/LocateInBim";
 
 const columns = [
   { id: "code", label: "EQ ID", value: (eq: Equipment) => eq.EquipmentCode },
@@ -43,6 +44,12 @@ export function EquipmentRegistry() {
       {EQUIPMENT_STATUSES.map((status) => <label key={status} className="block py-1"><input type="checkbox" checked={statuses.includes(status)} onChange={(event) => setStatuses((current) => event.target.checked ? [...current, status] : current.filter((entry) => entry !== status))} /> {status}</label>)}
     </div></details>;
   useEffect(() => { setSelected(null); setExpanded([]); }, [activeSiteId]);
+  // Deep link from the 3D BIM viewer: /equipment?eq=0000000001 preselects the equipment.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("eq");
+    if (code && data.equipment.some((eq) => eq.SiteId === activeSiteId && eq.EquipmentCode === code)) setSelected(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const equipment = data.equipment.filter((item) => item.SiteId === activeSiteId);
   const item = equipment.find((eq) => eq.EquipmentCode === selected);
   const shown = (tree ? equipment.filter((eq) => {
@@ -183,7 +190,7 @@ function EquipmentDetails({ item, onClose }: { item: Equipment; onClose: () => v
       const raw = event.target.value; setDraft((current) => ({ ...current, [key]: raw === "" ? undefined : Number(raw) }));
     }} className="mt-1 block w-full rounded border p-1 text-sm" /></label>;
   return <aside className="min-w-0 space-y-3 rounded border bg-white p-3 lg:w-1/2">
-    <div className="flex flex-wrap justify-between gap-2"><strong>{item.EquipmentCode} · {item.EquipmentName}</strong><div className="flex gap-2 text-xs">{locator ? <a href={locator} className="text-blue-700 underline">Find in 2D Floor Plan</a> : <span title="No room polygon is available">2D N/A</span>}<span title="IFC rendering and selection are not available">BIM N/A</span><button aria-label="Close equipment details" onClick={onClose}>✕</button></div></div>
+    <div className="flex flex-wrap justify-between gap-2"><strong>{item.EquipmentCode} · {item.EquipmentName}</strong><div className="flex gap-2 text-xs">{locator ? <a href={locator} className="text-blue-700 underline">Find in 2D Floor Plan</a> : <span title="No room polygon is available">2D N/A</span>}<LocateInBimButton siteId={item.SiteId} buildingId={item.bl_id} bimBuildingId={item.bimBuildingId} equipmentCode={item.EquipmentCode} hasBimLink={!!item.bimGlobalId} className="text-indigo-700 underline" /><button aria-label="Close equipment details" onClick={onClose}>✕</button></div></div>
     <nav className="flex flex-wrap gap-1">{(["General", "Details", "WRs", "Attached Documents", "KPIs", "Comments"] as const).map((name) =>
       <button key={name} onClick={() => setTab(name)} aria-pressed={tab === name} className={`rounded border px-2 py-1 text-xs ${tab === name ? "bg-blue-100" : ""}`}>{name}</button>)}</nav>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
