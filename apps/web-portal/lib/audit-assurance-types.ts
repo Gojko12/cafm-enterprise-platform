@@ -36,6 +36,11 @@ export const AuditFindingSchema = z.object({
   evidence: z.object({ beforePhotos: z.array(z.string()), afterPhotos: z.array(z.string()), measurements: z.string().optional(), certificates: z.array(z.string()), updatedDrawings: z.array(z.string()), replacedParts: z.array(z.string()), laborCostEUR: z.number().nonnegative(), materialCostEUR: z.number().nonnegative(), submittedBy: z.string().optional(), submittedAt: z.string().optional(), evidenceAccepted: z.boolean().optional(), evidenceReviewerNotes: z.string().optional() }),
   verification: z.object({ method: z.enum(["InternalReviewer", "AuditCompany_SOCOTEC", "NextInspection", "ControlledLowRiskRule"]).optional(), verifiedBy: z.string().optional(), verifiedAt: z.string().optional(), verificationOutcome: z.enum(["VerifiedClosed", "RejectedReworkRequired"]).optional(), notes: z.string().optional() }),
   auditTrail: z.array(z.object({ id: nonempty, timestamp: nonempty, actor: nonempty, action: nonempty, justification: z.string().optional() })),
+  // --- Analytics fields (optional, non-breaking): structured remediation tracking ---
+  severity: z.enum(["Critical", "Major", "Minor"]).optional(),
+  dueDate: z.iso.date().optional(),
+  addressedAt: z.string().optional(),
+  status: z.enum(["Open", "Addressed", "Closed"]).optional(),
 });
 export const AuditInspectionSchema = z.object({
   id: nonempty, siteId: site, campaignId: nonempty, equipmentId: nonempty, buildingId: nonempty, systemName: nonempty,

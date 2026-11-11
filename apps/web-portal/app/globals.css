@@ -99,3 +99,31 @@ body {
 .wr-status-overdue {
   @apply bg-red-100 text-red-800;
 }
+
+/* Print / PDF Executive Summary: print only the analytics dashboard content. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    min-height: auto;
+    background: white !important;
+    padding: 0.5cm;
+  }
+  .print-area .no-print,
+  .no-print {
+    display: none !important;
+  }
+  .print-area section,
+  .print-area .rounded-lg {
+    break-inside: avoid;
+  }
+}

@@ -11,6 +11,7 @@ import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles } from "./access-profiles";
 import { seedAssurance, seedAuditTemplates } from "./audit-assurance-seed";
 import { withSnowdonShowcase } from "./snowdon-seed";
+import { ensureAnalyticsHistorySeeded } from "./analytics-history-seed";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
 export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
@@ -23,9 +24,9 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
 export function scopeData(data: DemoData, site: SiteId): DemoData {
-  // The Snowdon Towers showcase migration is idempotent and runs on every scope pass,
-  // so existing saved states pick up S01-BL-2 without a demo data reset.
-  data = withSnowdonShowcase(migratePmState(data));
+  // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
+  // run on every scope pass, so existing saved states are enriched without a reset.
+  data = ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(data)));
   return {
     ...data,
     sites: [site],

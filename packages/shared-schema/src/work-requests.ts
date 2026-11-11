@@ -262,6 +262,38 @@ export const BaseWorkRequestSchema = z.object({
   originatingChecklistStepId: z.string().min(1).optional(),
   originatingChecklistStepLabel: z.string().min(1).optional(),
   updatedAt: z.string().optional(),
+  // --- Analytics lifecycle fields (optional, non-breaking) ---
+  /** Timestamp of reaching 78% Technically Completed. */
+  CompletedAt: z.string().optional(),
+  /** Timestamp of reaching 100% Closed/Approved (or cancellation). */
+  ClosedAt: z.string().optional(),
+  ReopenCount: z.number().int().nonnegative().optional(),
+  ReopenedHistory: z.array(z.object({
+    reopenedAt: z.string().min(1),
+    fromPercentage: z.number().min(0).max(100),
+    toPercentage: z.number().min(0).max(100),
+    reason: z.string().optional(),
+    actor: z.string().optional(),
+  })).optional(),
+  /** Stage lifecycle trail (primarily for Long Jobs: 10% -> 20% -> ... -> 100%). */
+  StageHistory: z.array(z.object({
+    status: z.string().min(1),
+    percentage: z.number().min(0).max(100).optional(),
+    enteredAt: z.string().min(1),
+    exitedAt: z.string().optional(),
+    actor: z.string().optional(),
+  })).optional(),
+  /** Timestamped technician labor bookings used by the analytics engine. */
+  TimeLogs: z.array(z.object({
+    id: z.string().min(1),
+    personId: z.string().min(1),
+    technicianName: z.string().min(1),
+    wrId: z.string().min(1),
+    wrType: z.enum(["PM", "FJ", "LJ"]),
+    hours: z.number().nonnegative(),
+    loggedAt: z.string().min(1),
+    note: z.string().optional(),
+  })).optional(),
   OriginatingWR_ID: z.string().min(1).optional(),
   OriginatingFJ_WR_ID: z.string().min(1).optional(),
   EscalatedToLJ_WR_ID: z.string().min(1).optional(),
