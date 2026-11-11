@@ -15,3 +15,7 @@ install.log
 .env.*
 apps/web-portal/public/mobile/
 apps/web-portal/.next-cloud/
+# Raw .ifc models above ~45MB must ship gzip-compressed (*.ifc.gz); only the small
+# bundled S01-BL-1.ifc demo file is tracked uncompressed.
+apps/web-portal/public/bim/*.ifc
+!apps/web-portal/public/bim/S01-BL-1.ifc

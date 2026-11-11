@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { gunzipSync, gzipSync } from "node:zlib";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -7,14 +8,14 @@ import { upsertMarkInStepText } from "@/lib/ifc-step-mark";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_IFC_BYTES = 128 * 1024 * 1024;
-const BUNDLED_BUILDING_ID = "S01-BL-1";
+/** Direct in-app uploads may be raw `.ifc` or client-gzipped `.ifc.gz` up to 200MB. */
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 const idSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "Identifiers may only contain letters, digits, dashes, and underscores.");
 const uploadSchema = z.object({
   siteId: idSchema,
   buildingId: idSchema,
   fileName: z.string().trim().min(1).max(260).optional(),
-  content: z.string().min(1).max(MAX_IFC_BYTES),
+  content: z.string().min(1).max(MAX_UPLOAD_BYTES),
 });
 const patchSchema = z.object({
   siteId: idSchema,
@@ -29,16 +30,26 @@ function storageDirectory() {
   return path.join(process.cwd(), ".data", "bim");
 }
 
-function bundledModelPath() {
-  return path.join(process.cwd(), "public", "bim", `${BUNDLED_BUILDING_ID}.ifc`);
+function bundledDirectory() {
+  return path.join(process.cwd(), "public", "bim");
 }
 
-function storedModelPath(siteId: string, buildingId: string) {
-  return path.join(storageDirectory(), `${siteId}__${buildingId}.ifc`);
+function storedModelPath(siteId: string, buildingId: string, compressed: boolean) {
+  return path.join(storageDirectory(), `${siteId}__${buildingId}.ifc${compressed ? ".gz" : ""}`);
 }
 
 function reply(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+function isGzipBytes(bytes: Uint8Array): boolean {
+  return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+}
+
+/** Reads the gzip ISIZE footer (uncompressed size modulo 2^32) without inflating. */
+function gzipUncompressedBytes(bytes: Buffer): number | undefined {
+  if (bytes.length < 4) return undefined;
+  return bytes.readUInt32LE(bytes.length - 4);
 }
 
 interface BimModelMetadata {
@@ -47,60 +58,101 @@ interface BimModelMetadata {
   fileName: string;
   updatedAt: string;
   sizeBytes: number;
+  uncompressedBytes?: number;
+  compressed: boolean;
   source: "uploaded" | "bundled";
 }
 
-async function listModels(siteId: string): Promise<BimModelMetadata[]> {
-  const models: BimModelMetadata[] = [];
-  const prefix = `${siteId}__`;
-  try {
-    for (const entry of await readdir(storageDirectory())) {
-      if (!entry.startsWith(prefix) || !entry.endsWith(".ifc")) continue;
-      const buildingId = entry.slice(prefix.length, -4);
-      if (!idSchema.safeParse(buildingId).success) continue;
-      const info = await stat(path.join(storageDirectory(), entry));
-      models.push({ siteId, buildingId, fileName: entry, updatedAt: info.mtime.toISOString(), sizeBytes: info.size, source: "uploaded" });
-    }
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-  }
-  // The demo building ships with the app; expose it whenever no custom override was uploaded.
-  if (!models.some((model) => model.buildingId === BUNDLED_BUILDING_ID)) {
-    try {
-      const info = await stat(bundledModelPath());
-      models.push({ siteId, buildingId: BUNDLED_BUILDING_ID, fileName: `${BUNDLED_BUILDING_ID}.ifc`, updatedAt: info.mtime.toISOString(), sizeBytes: info.size, source: "bundled" });
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-    }
-  }
-  return models.sort((a, b) => a.buildingId.localeCompare(b.buildingId));
+interface ResolvedModelFile {
+  filePath: string;
+  compressed: boolean;
+  source: "uploaded" | "bundled";
 }
 
-async function resolveModelFile(siteId: string, buildingId: string): Promise<{ filePath: string; source: "uploaded" | "bundled" } | null> {
-  const stored = storedModelPath(siteId, buildingId);
+function parseModelFileName(entry: string): { baseName: string; compressed: boolean } | null {
+  if (entry.endsWith(".ifc.gz")) return { baseName: entry.slice(0, -7), compressed: true };
+  if (entry.endsWith(".ifc")) return { baseName: entry.slice(0, -4), compressed: false };
+  return null;
+}
+
+async function safeReadDir(directory: string): Promise<string[]> {
   try {
-    await stat(stored);
-    return { filePath: stored, source: "uploaded" };
+    return await readdir(directory);
   } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    throw error;
   }
-  if (buildingId === BUNDLED_BUILDING_ID) {
-    try {
-      await stat(bundledModelPath());
-      return { filePath: bundledModelPath(), source: "bundled" };
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-    }
+}
+
+async function describe(filePath: string, base: Omit<BimModelMetadata, "updatedAt" | "sizeBytes" | "uncompressedBytes">): Promise<BimModelMetadata> {
+  const info = await stat(filePath);
+  let uncompressedBytes: number | undefined;
+  if (base.compressed) {
+    const content = await readFile(filePath);
+    uncompressedBytes = gzipUncompressedBytes(content);
+  }
+  return { ...base, updatedAt: info.mtime.toISOString(), sizeBytes: info.size, uncompressedBytes };
+}
+
+/** Lists uploaded site models plus every bundled model in public/bim (*.ifc and *.ifc.gz). */
+async function listModels(siteId: string): Promise<BimModelMetadata[]> {
+  const models = new Map<string, BimModelMetadata>();
+  // Bundled defaults first; site uploads override them below.
+  for (const entry of await safeReadDir(bundledDirectory())) {
+    const parsed = parseModelFileName(entry);
+    if (!parsed || !idSchema.safeParse(parsed.baseName).success) continue;
+    const existing = models.get(parsed.baseName);
+    if (existing && !existing.compressed) continue; // plain .ifc beats .ifc.gz for the same id
+    models.set(parsed.baseName, await describe(path.join(bundledDirectory(), entry), {
+      siteId, buildingId: parsed.baseName, fileName: entry, compressed: parsed.compressed, source: "bundled",
+    }));
+  }
+  const prefix = `${siteId}__`;
+  for (const entry of await safeReadDir(storageDirectory())) {
+    if (!entry.startsWith(prefix)) continue;
+    const parsed = parseModelFileName(entry.slice(prefix.length));
+    if (!parsed || !idSchema.safeParse(parsed.baseName).success) continue;
+    const existing = models.get(parsed.baseName);
+    if (existing?.source === "uploaded" && existing.compressed && !parsed.compressed) continue;
+    models.set(parsed.baseName, await describe(path.join(storageDirectory(), entry), {
+      siteId, buildingId: parsed.baseName, fileName: entry, compressed: parsed.compressed, source: "uploaded",
+    }));
+  }
+  return [...models.values()].sort((a, b) => a.buildingId.localeCompare(b.buildingId));
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function resolveModelFile(siteId: string, buildingId: string): Promise<ResolvedModelFile | null> {
+  const candidates: ResolvedModelFile[] = [
+    { filePath: storedModelPath(siteId, buildingId, true), compressed: true, source: "uploaded" },
+    { filePath: storedModelPath(siteId, buildingId, false), compressed: false, source: "uploaded" },
+    { filePath: path.join(bundledDirectory(), `${buildingId}.ifc`), compressed: false, source: "bundled" },
+    { filePath: path.join(bundledDirectory(), `${buildingId}.ifc.gz`), compressed: true, source: "bundled" },
+  ];
+  for (const candidate of candidates) {
+    if (await exists(candidate.filePath)) return candidate;
   }
   return null;
 }
 
-async function saveModelAtomically(siteId: string, buildingId: string, content: string) {
+/** Persists the model as compressed `.ifc.gz` (atomic replace), dropping stale plain copies. */
+async function saveCompressedModel(siteId: string, buildingId: string, gzBytes: Buffer | Uint8Array) {
   await mkdir(storageDirectory(), { recursive: true });
-  const destination = storedModelPath(siteId, buildingId);
+  const destination = storedModelPath(siteId, buildingId, true);
   const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, content, "utf8");
+  await writeFile(temporary, gzBytes);
   await rename(temporary, destination);
+  const legacyPlain = storedModelPath(siteId, buildingId, false);
+  if (await exists(legacyPlain)) await unlink(legacyPlain).catch(() => undefined);
   const info = await stat(destination);
   return { updatedAt: info.mtime.toISOString(), sizeBytes: info.size };
 }
@@ -116,20 +168,33 @@ export async function GET(request: Request) {
     if (!buildingId.success) return reply({ error: "Invalid buildingId." }, 400);
     const resolved = await resolveModelFile(siteId.data, buildingId.data);
     if (!resolved) return reply({ error: `No .ifc model is stored for ${buildingId.data}.` }, 404);
+    const info = await stat(resolved.filePath);
     if (url.searchParams.get("download") !== "1") {
-      const info = await stat(resolved.filePath);
-      return reply({ model: { siteId: siteId.data, buildingId: buildingId.data, fileName: path.basename(resolved.filePath), updatedAt: info.mtime.toISOString(), sizeBytes: info.size, source: resolved.source } });
+      const content = resolved.compressed ? await readFile(resolved.filePath) : null;
+      return reply({ model: {
+        siteId: siteId.data, buildingId: buildingId.data, fileName: path.basename(resolved.filePath),
+        updatedAt: info.mtime.toISOString(), sizeBytes: info.size, compressed: resolved.compressed,
+        uncompressedBytes: content ? gzipUncompressedBytes(content) : info.size, source: resolved.source,
+      } });
     }
     const content = await readFile(resolved.filePath);
-    const info = await stat(resolved.filePath);
-    return new Response(new Uint8Array(content), {
+    // `rawIfc=1` / `gunzip=1` always deliver a standard uncompressed .ifc (used by the
+    // "Download .IFC (with EQ IDs)" button and as a DecompressionStream fallback).
+    const wantRaw = url.searchParams.get("rawIfc") === "1" || url.searchParams.get("gunzip") === "1";
+    const sendCompressed = resolved.compressed && !wantRaw;
+    const body = resolved.compressed && wantRaw ? gunzipSync(content) : content;
+    return new Response(new Uint8Array(body), {
       status: 200,
       headers: {
-        "Content-Type": "application/x-step; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${buildingId.data}.ifc"`,
+        "Content-Type": sendCompressed ? "application/gzip" : "application/x-step; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${buildingId.data}.ifc${sendCompressed ? ".gz" : ""}"`,
         "Cache-Control": "no-store",
         "X-BIM-Source": resolved.source,
         "X-BIM-Updated-At": info.mtime.toISOString(),
+        ...(sendCompressed ? {
+          "X-BIM-Compressed": "gzip",
+          ...(gzipUncompressedBytes(content) !== undefined ? { "X-BIM-Uncompressed-Bytes": String(gzipUncompressedBytes(content)) } : {}),
+        } : {}),
       },
     });
   } catch (error) {
@@ -138,19 +203,51 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+interface NormalizedUpload {
+  siteId: string;
+  buildingId: string;
+  bytes: Uint8Array;
+}
+
+async function parseUpload(request: Request): Promise<NormalizedUpload | { error: string; status: number }> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await request.formData();
+    const siteId = idSchema.safeParse(form.get("siteId"));
+    const buildingId = idSchema.safeParse(form.get("buildingId"));
+    const file = form.get("file");
+    if (!siteId.success || !buildingId.success) return { error: "Provide valid siteId and buildingId fields.", status: 400 };
+    if (!(file instanceof Blob)) return { error: "Provide the .ifc or .ifc.gz file as the 'file' form field.", status: 400 };
+    if (file.size > MAX_UPLOAD_BYTES) return { error: "The upload exceeds the 200MB limit.", status: 413 };
+    return { siteId: siteId.data, buildingId: buildingId.data, bytes: new Uint8Array(await file.arrayBuffer()) };
+  }
   let payload: z.infer<typeof uploadSchema>;
   try {
     payload = uploadSchema.parse(await request.json());
   } catch {
-    return reply({ error: "Invalid upload payload. Provide siteId, buildingId, and the .ifc file content." }, 400);
+    return { error: "Invalid upload payload. Provide siteId, buildingId, and the .ifc file content.", status: 400 };
   }
-  if (!payload.content.trimStart().startsWith("ISO-10303-21")) {
-    return reply({ error: "The uploaded file is not a valid IFC STEP (ISO-10303-21) file." }, 422);
-  }
+  return { siteId: payload.siteId, buildingId: payload.buildingId, bytes: new TextEncoder().encode(payload.content) };
+}
+
+export async function POST(request: Request) {
   try {
-    const saved = await saveModelAtomically(payload.siteId, payload.buildingId, payload.content);
-    return reply({ ok: true, model: { siteId: payload.siteId, buildingId: payload.buildingId, fileName: `${payload.siteId}__${payload.buildingId}.ifc`, ...saved, source: "uploaded" as const } });
+    const upload = await parseUpload(request);
+    if ("error" in upload) return reply({ error: upload.error }, upload.status);
+    const gzUpload = isGzipBytes(upload.bytes);
+    const stepBytes = gzUpload ? gunzipSync(upload.bytes) : upload.bytes;
+    const header = Buffer.from(stepBytes.slice(0, 64)).toString("utf8").trimStart();
+    if (!header.startsWith("ISO-10303-21")) {
+      return reply({ error: "The uploaded file is not a valid IFC STEP (ISO-10303-21) file." }, 422);
+    }
+    // Always persist compressed to keep server disk usage small.
+    const gzBytes = gzUpload ? upload.bytes : gzipSync(stepBytes, { level: 6 });
+    const saved = await saveCompressedModel(upload.siteId, upload.buildingId, gzBytes);
+    return reply({ ok: true, model: {
+      siteId: upload.siteId, buildingId: upload.buildingId,
+      fileName: `${upload.siteId}__${upload.buildingId}.ifc.gz`,
+      ...saved, uncompressedBytes: stepBytes.length, compressed: true, source: "uploaded" as const,
+    } });
   } catch (error) {
     console.error("Could not persist the BIM model", error);
     return reply({ error: "Could not persist the uploaded .ifc model." }, 500);
@@ -167,14 +264,15 @@ export async function PATCH(request: Request) {
   try {
     const resolved = await resolveModelFile(payload.siteId, payload.buildingId);
     if (!resolved) return reply({ error: `No .ifc model is stored for ${payload.buildingId}.` }, 404);
-    const stepText = await readFile(resolved.filePath, "utf8");
+    const content = await readFile(resolved.filePath);
+    const stepText = (resolved.compressed ? gunzipSync(content) : content).toString("utf8");
     const { text, action } = upsertMarkInStepText(stepText, {
       ifcGlobalId: payload.ifcGlobalId,
       expressId: payload.expressId,
       equipmentCode: payload.equipmentCode,
     });
-    // Copy-on-write: patched bundled models are persisted as site-specific overrides.
-    const saved = await saveModelAtomically(payload.siteId, payload.buildingId, text);
+    // Copy-on-write: patched models (bundled or uploaded) persist as compressed site overrides.
+    const saved = await saveCompressedModel(payload.siteId, payload.buildingId, gzipSync(Buffer.from(text, "utf8"), { level: 6 }));
     return reply({ ok: true, action, ...saved });
   } catch (error) {
     if (error instanceof Error && error.message.includes("was not found in the model")) return reply({ error: error.message }, 404);

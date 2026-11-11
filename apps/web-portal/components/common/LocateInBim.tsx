@@ -10,6 +10,9 @@ export interface BimModelInfo {
   fileName: string;
   updatedAt: string;
   sizeBytes: number;
+  /** Uncompressed STEP size when the stored file is a gzip archive. */
+  uncompressedBytes?: number;
+  compressed?: boolean;
   source: "uploaded" | "bundled";
 }
 

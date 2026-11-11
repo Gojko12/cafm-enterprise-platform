@@ -15,8 +15,8 @@ import { getUnfavourableStepCount } from "@/lib/wr-signals";
 import { freezeLocations, localNowIso } from "@/lib/location-freezes";
 import { fetchBimModels, type BimModelInfo } from "@/components/common/LocateInBim";
 import {
-  bimLinkKey, fetchIfcBuffer, findMissingSyncItems, loadBimModel, nextSequentialEquipmentCode,
-  resolveElementLinks, suggestEquipmentCategory, suggestEquipmentTrade,
+  bimLinkKey, expressIdFromBatchedHit, fetchIfcBuffer, findMissingSyncItems, gunzipBytes, gzipBytes,
+  loadBimModel, nextSequentialEquipmentCode, resolveElementLinks, suggestEquipmentCategory, suggestEquipmentTrade,
   type BimElement, type BimModelIndex, type BimSpace, type LoadedBimModel,
 } from "@/lib/ifc-cafm-bridge";
 import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
@@ -88,6 +88,8 @@ export function BIMViewer() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const modelRootRef = useRef<THREE.Group | null>(null);
   const modelBoxRef = useRef<THREE.Box3 | null>(null);
+  const gridRef = useRef<THREE.GridHelper | null>(null);
+  const selectionHelperRef = useRef<THREE.Box3Helper | null>(null);
   const clipPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, -1, 0), 0));
   const flyRef = useRef<{ fromPos: THREE.Vector3; toPos: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; start: number; duration: number } | null>(null);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -141,8 +143,9 @@ export function BIMViewer() {
     container.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111827);
-    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / Math.max(container.clientHeight, 1), 10, 1e8);
-    camera.position.set(15000, 12000, 15000);
+    // Models are centred near the origin with minY = 0 in Y-up meters.
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / Math.max(container.clientHeight, 1), 0.1, 5000);
+    camera.position.set(30, 22, 30);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -150,8 +153,10 @@ export function BIMViewer() {
     const sun = new THREE.DirectionalLight(0xffffff, 0.9);
     sun.position.set(1, 2, 1.5);
     scene.add(sun);
-    const grid = new THREE.GridHelper(60000, 60, 0x374151, 0x1f2937);
+    const grid = new THREE.GridHelper(60, 60, 0x374151, 0x1f2937);
+    grid.position.y = -0.02;
     scene.add(grid);
+    gridRef.current = grid;
     rendererRef.current = renderer;
     sceneRef.current = scene;
     cameraRef.current = camera;
@@ -207,9 +212,11 @@ export function BIMViewer() {
     const distance = Math.max(maxDim * 1.9, modelDim * 0.12);
     const direction = new THREE.Vector3(1, 0.75, 1).normalize();
     const targetPos = center.clone().add(direction.multiplyScalar(distance));
-    camera.near = Math.max(modelDim / 5000, 1);
-    camera.far = Math.max(modelDim * 60, 100000);
+    // Dynamic near/far/orbit limits keep both 12m demo buildings and 67MB towers jitter-free.
+    camera.near = Math.max(modelDim / 2000, 0.05);
+    camera.far = Math.max(modelDim * 25, 2000);
     camera.updateProjectionMatrix();
+    controls.maxDistance = Math.max(modelDim * 6, 500);
     if (animated) {
       flyRef.current = {
         fromPos: camera.position.clone(), toPos: targetPos,
@@ -223,11 +230,16 @@ export function BIMViewer() {
   }, []);
 
   const elementWorldBox = useCallback((expressId: number): THREE.Box3 | null => {
-    const meshes = loadedRef.current?.elementMeshes.get(expressId);
-    if (!meshes?.length) return null;
-    const box = new THREE.Box3();
-    for (const mesh of meshes) box.expandByObject(mesh);
-    return box.isEmpty() ? null : box;
+    // Element bboxes live in model space; the group only translates (no rotation/scale),
+    // so world = bbox + group.position. This also covers elements inside batched meshes.
+    const model = loadedRef.current;
+    const element = model?.index.elements.find((entry) => entry.expressId === expressId);
+    if (!model || !element?.bbox) return null;
+    const offset = model.group.position;
+    return new THREE.Box3(
+      new THREE.Vector3(element.bbox.min[0] + offset.x, element.bbox.min[1] + offset.y, element.bbox.min[2] + offset.z),
+      new THREE.Vector3(element.bbox.max[0] + offset.x, element.bbox.max[1] + offset.y, element.bbox.max[2] + offset.z),
+    );
   }, []);
 
   const flyToElement = useCallback((expressId: number) => {
@@ -287,11 +299,11 @@ export function BIMViewer() {
         setError("");
         setSelection(null);
         setStoreyFilter(ALL_STOREYS);
-        setStatus(`Downloading ${buildingId}.ifc…`);
-        const buffer = await fetchIfcBuffer(activeSiteId, buildingId, meta.updatedAt);
+        setStatus("Downloading BIM archive…");
+        const buffer = await fetchIfcBuffer(activeSiteId, buildingId, meta.updatedAt, (stage) => { if (active) setStatus(stage); });
         if (!active) return;
-        setStatus("Parsing IFC model (web-ifc WASM)…");
-        const model = await loadBimModel(buffer);
+        setStatus("Decompressing & parsing IFC…");
+        const model = await loadBimModel(buffer, (stage) => { if (active) setStatus(stage); });
         if (!active) { model.dispose(); return; }
         // Remember per-mesh originals for X-Ray / status overlays.
         for (const meshes of [...model.elementMeshes.values(), ...model.spaceMeshes.values()]) {
@@ -303,6 +315,13 @@ export function BIMViewer() {
             } satisfies MeshOriginal;
           }
         }
+        for (const mesh of model.batchedMeshes) {
+          const material = mesh.material as THREE.MeshLambertMaterial;
+          mesh.userData.original = {
+            color: material.color.getHex(), opacity: material.opacity,
+            transparent: material.transparent, depthWrite: material.depthWrite,
+          } satisfies MeshOriginal;
+        }
         const scene = sceneRef.current;
         if (modelRootRef.current && scene) scene.remove(modelRootRef.current);
         loadedRef.current?.dispose();
@@ -312,6 +331,16 @@ export function BIMViewer() {
         modelBoxRef.current = box;
         modelRootRef.current = model.group;
         loadedRef.current = model;
+        // Resize the ground grid to the model footprint (the model sits at Y = 0).
+        if (scene && !box.isEmpty()) {
+          if (gridRef.current) scene.remove(gridRef.current);
+          const size = box.getSize(new THREE.Vector3());
+          const span = Math.ceil(Math.max(size.x, size.z, 20) * 1.6 / 10) * 10;
+          const grid = new THREE.GridHelper(span, Math.min(100, Math.max(20, Math.round(span / 2))), 0x374151, 0x1f2937);
+          grid.position.y = -0.02;
+          scene.add(grid);
+          gridRef.current = grid;
+        }
         setLoaded(model);
         setIndex(model.index);
         fitCameraToBox(box, false);
@@ -404,7 +433,50 @@ export function BIMViewer() {
         (mesh.material as THREE.MeshLambertMaterial).clippingPlanes = clipping;
       }
     }
+    // Batched shell / passive-distribution meshes: storey slicing, X-Ray ghosting, clipping.
+    for (const mesh of model.batchedMeshes) {
+      const storeyName = mesh.userData.storeyName as string;
+      mesh.visible = storeyFilter === ALL_STOREYS || storeyName === storeyFilter;
+      const material = mesh.material as THREE.MeshLambertMaterial;
+      const original = mesh.userData.original as MeshOriginal | undefined;
+      if (!original) continue;
+      material.clippingPlanes = clipping;
+      if (xray) {
+        material.opacity = 0.15;
+        material.transparent = true;
+        material.depthWrite = false;
+      } else {
+        material.opacity = original.opacity;
+        material.transparent = original.transparent;
+        material.depthWrite = original.depthWrite;
+      }
+      material.needsUpdate = true;
+    }
   }, [index, links, selection, storeyFilter, xray, clipEnabled, clipPercent, colorMode, showSpaces, statusColorByCode, loaded]);
+
+  // ---- Selection outline (works for individual AND batched elements) ----
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (selectionHelperRef.current) {
+      scene.remove(selectionHelperRef.current);
+      selectionHelperRef.current.dispose();
+      selectionHelperRef.current = null;
+    }
+    if (selection === null || !loaded) return;
+    const box = elementWorldBox(selection);
+    if (!box) return;
+    const helper = new THREE.Box3Helper(box.expandByScalar(0.05), new THREE.Color(COLOR_HIGHLIGHT));
+    scene.add(helper);
+    selectionHelperRef.current = helper;
+    return () => {
+      if (selectionHelperRef.current) {
+        scene.remove(selectionHelperRef.current);
+        selectionHelperRef.current.dispose();
+        selectionHelperRef.current = null;
+      }
+    };
+  }, [selection, loaded, elementWorldBox]);
 
   // ---- Picking ----
   const onPointerDown = (event: React.PointerEvent) => {
@@ -425,12 +497,18 @@ export function BIMViewer() {
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(pointer, camera);
+    // Raycast only on clean clicks (<5px movement), never on hover/mousemove.
     const pickables: THREE.Object3D[] = [];
     for (const meshes of model.elementMeshes.values()) for (const mesh of meshes) if (mesh.visible) pickables.push(mesh);
+    for (const mesh of model.batchedMeshes) if (mesh.visible) pickables.push(mesh);
     const hits = raycaster.intersectObjects(pickables, false);
-    const hit = hits[0]?.object as THREE.Mesh | undefined;
-    if (hit) {
-      setSelection(hit.userData.expressId as number);
+    const hit = hits[0];
+    const mesh = hit?.object as THREE.Mesh | undefined;
+    if (mesh) {
+      const expressId = mesh.userData.batched
+        ? expressIdFromBatchedHit(mesh, hit!.faceIndex ?? 0)
+        : (mesh.userData.expressId as number);
+      setSelection(expressId ?? null);
       setAssignOpen(false);
     } else {
       setSelection(null);
@@ -637,7 +715,8 @@ export function BIMViewer() {
 
   const downloadIfc = async () => {
     try {
-      const response = await fetch(`/api/bim-models?siteId=${encodeURIComponent(activeSiteId)}&buildingId=${encodeURIComponent(buildingId)}&download=1`, { cache: "no-store" });
+      // rawIfc=1: users always download a standard uncompressed .ifc with their EQ IDs.
+      const response = await fetch(`/api/bim-models?siteId=${encodeURIComponent(activeSiteId)}&buildingId=${encodeURIComponent(buildingId)}&download=1&rawIfc=1`, { cache: "no-store" });
       if (!response.ok) throw new Error("The download failed.");
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -1062,7 +1141,7 @@ function UploadIfcModal({ siteId, buildings, onClose, onImported }: {
 }) {
   const [targetBuildingId, setTargetBuildingId] = useState<string>("__new__");
   const [fileName, setFileName] = useState("");
-  const [content, setContent] = useState<string>("");
+  const [stepBytes, setStepBytes] = useState<Uint8Array | null>(null);
   const [preview, setPreview] = useState<UploadPreview | null>(null);
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1072,14 +1151,17 @@ function UploadIfcModal({ siteId, buildings, onClose, onImported }: {
   const handleFile = async (file: File) => {
     setError("");
     setPreview(null);
-    if (!file.name.toLowerCase().endsWith(".ifc")) { setError("Choose a .ifc file."); return; }
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".ifc") && !lower.endsWith(".ifc.gz")) { setError("Choose a .ifc or .ifc.gz file."); return; }
     setParsing(true);
     try {
-      const text = await file.text();
-      if (!text.trimStart().startsWith("ISO-10303-21")) throw new Error("The file is not a valid IFC STEP (ISO-10303-21) file.");
+      let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
+      if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = await gunzipBytes(bytes);
+      const header = new TextDecoder().decode(bytes.slice(0, 64)).trimStart();
+      if (!header.startsWith("ISO-10303-21")) throw new Error("The file is not a valid IFC STEP (ISO-10303-21) file.");
       setFileName(file.name);
-      setContent(text);
-      const model = await loadBimModel(new TextEncoder().encode(text));
+      setStepBytes(bytes);
+      const model = await loadBimModel(bytes);
       try {
         setPreview({
           buildingName: model.index.buildingName,
@@ -1094,7 +1176,7 @@ function UploadIfcModal({ siteId, buildings, onClose, onImported }: {
       }
     } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : "Could not parse the .ifc file.");
-      setContent("");
+      setStepBytes(null);
       setFileName("");
     } finally {
       setParsing(false);
@@ -1104,17 +1186,20 @@ function UploadIfcModal({ siteId, buildings, onClose, onImported }: {
   const sanitizeId = (value: string) => value.trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 
   const importModel = async () => {
-    if (!content || !preview) { setError("Choose and parse a .ifc file first."); return; }
+    if (!stepBytes || !preview) { setError("Choose and parse a .ifc file first."); return; }
     const buildingId = targetBuildingId === "__new__" ? sanitizeId(preview.buildingName) : targetBuildingId;
     if (!buildingId) { setError("The IFCBUILDING has no usable name; choose an existing target building."); return; }
     setImporting(true);
     setError("");
     try {
-      const response = await fetch("/api/bim-models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ siteId, buildingId, fileName, content }),
-      });
+      // Gzip client-side so a 67MB .ifc uploads as a ~7-15MB .ifc.gz archive.
+      const gz = await gzipBytes(stepBytes);
+      const payload = gz ?? stepBytes;
+      const form = new FormData();
+      form.set("siteId", siteId);
+      form.set("buildingId", buildingId);
+      form.set("file", new Blob([payload as BlobPart], { type: gz ? "application/gzip" : "application/x-step" }), gz ? `${buildingId}.ifc.gz` : `${buildingId}.ifc`);
+      const response = await fetch("/api/bim-models", { method: "POST", body: form });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(body && typeof body === "object" && "error" in body ? String(body.error) : "The upload failed.");
@@ -1154,10 +1239,10 @@ function UploadIfcModal({ siteId, buildings, onClose, onImported }: {
             className={`rounded border-2 border-dashed p-5 text-center ${dragActive ? "border-blue-500 bg-blue-50" : "border-gray-300"}`}
           >
             <Box className="mx-auto mb-1 text-gray-400" size={22} />
-            <p className="text-gray-600">{fileName || "Drag & drop a .ifc file here, or"}</p>
+            <p className="text-gray-600">{fileName || "Drag & drop a .ifc / .ifc.gz file here, or"}</p>
             <label className="mt-1 inline-block cursor-pointer rounded bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700">
               Browse…
-              <input type="file" accept=".ifc" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleFile(file); }} />
+              <input type="file" accept=".ifc,.gz" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleFile(file); }} />
             </label>
           </div>
           {parsing && <p className="flex items-center gap-1.5 text-gray-600"><Loader2 className="animate-spin" size={13} /> Parsing the IFC model…</p>}

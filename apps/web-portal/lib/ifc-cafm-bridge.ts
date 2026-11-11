@@ -5,9 +5,18 @@
  *
  * - Initialises the `IfcAPI` strictly in the browser with WASM served from `/wasm/`
  *   so Next.js SSR builds never try to bundle WebAssembly.
- * - Parses IFCBUILDING / IFCBUILDINGSTOREY / IFCSPACE and every physical element,
- *   distinguishing the architectural shell from MEP / assignable equipment.
- * - Builds Three.js geometry per element for picking, X-Ray, slicing, and overlays.
+ * - web-ifc's `flatTransformation` matrices ALREADY convert IFC Z-up model
+ *   coordinates into Three.js Y-up meters (verified against S01-BL-1.ifc: floor
+ *   slabs stack at Y = 0 m / 4 m / 8 m / 12 m), so NO extra axis rotation is applied.
+ * - Walks IFCRELAGGREGATES (Building -> Storey -> Space) and
+ *   IFCRELCONTAINEDINSPATIALSTRUCTURE (Storey / Space -> Elements) first, then
+ *   falls back to 3D point-in-box math in the same upright Y-up meter space.
+ * - Converts raw IfcBuildingStorey.Elevation values through the project length
+ *   unit (mm / ft / m) and cross-checks them against observed slab/space geometry.
+ * - Batches architectural shell and passive duct/pipe distribution geometry per
+ *   (storey, colour) so 67MB+ models render at 60 FPS, while MEP equipment and
+ *   IfcSpace volumes stay individually pickable. Batched meshes carry a
+ *   triangle-range -> expressID lookup for picking.
  * - Caches downloaded `.ifc` buffers in IndexedDB keyed by (siteId, buildingId, updatedAt).
  */
 
@@ -20,7 +29,7 @@ export interface BimStorey {
   expressId: number;
   globalId: string;
   name: string;
-  /** Model units (millimetres in Revit exports). */
+  /** World Y elevation in meters (unit-converted and geometry-cross-checked). */
   elevation: number;
 }
 
@@ -64,14 +73,23 @@ export interface BimModelIndex {
   elements: BimElement[];
 }
 
+export interface BatchRange {
+  /** Start offset into the geometry index buffer. */
+  start: number;
+  count: number;
+  expressId: number;
+}
+
 export interface LoadedBimModel {
   index: BimModelIndex;
-  /** Root group already rotated from IFC Z-up into Three.js Y-up. */
+  /** Root group, translated so the model is centred in X/Z with minY = 0. */
   group: THREE.Group;
-  /** All pickable meshes of physical elements, keyed by expressID. */
+  /** Individually pickable meshes of MEP / assignable elements, keyed by expressID. */
   elementMeshes: Map<number, THREE.Mesh[]>;
   /** Translucent IfcSpace volumes (hidden by default), keyed by space expressID. */
   spaceMeshes: Map<number, THREE.Mesh[]>;
+  /** Merged shell / passive-distribution meshes with triangle-range lookups. */
+  batchedMeshes: THREE.Mesh[];
   dispose: () => void;
 }
 
@@ -83,18 +101,30 @@ const SHELL_TYPES = new Set([
 ]);
 
 const ASSIGNABLE_TYPES = new Set([
-  "IFCBUILDINGELEMENTPROXY", "IFCDISTRIBUTIONELEMENT", "IFCDISTRIBUTIONCONTROLELEMENT",
-  "IFCDISTRIBUTIONFLOWELEMENT", "IFCENERGYCONVERSIONDEVICE", "IFCFURNISHINGELEMENT",
-  "IFCTRANSPORTELEMENT", "IFCUNITARYEQUIPMENT", "IFCELECTRICAPPLIANCE", "IFCPUMP",
-  "IFCFAN", "IFCVALVE", "IFCDAMPER", "IFCBOILER", "IFCCHILLER", "IFCSANITARYTERMINAL",
+  "IFCDISTRIBUTIONELEMENT", "IFCDISTRIBUTIONCONTROLELEMENT", "IFCDISTRIBUTIONFLOWELEMENT",
+  "IFCENERGYCONVERSIONDEVICE", "IFCTRANSPORTELEMENT", "IFCUNITARYEQUIPMENT",
+  "IFCELECTRICAPPLIANCE", "IFCPUMP", "IFCFAN", "IFCVALVE", "IFCDAMPER", "IFCBOILER",
+  "IFCCHILLER", "IFCSANITARYTERMINAL", "IFCAIRTERMINAL", "IFCAIRTERMINALBOX",
+  "IFCFLOWTERMINAL", "IFCFLOWMOVINGDEVICE", "IFCFLOWCONTROLLER",
+  "IFCAIRTOAIRHEATRECOVERY", "IFCCOOLINGTOWER", "IFCCOIL", "IFCCOMPRESSOR",
+]);
+
+/** Passive distribution runs are batched, never individually assignable. */
+const PASSIVE_DISTRIBUTION_TYPES = new Set([
+  "IFCDUCTSEGMENT", "IFCDUCTFITTING", "IFCPIPESEGMENT", "IFCPIPEFITTING",
+  "IFCCABLECARRIERSEGMENT", "IFCCABLECARRIERFITTING", "IFCCABLESEGMENT",
+  "IFCFLOWSEGMENT", "IFCFLOWFITTING",
 ]);
 
 const MEP_CATEGORY_HINTS = [
-  "mechanical equipment", "electrical equipment", "duct accessories", "duct", "plumbing fixtures",
-  "pipe accessories", "pipe", "fire alarm", "fire protection", "sprinklers", "air terminals",
-  "lighting fixtures", "specialty equipment", "generic models", "communication devices",
+  "mechanical equipment", "electrical equipment", "duct accessories", "plumbing fixtures",
+  "pipe accessories", "fire alarm", "fire protection", "sprinklers", "air terminals",
+  "lighting fixtures", "specialty equipment", "communication devices",
   "data devices", "electrical fixtures", "security devices",
 ];
+
+/** Generic proxies only count as assignable equipment when they look like plant/MEP. */
+const PROXY_EQUIPMENT_NAME = /(chiller|ahu|air handling|heat recovery|hru|pump|boiler|fan coil|\bfan\b|vav|generator|\bups\b|damper|hood|compressor|drain|extraction|crane|lift controller|hvac|heat pump|condenser|cooling tower|unit heater|water heater|rooftop unit|exhaust)/i;
 
 let ifcApiPromise: Promise<WebIFC.IfcAPI> | null = null;
 
@@ -106,6 +136,8 @@ export function getIfcApi(): Promise<WebIFC.IfcAPI> {
       const api = new WebIFC.IfcAPI();
       api.SetWasmPath("/wasm/", true);
       await api.Init();
+      // Silence non-fatal geometry warnings (e.g. Model Lines without meshes) on big models.
+      try { api.SetLogLevel(WebIFC.LogLevel.LOG_LEVEL_OFF); } catch { /* older web-ifc builds */ }
       return api;
     })().catch((error: unknown) => {
       ifcApiPromise = null;
@@ -131,12 +163,34 @@ function numeric(value: unknown): number {
   return Number(value ?? 0);
 }
 
+/**
+ * Scale factor converting raw IFC length attribute values (e.g. storey Elevation)
+ * into meters. Geometry from web-ifc is already meter-scaled; this is only for
+ * raw attributes. Supports SI prefixes (mm/cm/dm) and imperial FOOT/INCH units.
+ */
+function lengthUnitScale(api: WebIFC.IfcAPI, modelID: number): number {
+  let scale = 1;
+  for (const id of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCSIUNIT))) {
+    const unit = api.GetLine(modelID, id);
+    if (text(unit?.UnitType) !== "LENGTHUNIT") continue;
+    const prefix = text(unit?.Prefix);
+    scale = prefix === "MILLI" ? 0.001 : prefix === "CENTI" ? 0.01 : prefix === "DECI" ? 0.1 : 1;
+  }
+  for (const id of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCCONVERSIONBASEDUNIT))) {
+    const unit = api.GetLine(modelID, id);
+    if (text(unit?.UnitType) !== "LENGTHUNIT") continue;
+    const name = text(unit?.Name).toUpperCase();
+    if (name.includes("FOOT") || name.includes("FEET")) scale = 0.3048;
+    else if (name.includes("INCH")) scale = 0.0254;
+  }
+  return scale;
+}
+
 /** Collects single-value properties (Mark, Category, CAFM_Code, ...) per element. */
 function collectElementProperties(api: WebIFC.IfcAPI, modelID: number): Map<number, Record<string, string>> {
   const properties = new Map<number, Record<string, string>>();
   const psetCache = new Map<number, Record<string, string>>();
-  const relations = api.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYPROPERTIES);
-  for (const relationId of vectorToArray(relations)) {
+  for (const relationId of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYPROPERTIES))) {
     const relation = api.GetLine(modelID, relationId);
     const definitionId: number | undefined = relation?.RelatingPropertyDefinition?.value;
     if (!definitionId) continue;
@@ -149,12 +203,12 @@ function collectElementProperties(api: WebIFC.IfcAPI, modelID: number): Map<numb
           if (!handle?.value) continue;
           const property = api.GetLine(modelID, handle.value);
           const name = text(property?.Name);
-          if (name) values[name] = text(property?.NominalValue);
+          if (name === "Mark" || name === "CAFM_Code" || name === "Category") values[name] = text(property?.NominalValue);
         }
       }
       psetCache.set(definitionId, values);
     }
-    if (!Array.isArray(relation?.RelatedObjects)) continue;
+    if (!Object.keys(values).length || !Array.isArray(relation?.RelatedObjects)) continue;
     for (const related of relation.RelatedObjects) {
       if (!related?.value) continue;
       const existing = properties.get(related.value) ?? {};
@@ -164,11 +218,10 @@ function collectElementProperties(api: WebIFC.IfcAPI, modelID: number): Map<numb
   return properties;
 }
 
-/** Maps element expressID -> containing spatial structure expressID (storey or space). */
+/** element -> containing spatial structure (storey or space), from explicit Revit links. */
 function collectSpatialContainment(api: WebIFC.IfcAPI, modelID: number): Map<number, number> {
   const containment = new Map<number, number>();
-  const relations = api.GetLineIDsWithType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE);
-  for (const relationId of vectorToArray(relations)) {
+  for (const relationId of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE))) {
     const relation = api.GetLine(modelID, relationId);
     const structureId: number | undefined = relation?.RelatingStructure?.value;
     if (!structureId || !Array.isArray(relation?.RelatedElements)) continue;
@@ -179,195 +232,385 @@ function collectSpatialContainment(api: WebIFC.IfcAPI, modelID: number): Map<num
   return containment;
 }
 
-function buildBufferGeometry(api: WebIFC.IfcAPI, modelID: number, placed: WebIFC.PlacedGeometry): THREE.BufferGeometry {
+/** child -> parent in the IfcProject/Site/Building/Storey/Space aggregation tree. */
+function collectAggregates(api: WebIFC.IfcAPI, modelID: number): Map<number, number> {
+  const parents = new Map<number, number>();
+  for (const relationId of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCRELAGGREGATES))) {
+    const relation = api.GetLine(modelID, relationId);
+    const parent: number | undefined = relation?.RelatingObject?.value;
+    if (!parent || !Array.isArray(relation?.RelatedObjects)) continue;
+    for (const child of relation.RelatedObjects) {
+      if (child?.value) parents.set(child.value, parent);
+    }
+  }
+  return parents;
+}
+
+interface GeometryChunk {
+  positions: Float32Array; // world-space (Y-up meters), transform already applied
+  normals: Float32Array;
+  indices: Uint32Array;
+  colorKey: number;
+  alpha: number;
+}
+
+function extractChunk(api: WebIFC.IfcAPI, modelID: number, placed: WebIFC.PlacedGeometry): GeometryChunk {
   const geometry = api.GetGeometry(modelID, placed.geometryExpressID);
   const vertices = api.GetVertexArray(geometry.GetVertexData(), geometry.GetVertexDataSize());
-  const indices = api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize());
-  const positions = new Float32Array(vertices.length / 2);
-  const normals = new Float32Array(vertices.length / 2);
-  for (let index = 0; index < vertices.length; index += 6) {
-    const target = index / 2;
-    positions[target] = vertices[index];
-    positions[target + 1] = vertices[index + 1];
-    positions[target + 2] = vertices[index + 2];
-    normals[target] = vertices[index + 3];
-    normals[target + 1] = vertices[index + 4];
-    normals[target + 2] = vertices[index + 5];
+  const indices = new Uint32Array(api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize()));
+  const count = vertices.length / 6;
+  const positions = new Float32Array(count * 3);
+  const normals = new Float32Array(count * 3);
+  const m = placed.flatTransformation;
+  for (let v = 0; v < count; v++) {
+    const px = vertices[v * 6], py = vertices[v * 6 + 1], pz = vertices[v * 6 + 2];
+    const nx = vertices[v * 6 + 3], ny = vertices[v * 6 + 4], nz = vertices[v * 6 + 5];
+    positions[v * 3] = m[0] * px + m[4] * py + m[8] * pz + m[12];
+    positions[v * 3 + 1] = m[1] * px + m[5] * py + m[9] * pz + m[13];
+    positions[v * 3 + 2] = m[2] * px + m[6] * py + m[10] * pz + m[14];
+    // Rigid placement matrices: the rotation part transforms normals directly.
+    const wx = m[0] * nx + m[4] * ny + m[8] * nz;
+    const wy = m[1] * nx + m[5] * ny + m[9] * nz;
+    const wz = m[2] * nx + m[6] * ny + m[10] * nz;
+    const length = Math.hypot(wx, wy, wz) || 1;
+    normals[v * 3] = wx / length;
+    normals[v * 3 + 1] = wy / length;
+    normals[v * 3 + 2] = wz / length;
   }
-  const buffer = new THREE.BufferGeometry();
-  buffer.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  buffer.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-  buffer.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-  const matrix = new THREE.Matrix4().fromArray(placed.flatTransformation);
-  buffer.applyMatrix4(matrix);
-  return buffer;
+  const color = new THREE.Color(placed.color.x, placed.color.y, placed.color.z);
+  return { positions, normals, indices, colorKey: color.getHex(), alpha: placed.color.w };
 }
 
-function toBimBox(box: THREE.Box3 | null): BimBox | null {
-  if (!box || box.isEmpty()) return null;
-  return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
+function expandBox(box: { min: number[]; max: number[] }, positions: Float32Array) {
+  for (let index = 0; index < positions.length; index += 3) {
+    for (let axis = 0; axis < 3; axis++) {
+      const value = positions[index + axis];
+      if (value < box.min[axis]) box.min[axis] = value;
+      if (value > box.max[axis]) box.max[axis] = value;
+    }
+  }
 }
 
-function pointInBox(point: [number, number, number], box: BimBox, marginXY = 1): boolean {
-  return point[0] >= box.min[0] - marginXY && point[0] <= box.max[0] + marginXY &&
-    point[1] >= box.min[1] - marginXY && point[1] <= box.max[1] + marginXY &&
-    point[2] >= box.min[2] && point[2] <= box.max[2];
+function freshBox() {
+  return { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
 }
 
-function pointInBoxXY(point: [number, number, number], box: BimBox, marginXY = 1): boolean {
-  return point[0] >= box.min[0] - marginXY && point[0] <= box.max[0] + marginXY &&
-    point[1] >= box.min[1] - marginXY && point[1] <= box.max[1] + marginXY;
+function toBimBox(box: { min: number[]; max: number[] }): BimBox | null {
+  if (!Number.isFinite(box.min[0]) || !Number.isFinite(box.max[0])) return null;
+  return { min: [box.min[0], box.min[1], box.min[2]], max: [box.max[0], box.max[1], box.max[2]] };
+}
+
+/** 3D containment in upright Y-up meters: X/Z are the ground plane, Y is height. */
+function pointInBox(point: [number, number, number], box: BimBox, marginXZ = 0.05): boolean {
+  return point[0] >= box.min[0] - marginXZ && point[0] <= box.max[0] + marginXZ &&
+    point[2] >= box.min[2] - marginXZ && point[2] <= box.max[2] + marginXZ &&
+    point[1] >= box.min[1] - 0.01 && point[1] <= box.max[1] + 0.01;
+}
+
+function pointInBoxXZ(point: [number, number, number], box: BimBox, marginXZ = 0.05): boolean {
+  return point[0] >= box.min[0] - marginXZ && point[0] <= box.max[0] + marginXZ &&
+    point[2] >= box.min[2] - marginXZ && point[2] <= box.max[2] + marginXZ;
+}
+
+function mergeChunks(chunks: GeometryChunk[], withRanges?: number[]): { geometry: THREE.BufferGeometry; ranges: BatchRange[] } {
+  let vertexTotal = 0, indexTotal = 0;
+  for (const chunk of chunks) { vertexTotal += chunk.positions.length; indexTotal += chunk.indices.length; }
+  const positions = new Float32Array(vertexTotal);
+  const normals = new Float32Array(vertexTotal);
+  const indices = new Uint32Array(indexTotal);
+  const ranges: BatchRange[] = [];
+  let vertexOffset = 0, indexOffset = 0;
+  chunks.forEach((chunk, chunkIndex) => {
+    positions.set(chunk.positions, vertexOffset);
+    normals.set(chunk.normals, vertexOffset);
+    const base = vertexOffset / 3;
+    for (let i = 0; i < chunk.indices.length; i++) indices[indexOffset + i] = chunk.indices[i] + base;
+    if (withRanges) {
+      const expressId = withRanges[chunkIndex];
+      const last = ranges[ranges.length - 1];
+      if (last && last.expressId === expressId) last.count += chunk.indices.length;
+      else ranges.push({ start: indexOffset, count: chunk.indices.length, expressId });
+    }
+    vertexOffset += chunk.positions.length;
+    indexOffset += chunk.indices.length;
+  });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  return { geometry, ranges };
 }
 
 /**
- * Loads a full IFC model: metadata index + Three.js render groups.
+ * Loads a full IFC model: metadata index + batched Three.js render groups.
  * Must only run in the browser (web-ifc WASM).
  */
-export async function loadBimModel(data: Uint8Array): Promise<LoadedBimModel> {
+export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string) => void): Promise<LoadedBimModel> {
   const api = await getIfcApi();
+  onProgress?.("Decompressing & parsing IFC…");
+  await new Promise((resolve) => setTimeout(resolve, 0));
   const modelID = api.OpenModel(data, { COORDINATE_TO_ORIGIN: false });
   try {
-    // ---- Metadata ----
+    // ---- Metadata & spatial tree ----
+    const unitScale = lengthUnitScale(api, modelID);
     let buildingGlobalId = "";
     let buildingName = "";
     for (const id of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCBUILDING))) {
       const line = api.GetLine(modelID, id);
-      buildingGlobalId = text(line?.GlobalId);
-      buildingName = text(line?.Name) || text(line?.LongName);
-      break;
+      if (!buildingGlobalId) {
+        buildingGlobalId = text(line?.GlobalId);
+        buildingName = text(line?.Name) || text(line?.LongName);
+      }
     }
 
-    const storeys: BimStorey[] = vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCBUILDINGSTOREY)).map((id) => {
+    // Raw storeys (large merged exports can contain duplicate storey sets; dedupe by name).
+    const storeyById = new Map<number, { globalId: string; name: string; rawElevation: number }>();
+    for (const id of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCBUILDINGSTOREY))) {
       const line = api.GetLine(modelID, id);
-      return { expressId: id, globalId: text(line?.GlobalId), name: text(line?.Name) || text(line?.LongName), elevation: numeric(line?.Elevation) };
-    }).sort((a, b) => a.elevation - b.elevation);
-    const storeyNameById = new Map(storeys.map((storey) => [storey.expressId, storey.name]));
+      storeyById.set(id, { globalId: text(line?.GlobalId), name: text(line?.Name) || text(line?.LongName), rawElevation: numeric(line?.Elevation) });
+    }
 
+    const aggregateParent = collectAggregates(api, modelID);
     const containment = collectSpatialContainment(api, modelID);
     const elementProperties = collectElementProperties(api, modelID);
 
-    // ---- Geometry ----
+    const storeyNameOfStructure = (structureId: number | undefined): string => {
+      let cursor = structureId;
+      for (let hops = 0; cursor !== undefined && hops < 8; hops++) {
+        const storey = storeyById.get(cursor);
+        if (storey) return storey.name;
+        cursor = aggregateParent.get(cursor);
+      }
+      return "";
+    };
+
+    // ---- Geometry extraction (world Y-up meters, transforms baked in) ----
+    onProgress?.("Building 3D scene…");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const elementChunks = new Map<number, GeometryChunk[]>();
+    const spaceChunks = new Map<number, GeometryChunk[]>();
+    const elementBoxes = new Map<number, { min: number[]; max: number[] }>();
+    const spaceBoxes = new Map<number, { min: number[]; max: number[] }>();
+    const overall = freshBox();
+
+    api.StreamAllMeshes(modelID, (mesh: WebIFC.FlatMesh) => {
+      const chunks: GeometryChunk[] = [];
+      const box = elementBoxes.get(mesh.expressID) ?? freshBox();
+      for (let index = 0; index < mesh.geometries.size(); index++) {
+        const chunk = extractChunk(api, modelID, mesh.geometries.get(index));
+        expandBox(box, chunk.positions);
+        expandBox(overall, chunk.positions);
+        chunks.push(chunk);
+      }
+      if (!chunks.length) return;
+      elementBoxes.set(mesh.expressID, box);
+      elementChunks.set(mesh.expressID, [...(elementChunks.get(mesh.expressID) ?? []), ...chunks]);
+    });
+    api.StreamAllMeshesWithTypes(modelID, [WebIFC.IFCSPACE], (mesh: WebIFC.FlatMesh) => {
+      const chunks: GeometryChunk[] = [];
+      const box = spaceBoxes.get(mesh.expressID) ?? freshBox();
+      for (let index = 0; index < mesh.geometries.size(); index++) {
+        const chunk = extractChunk(api, modelID, mesh.geometries.get(index));
+        expandBox(box, chunk.positions);
+        chunks.push(chunk);
+      }
+      if (!chunks.length) return;
+      spaceBoxes.set(mesh.expressID, box);
+      spaceChunks.set(mesh.expressID, [...(spaceChunks.get(mesh.expressID) ?? []), ...chunks]);
+    });
+
+    // ---- Storey elevations in meters, cross-checked against assigned geometry ----
+    const observedMin = new Map<string, number>();
+    const observe = (name: string, minY: number) => {
+      if (!name || !Number.isFinite(minY)) return;
+      observedMin.set(name, Math.min(observedMin.get(name) ?? Infinity, minY));
+    };
+    for (const [spaceId, box] of spaceBoxes) observe(storeyNameOfStructure(aggregateParent.get(spaceId)), box.min[1]);
+    for (const [elementId, structureId] of containment) {
+      const storey = storeyById.get(structureId);
+      if (!storey) continue;
+      const box = elementBoxes.get(elementId);
+      if (box) observe(storey.name, box.min[1]);
+    }
+    const storeyMap = new Map<string, BimStorey>();
+    for (const [id, raw] of storeyById) {
+      const scaled = raw.rawElevation * unitScale;
+      const observed = observedMin.get(raw.name);
+      const elevation = observed !== undefined && Math.abs(observed - scaled) > 1 ? observed : scaled;
+      const existing = storeyMap.get(raw.name);
+      if (!existing || elevation < existing.elevation) {
+        storeyMap.set(raw.name, { expressId: id, globalId: raw.globalId, name: raw.name, elevation });
+      }
+    }
+    const storeys = [...storeyMap.values()].sort((a, b) => a.elevation - b.elevation);
+
+    // ---- Spaces ----
+    const spaces: BimSpace[] = [];
+    const spaceById = new Map<number, BimSpace>();
+    for (const id of vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCSPACE))) {
+      const line = api.GetLine(modelID, id);
+      const box = spaceBoxes.get(id);
+      let storeyName = storeyNameOfStructure(aggregateParent.get(id));
+      if (!storeyName && box) {
+        const below = storeys.filter((storey) => storey.elevation <= box.min[1] + 0.3);
+        storeyName = (below.length ? below[below.length - 1] : storeys[0])?.name ?? "";
+      }
+      const space: BimSpace = {
+        expressId: id, globalId: text(line?.GlobalId), code: text(line?.Name), longName: text(line?.LongName),
+        storeyName, bbox: box ? toBimBox(box) : null,
+      };
+      spaces.push(space);
+      spaceById.set(id, space);
+    }
+
+    const resolveStorey = (expressId: number, center: [number, number, number]): string => {
+      const structureId = containment.get(expressId);
+      if (structureId !== undefined) {
+        const viaSpace = spaceById.get(structureId);
+        if (viaSpace?.storeyName) return viaSpace.storeyName;
+        const name = storeyNameOfStructure(structureId);
+        if (name) return name;
+      }
+      const below = storeys.filter((storey) => storey.elevation <= center[1] + 0.3);
+      return (below.length ? below[below.length - 1] : storeys[0])?.name ?? "";
+    };
+
+    const resolveRoom = (expressId: number, center: [number, number, number], storeyName: string): string => {
+      const structureId = containment.get(expressId);
+      const direct = structureId !== undefined ? spaceById.get(structureId) : undefined;
+      if (direct) return direct.code;
+      // 3D point-in-box in the same upright meter space (handles ceiling-void gear).
+      const inside = spaces.filter((space) => space.bbox && pointInBox(center, space.bbox));
+      if (inside.length) return (inside.find((space) => space.storeyName === storeyName) ?? inside[0]).code;
+      const column = spaces.filter((space) => space.bbox && pointInBoxXZ(center, space.bbox));
+      if (!column.length) return "";
+      const gap = (space: BimSpace) => Math.min(Math.abs(center[1] - space.bbox!.min[1]), Math.abs(center[1] - space.bbox!.max[1]));
+      const sameStorey = column.filter((space) => space.storeyName === storeyName);
+      const pool = sameStorey.length ? sameStorey : column;
+      pool.sort((a, b) => gap(a) - gap(b));
+      return pool[0].code;
+    };
+
+    // ---- Element classification & index ----
+    const elements: BimElement[] = [];
+    const elementById = new Map<number, BimElement>();
+    for (const [expressId] of elementChunks) {
+      const typeCode = api.GetLineType(modelID, expressId);
+      const ifcType = String(api.GetNameFromTypeCode(Number(typeCode)) ?? "").toUpperCase();
+      if (["IFCSPACE", "IFCOPENINGELEMENT", "IFCSITE", "IFCBUILDING", "IFCBUILDINGSTOREY"].includes(ifcType)) continue;
+      const line = api.GetLine(modelID, expressId);
+      const props = elementProperties.get(expressId) ?? {};
+      const box = elementBoxes.get(expressId)!;
+      const center: [number, number, number] = [
+        (box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2,
+      ];
+      const name = text(line?.Name);
+      const typeName = text(line?.ObjectType) || name;
+      const category = props.Category ?? "";
+      const mark = (props.Mark ?? props.CAFM_Code ?? "").trim();
+      const categoryLower = category.toLowerCase();
+      const isShell = SHELL_TYPES.has(ifcType);
+      const isPassive = PASSIVE_DISTRIBUTION_TYPES.has(ifcType);
+      const hinted = MEP_CATEGORY_HINTS.some((hint) => categoryLower.includes(hint));
+      const isAssignable = !isShell && !isPassive && (
+        ifcType === "IFCBUILDINGELEMENTPROXY"
+          ? Boolean(mark) || hinted || PROXY_EQUIPMENT_NAME.test(`${name} ${typeName}`)
+          : ASSIGNABLE_TYPES.has(ifcType) || ifcType.startsWith("IFCENERGY") || hinted
+      );
+      const storeyName = resolveStorey(expressId, center);
+      const element: BimElement = {
+        expressId,
+        globalId: text(line?.GlobalId),
+        name,
+        typeName,
+        ifcType,
+        category,
+        mark,
+        storeyName,
+        roomCode: resolveRoom(expressId, center, storeyName),
+        isShell,
+        isAssignable,
+        bbox: toBimBox(box),
+        center,
+      };
+      elements.push(element);
+      elementById.set(expressId, element);
+    }
+
+    // ---- Scene assembly: centre near origin with minY = 0 ----
     const group = new THREE.Group();
     group.name = "ifc-model";
-    group.rotation.x = -Math.PI / 2; // IFC is Z-up; Three.js is Y-up.
+    if (Number.isFinite(overall.min[0])) {
+      group.position.set(
+        -(overall.min[0] + overall.max[0]) / 2,
+        -overall.min[1],
+        -(overall.min[2] + overall.max[2]) / 2,
+      );
+    }
     const elementMeshes = new Map<number, THREE.Mesh[]>();
     const spaceMeshes = new Map<number, THREE.Mesh[]>();
-    const modelBoxes = new Map<number, THREE.Box3>();
+    const batchedMeshes: THREE.Mesh[] = [];
     const disposables: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
 
-    const addMesh = (expressID: number, placed: WebIFC.PlacedGeometry, isSpace: boolean) => {
-      const geometry = buildBufferGeometry(api, modelID, placed);
-      const color = new THREE.Color(placed.color.x, placed.color.y, placed.color.z);
+    const addIndividualMesh = (expressId: number, chunk: GeometryChunk, isSpace: boolean) => {
+      const { geometry } = mergeChunks([chunk]);
       const material = new THREE.MeshLambertMaterial({
-        color,
+        color: chunk.colorKey,
         side: THREE.DoubleSide,
-        transparent: isSpace || placed.color.w < 1,
-        opacity: isSpace ? 0.14 : placed.color.w < 1 ? placed.color.w : 1,
-        depthWrite: !isSpace && placed.color.w >= 1,
+        transparent: isSpace || chunk.alpha < 1,
+        opacity: isSpace ? 0.14 : chunk.alpha < 1 ? chunk.alpha : 1,
+        depthWrite: !isSpace && chunk.alpha >= 1,
       });
       const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.expressId = expressID;
+      mesh.userData.expressId = expressId;
       mesh.userData.isSpace = isSpace;
       group.add(mesh);
       disposables.push({ geometry, material });
       const target = isSpace ? spaceMeshes : elementMeshes;
-      const list = target.get(expressID) ?? [];
-      list.push(mesh);
-      target.set(expressID, list);
-      geometry.computeBoundingBox();
-      if (geometry.boundingBox) {
-        const box = modelBoxes.get(expressID) ?? new THREE.Box3();
-        box.union(geometry.boundingBox);
-        modelBoxes.set(expressID, box);
-      }
+      target.set(expressId, [...(target.get(expressId) ?? []), mesh]);
     };
 
-    api.StreamAllMeshes(modelID, (mesh: WebIFC.FlatMesh) => {
-      for (let index = 0; index < mesh.geometries.size(); index++) {
-        addMesh(mesh.expressID, mesh.geometries.get(index), false);
+    // Batch shell + passive distribution per (storey, colour); keep equipment individual.
+    const batches = new Map<string, { chunks: GeometryChunk[]; owners: number[]; colorKey: number; alpha: number; storeyName: string }>();
+    for (const [expressId, chunks] of elementChunks) {
+      const element = elementById.get(expressId);
+      if (!element) continue;
+      if (element.isAssignable) {
+        for (const chunk of chunks) addIndividualMesh(expressId, chunk, false);
+        continue;
       }
-    });
-    api.StreamAllMeshesWithTypes(modelID, [WebIFC.IFCSPACE], (mesh: WebIFC.FlatMesh) => {
-      for (let index = 0; index < mesh.geometries.size(); index++) {
-        addMesh(mesh.expressID, mesh.geometries.get(index), true);
+      for (const chunk of chunks) {
+        const alphaKey = chunk.alpha < 1 ? "t" : "o";
+        const key = `${element.storeyName}|${chunk.colorKey}|${alphaKey}`;
+        const batch = batches.get(key) ?? { chunks: [], owners: [], colorKey: chunk.colorKey, alpha: chunk.alpha, storeyName: element.storeyName };
+        batch.chunks.push(chunk);
+        batch.owners.push(expressId);
+        batches.set(key, batch);
       }
-    });
-    for (const meshes of spaceMeshes.values()) for (const mesh of meshes) mesh.visible = false;
-
-    // ---- Spaces ----
-    const spaces: BimSpace[] = vectorToArray(api.GetLineIDsWithType(modelID, WebIFC.IFCSPACE)).map((id) => {
-      const line = api.GetLine(modelID, id);
-      const containerId = containment.get(id);
-      const box = toBimBox(modelBoxes.get(id) ?? null);
-      // Revit relates spaces to storeys through IfcRelAggregates; fall back to elevation.
-      let storeyName = containerId ? storeyNameById.get(containerId) ?? "" : "";
-      if (!storeyName && box) {
-        const zMin = box.min[2];
-        const candidates = storeys.filter((storey) => storey.elevation <= zMin + 10);
-        storeyName = (candidates.length ? candidates[candidates.length - 1] : storeys[0])?.name ?? "";
-      }
-      return { expressId: id, globalId: text(line?.GlobalId), code: text(line?.Name), longName: text(line?.LongName), storeyName, bbox: box };
-    });
-
-    const resolveStorey = (expressId: number, center: [number, number, number]): string => {
-      const containerId = containment.get(expressId);
-      if (containerId && storeyNameById.has(containerId)) return storeyNameById.get(containerId) ?? "";
-      const candidates = storeys.filter((storey) => storey.elevation <= center[2] + 10);
-      return (candidates.length ? candidates[candidates.length - 1] : storeys[0])?.name ?? "";
-    };
-
-    const resolveRoom = (expressId: number, center: [number, number, number]): string => {
-      const containerId = containment.get(expressId);
-      const containedSpace = spaces.find((space) => space.expressId === containerId);
-      if (containedSpace) return containedSpace.code;
-      // 3D point-in-box: an above-ceiling fire damper still resolves to the room below it.
-      const inside = spaces.filter((space) => space.bbox && pointInBox(center, space.bbox));
-      if (inside.length) return inside[0].code;
-      const sameColumn = spaces.filter((space) => space.bbox && pointInBoxXY(center, space.bbox));
-      if (!sameColumn.length) return "";
-      sameColumn.sort((a, b) => {
-        const distance = (space: BimSpace) => Math.min(Math.abs(center[2] - space.bbox!.min[2]), Math.abs(center[2] - space.bbox!.max[2]));
-        return distance(a) - distance(b);
-      });
-      return sameColumn[0].code;
-    };
-
-    // ---- Elements ----
-    const elements: BimElement[] = [];
-    for (const [expressId] of elementMeshes) {
-      const line = api.GetLine(modelID, expressId);
-      const typeCode = api.GetLineType(modelID, expressId);
-      const ifcType = String(api.GetNameFromTypeCode(Number(typeCode)) ?? "").toUpperCase();
-      if (ifcType === "IFCSPACE" || ifcType === "IFCOPENINGELEMENT" || ifcType === "IFCSITE" || ifcType === "IFCBUILDING" || ifcType === "IFCBUILDINGSTOREY") continue;
-      const props = elementProperties.get(expressId) ?? {};
-      const box = toBimBox(modelBoxes.get(expressId) ?? null);
-      const center: [number, number, number] = box
-        ? [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2]
-        : [0, 0, 0];
-      const category = props.Category ?? "";
-      const categoryLower = category.toLowerCase();
-      const isShell = SHELL_TYPES.has(ifcType);
-      const isAssignable = !isShell && (
-        ASSIGNABLE_TYPES.has(ifcType) || ifcType.startsWith("IFCFLOW") ||
-        ifcType.startsWith("IFCDISTRIBUTION") || ifcType.startsWith("IFCENERGY") ||
-        MEP_CATEGORY_HINTS.some((hint) => categoryLower.includes(hint))
-      );
-      elements.push({
-        expressId,
-        globalId: text(line?.GlobalId),
-        name: text(line?.Name),
-        typeName: text(line?.ObjectType) || text(line?.Name),
-        ifcType,
-        category,
-        mark: (props.Mark ?? props.CAFM_Code ?? "").trim(),
-        storeyName: resolveStorey(expressId, center),
-        roomCode: resolveRoom(expressId, center),
-        isShell,
-        isAssignable,
-        bbox: box,
-        center,
-      });
     }
+    for (const batch of batches.values()) {
+      const { geometry, ranges } = mergeChunks(batch.chunks, batch.owners);
+      const material = new THREE.MeshLambertMaterial({
+        color: batch.colorKey,
+        side: THREE.DoubleSide,
+        transparent: batch.alpha < 1,
+        opacity: batch.alpha < 1 ? batch.alpha : 1,
+        depthWrite: batch.alpha >= 1,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.batched = true;
+      mesh.userData.storeyName = batch.storeyName;
+      mesh.userData.ranges = ranges;
+      group.add(mesh);
+      batchedMeshes.push(mesh);
+      disposables.push({ geometry, material });
+    }
+    for (const [expressId, chunks] of spaceChunks) {
+      for (const chunk of chunks) addIndividualMesh(expressId, chunk, true);
+    }
+    for (const meshes of spaceMeshes.values()) for (const mesh of meshes) mesh.visible = false;
+    elementChunks.clear();
+    spaceChunks.clear();
 
     const index: BimModelIndex = { buildingGlobalId, buildingName, storeys, spaces, elements };
     const dispose = () => {
@@ -376,10 +619,26 @@ export async function loadBimModel(data: Uint8Array): Promise<LoadedBimModel> {
         entry.material.dispose();
       }
     };
-    return { index, group, elementMeshes, spaceMeshes, dispose };
+    return { index, group, elementMeshes, spaceMeshes, batchedMeshes, dispose };
   } finally {
     api.CloseModel(modelID);
   }
+}
+
+/** Resolves a picked batched-mesh triangle back to its source element expressID. */
+export function expressIdFromBatchedHit(mesh: THREE.Mesh, faceIndex: number): number | null {
+  const ranges = mesh.userData.ranges as BatchRange[] | undefined;
+  if (!ranges?.length) return null;
+  const indexPosition = faceIndex * 3;
+  let low = 0, high = ranges.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const range = ranges[mid];
+    if (indexPosition < range.start) high = mid - 1;
+    else if (indexPosition >= range.start + range.count) low = mid + 1;
+    else return range.expressId;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -400,12 +659,18 @@ function openBimDatabase(): Promise<IDBDatabase> {
   });
 }
 
-async function readCachedModel(key: string): Promise<{ updatedAt: string; buffer: ArrayBuffer } | null> {
+interface CachedModel {
+  updatedAt: string;
+  buffer: ArrayBuffer;
+  compressed?: boolean;
+}
+
+async function readCachedModel(key: string): Promise<CachedModel | null> {
   try {
     const database = await openBimDatabase();
     return await new Promise((resolve) => {
       const request = database.transaction(BIM_STORE, "readonly").objectStore(BIM_STORE).get(key);
-      request.onsuccess = () => resolve((request.result as { updatedAt: string; buffer: ArrayBuffer } | undefined) ?? null);
+      request.onsuccess = () => resolve((request.result as CachedModel | undefined) ?? null);
       request.onerror = () => resolve(null);
     });
   } catch {
@@ -413,12 +678,12 @@ async function readCachedModel(key: string): Promise<{ updatedAt: string; buffer
   }
 }
 
-async function writeCachedModel(key: string, updatedAt: string, buffer: ArrayBuffer): Promise<void> {
+async function writeCachedModel(key: string, value: CachedModel): Promise<void> {
   try {
     const database = await openBimDatabase();
     await new Promise<void>((resolve) => {
       const transaction = database.transaction(BIM_STORE, "readwrite");
-      transaction.objectStore(BIM_STORE).put({ updatedAt, buffer }, key);
+      transaction.objectStore(BIM_STORE).put(value, key);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => resolve();
     });
@@ -427,17 +692,62 @@ async function writeCachedModel(key: string, updatedAt: string, buffer: ArrayBuf
   }
 }
 
-/** Downloads a model (or reuses the IndexedDB copy when `updatedAt` matches). */
-export async function fetchIfcBuffer(siteId: string, buildingId: string, updatedAt: string): Promise<Uint8Array> {
+function isGzip(bytes: Uint8Array): boolean {
+  return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+}
+
+/** Gunzips bytes with the browser-native DecompressionStream. */
+export async function gunzipBytes(bytes: Uint8Array): Promise<Uint8Array> {
+  if (typeof DecompressionStream === "undefined") throw new Error("DecompressionStream is unavailable.");
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** Gzips bytes with the browser-native CompressionStream (returns null when unsupported). */
+export async function gzipBytes(bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (typeof CompressionStream === "undefined") return null;
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/**
+ * Downloads a model (reusing the IndexedDB copy when `updatedAt` matches) and
+ * returns the UNCOMPRESSED STEP bytes. `.ifc.gz` transfers stay compressed on the
+ * wire (~7MB instead of 67MB) and are inflated client-side via
+ * `DecompressionStream('gzip')`, with a server-side `?gunzip=1` fallback.
+ */
+export async function fetchIfcBuffer(
+  siteId: string,
+  buildingId: string,
+  updatedAt: string,
+  onProgress?: (stage: string) => void,
+): Promise<Uint8Array> {
   const key = `${siteId}__${buildingId}`;
   const cached = await readCachedModel(key);
-  if (cached && cached.updatedAt === updatedAt) return new Uint8Array(cached.buffer);
-  const response = await fetch(`/api/bim-models?siteId=${encodeURIComponent(siteId)}&buildingId=${encodeURIComponent(buildingId)}&download=1`, { cache: "no-store" });
+  if (cached && cached.updatedAt === updatedAt) {
+    const bytes = new Uint8Array(cached.buffer);
+    if (cached.compressed || isGzip(bytes)) {
+      onProgress?.("Decompressing & parsing IFC…");
+      try { return await gunzipBytes(bytes); } catch { /* fall through to network */ }
+    } else {
+      return bytes;
+    }
+  }
+  onProgress?.("Downloading BIM archive…");
+  const base = `/api/bim-models?siteId=${encodeURIComponent(siteId)}&buildingId=${encodeURIComponent(buildingId)}&download=1`;
+  const canInflate = typeof DecompressionStream !== "undefined";
+  const response = await fetch(canInflate ? base : `${base}&gunzip=1`, { cache: "no-store" });
   if (!response.ok) throw new Error(`Could not download the .ifc model for ${buildingId}.`);
   const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
   const stamp = response.headers.get("X-BIM-Updated-At") ?? updatedAt;
-  await writeCachedModel(key, stamp, buffer);
-  return new Uint8Array(buffer);
+  const compressed = response.headers.get("X-BIM-Compressed") === "gzip" || isGzip(bytes);
+  await writeCachedModel(key, { updatedAt: stamp, buffer, compressed });
+  if (compressed) {
+    onProgress?.("Decompressing & parsing IFC…");
+    return gunzipBytes(bytes);
+  }
+  return bytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -457,7 +767,8 @@ export interface ResolvedBimLink {
 /**
  * Resolves the effective EQ ID per IFC element: a manual in-app assignment from
  * `bimElementLinks` always wins; otherwise a Revit `Mark` matching an existing
- * site EquipmentCode binds automatically.
+ * site EquipmentCode binds automatically. Equipment records whose `bimGlobalId`
+ * was seeded directly also bind without a STEP `Mark`.
  */
 export function resolveElementLinks(
   elements: BimElement[],
@@ -466,11 +777,18 @@ export function resolveElementLinks(
   bimElementLinks: Record<string, BimElementLink> | undefined,
 ): Map<number, ResolvedBimLink> {
   const equipmentCodes = new Set(equipment.map((asset) => asset.EquipmentCode));
+  const byGlobalId = new Map(equipment.filter((asset) => asset.bimGlobalId && asset.bimBuildingId === buildingId)
+    .map((asset) => [asset.bimGlobalId!, asset.EquipmentCode]));
   const links = new Map<number, ResolvedBimLink>();
   for (const element of elements) {
     const manual = bimElementLinks?.[bimLinkKey(buildingId, element.globalId)];
     if (manual && equipmentCodes.has(manual.equipmentCode)) {
       links.set(element.expressId, { element, equipmentCode: manual.equipmentCode, source: "manual" });
+      continue;
+    }
+    const seeded = byGlobalId.get(element.globalId);
+    if (seeded) {
+      links.set(element.expressId, { element, equipmentCode: seeded, source: "manual" });
       continue;
     }
     if (element.mark && equipmentCodes.has(element.mark)) {
@@ -516,13 +834,13 @@ export function suggestEquipmentCategory(element: BimElement): "A" | "B" | "C" |
   const haystack = `${element.category} ${element.typeName} ${element.name}`.toLowerCase();
   if (/(fire|damper|sprinkler|smoke)/.test(haystack)) return "F";
   if (/(chiller|cooling|cool)/.test(haystack)) return "C";
-  if (/(ahu|air handling|hvac|vent|air cond|heat pump)/.test(haystack)) return "A";
+  if (/(ahu|air handling|hvac|vent|air cond|heat pump|heat recovery|hru|diffuser|grille|air terminal)/.test(haystack)) return "A";
   if (/(boiler|heating|radiator)/.test(haystack)) return "H";
   if (/(ups|electrical|generator|panel|switch)/.test(haystack)) return "E";
-  if (/(drain|sewer|water|plumb|sanitary)/.test(haystack)) return "D";
+  if (/(drain|sewer|water|plumb|sanitary|sink|toilet|shower)/.test(haystack)) return "D";
   if (/(lift|elevator|escalator|transport)/.test(haystack)) return "L";
   if (/(pump|compress)/.test(haystack)) return element.category.toLowerCase().includes("compressed") ? "P" : "M";
-  if (/(kitchen|catering)/.test(haystack)) return "K";
+  if (/(kitchen|catering|hood|fryer|oven|range)/.test(haystack)) return "K";
   return element.isAssignable ? "M" : undefined;
 }
 
@@ -530,6 +848,7 @@ export function suggestEquipmentCategory(element: BimElement): "A" | "B" | "C" |
 export function suggestEquipmentTrade(element: BimElement): string {
   const haystack = `${element.category} ${element.typeName} ${element.name}`.toLowerCase();
   if (/(electrical|ups|generator|lighting|panel|data|communication)/.test(haystack)) return "Electrical";
+  if (/(kitchen|catering|hood|fryer|oven|range)/.test(haystack)) return "Catering";
   if (/(wall|slab|door|window|roof|ceiling|civil)/.test(haystack)) return "Civil";
   return "Mechanical";
 }
