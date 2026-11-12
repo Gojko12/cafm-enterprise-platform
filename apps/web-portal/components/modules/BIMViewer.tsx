@@ -31,6 +31,7 @@ const COLOR_EMERALD = 0x10b981;
 const COLOR_VIOLET = 0x8b5cf6;
 const COLOR_HIGHLIGHT = 0x1d4ed8;
 const ALL_STOREYS = "All Storeys";
+const SAFE_BOUNDS = { min: [-10, 0, -10] as [number, number, number], max: [10, 15, 10] as [number, number, number] };
 
 interface MeshOriginal {
   color: number;
@@ -67,6 +68,7 @@ export function BIMViewer() {
   const [xray, setXray] = useState(false);
   const [clipEnabled, setClipEnabled] = useState(false);
   const [clipPercent, setClipPercent] = useState(100);
+  const [viewportHealth, setViewportHealth] = useState<{ buildingId: string; meshCount: number; size: [number, number, number]; warning: string } | null>(null);
   const [colorMode, setColorMode] = useState<"bim" | "status">("bim");
   const [showSpaces, setShowSpaces] = useState(false);
 
@@ -200,23 +202,26 @@ export function BIMViewer() {
     };
   }, []);
 
-  const fitCameraToBox = useCallback((box: THREE.Box3, animated: boolean) => {
+  const fitCameraToBox = useCallback((inputBox: THREE.Box3, animated: boolean, isElement = false) => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
-    if (!camera || !controls || box.isEmpty()) return;
+    if (!camera || !controls) return;
+    const finiteBox = (candidate: THREE.Box3 | null | undefined) =>
+      !!candidate && !candidate.isEmpty() &&
+      [candidate.min.x, candidate.min.y, candidate.min.z, candidate.max.x, candidate.max.y, candidate.max.z].every(Number.isFinite);
+    const box = finiteBox(inputBox) ? inputBox : new THREE.Box3(new THREE.Vector3(...SAFE_BOUNDS.min), new THREE.Vector3(...SAFE_BOUNDS.max));
+    const sceneBox = finiteBox(modelBoxRef.current) ? modelBoxRef.current! : box;
     const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z, 1);
-    const modelBox = modelBoxRef.current;
-    const modelDim = modelBox && !modelBox.isEmpty() ? modelBox.getSize(new THREE.Vector3()).length() : maxDim;
-    const distance = Math.max(maxDim * 1.9, modelDim * 0.12);
+    const targetRadius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
+    const sceneRadius = Math.max(sceneBox.getSize(new THREE.Vector3()).length() / 2, targetRadius);
+    const cameraDistance = isElement ? Math.max(targetRadius * 2.8, 2) : Math.max(targetRadius * 2.4, 8);
     const direction = new THREE.Vector3(1, 0.75, 1).normalize();
-    const targetPos = center.clone().add(direction.multiplyScalar(distance));
+    const targetPos = center.clone().add(direction.multiplyScalar(cameraDistance));
     // Dynamic near/far/orbit limits keep both 12m demo buildings and 67MB towers jitter-free.
-    camera.near = Math.max(modelDim / 2000, 0.05);
-    camera.far = Math.max(modelDim * 25, 2000);
+    camera.near = Math.max(0.05, Math.min(0.25, targetRadius * 0.02));
+    camera.far = Math.max(5000, sceneRadius * 25, cameraDistance * 12);
     camera.updateProjectionMatrix();
-    controls.maxDistance = Math.max(modelDim * 6, 500);
+    controls.maxDistance = Math.max(500, sceneRadius * 10);
     if (animated) {
       flyRef.current = {
         fromPos: camera.position.clone(), toPos: targetPos,
@@ -226,29 +231,43 @@ export function BIMViewer() {
     } else {
       camera.position.copy(targetPos);
       controls.target.copy(center);
+      flyRef.current = null;
     }
+    controls.update();
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    if (renderer && scene) renderer.render(scene, camera);
   }, []);
 
+
   const elementWorldBox = useCallback((expressId: number): THREE.Box3 | null => {
-    // Element bboxes live in model space; the group only translates (no rotation/scale),
+    // Element bboxes live in the parsed model space; the group only translates (no rotation/scale),
     // so world = bbox + group.position. This also covers elements inside batched meshes.
     const model = loadedRef.current;
-    const element = model?.index.elements.find((entry) => entry.expressId === expressId);
-    if (!model || !element?.bbox) return null;
+    if (!model) return null;
+    const element = model.index.elements.find((entry) => entry.expressId === expressId);
     const offset = model.group.position;
-    return new THREE.Box3(
-      new THREE.Vector3(element.bbox.min[0] + offset.x, element.bbox.min[1] + offset.y, element.bbox.min[2] + offset.z),
-      new THREE.Vector3(element.bbox.max[0] + offset.x, element.bbox.max[1] + offset.y, element.bbox.max[2] + offset.z),
-    );
+    if (element?.bbox) {
+      const box = new THREE.Box3(
+        new THREE.Vector3(element.bbox.min[0] + offset.x, element.bbox.min[1] + offset.y, element.bbox.min[2] + offset.z),
+        new THREE.Vector3(element.bbox.max[0] + offset.x, element.bbox.max[1] + offset.y, element.bbox.max[2] + offset.z),
+      );
+      if (!box.isEmpty() && Number.isFinite(box.min.x + box.max.x + box.min.y + box.max.y + box.min.z + box.max.z)) return box;
+    }
+    const meshes = model.elementMeshes.get(expressId);
+    if (!meshes?.length) return null;
+    const box = new THREE.Box3();
+    for (const mesh of meshes) box.expandByObject(mesh);
+    return box.isEmpty() ? null : box;
   }, []);
 
   const flyToElement = useCallback((expressId: number) => {
     const box = elementWorldBox(expressId);
-    if (box) fitCameraToBox(box, true);
+    if (box) fitCameraToBox(box, true, true);
   }, [elementWorldBox, fitCameraToBox]);
 
   const resetCamera = useCallback(() => {
-    if (modelBoxRef.current) fitCameraToBox(modelBoxRef.current, true);
+    fitCameraToBox(modelBoxRef.current ?? new THREE.Box3(), true);
   }, [fitCameraToBox]);
 
   // ---- Model catalogue ----
@@ -298,6 +317,9 @@ export function BIMViewer() {
       try {
         setError("");
         setSelection(null);
+        setClipEnabled(false);
+        setClipPercent(100);
+        setViewportHealth(null);
         setStoreyFilter(ALL_STOREYS);
         setStatus("Downloading BIM archive…");
         const buffer = await fetchIfcBuffer(activeSiteId, buildingId, meta.updatedAt, (stage) => { if (active) setStatus(stage); });
@@ -327,12 +349,24 @@ export function BIMViewer() {
         loadedRef.current?.dispose();
         scene?.add(model.group);
         model.group.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(model.group);
+        const bounds = model.framingBounds;
+        const framing = new THREE.Box3(new THREE.Vector3(...bounds.min), new THREE.Vector3(...bounds.max));
+        const framingValid = !framing.isEmpty() &&
+          [...bounds.min, ...bounds.max].every(Number.isFinite);
+        const box = framingValid ? framing : new THREE.Box3(new THREE.Vector3(...SAFE_BOUNDS.min), new THREE.Vector3(...SAFE_BOUNDS.max));
         modelBoxRef.current = box;
         modelRootRef.current = model.group;
         loadedRef.current = model;
+        setClipEnabled(false);
+        setClipPercent(100);
+        setViewportHealth({
+          buildingId, meshCount: model.meshCount,
+          size: box.getSize(new THREE.Vector3()).toArray() as [number, number, number],
+          warning: model.meshCount === 0 ? "No 3D geometry could be built for this model."
+            : !model.batched ? "Batching failed; showing individual meshes (slower)." : "",
+        });
         // Resize the ground grid to the model footprint (the model sits at Y = 0).
-        if (scene && !box.isEmpty()) {
+        if (scene) {
           if (gridRef.current) scene.remove(gridRef.current);
           const size = box.getSize(new THREE.Vector3());
           const span = Math.ceil(Math.max(size.x, size.z, 20) * 1.6 / 10) * 10;
@@ -347,7 +381,12 @@ export function BIMViewer() {
         setStatus("");
       } catch (loadError) {
         console.error("Could not load the BIM model", loadError);
-        if (active) { setStatus(""); setError(loadError instanceof Error ? loadError.message : "Could not load the BIM model."); }
+        if (active) {
+          setStatus("");
+          const message = loadError instanceof Error ? loadError.message : "Could not load the BIM model.";
+          setError(message);
+          setViewportHealth({ buildingId, meshCount: 0, size: [0, 0, 0], warning: `3D build failed: ${message}` });
+        }
       }
     })();
     return () => { active = false; };
@@ -382,9 +421,10 @@ export function BIMViewer() {
     const plane = clipPlaneRef.current;
     const modelBox = modelBoxRef.current;
     if (modelBox && !modelBox.isEmpty()) {
-      plane.constant = modelBox.min.y + (clipPercent / 100) * (modelBox.max.y - modelBox.min.y);
+      plane.constant = modelBox.min.y + (clipPercent / 100) * (modelBox.max.y + 0.5 - modelBox.min.y);
     }
     const clipping = clipEnabled ? [plane] : null;
+    if (rendererRef.current) rendererRef.current.clippingPlanes = [];
     const elementById = new Map(index.elements.map((element) => [element.expressId, element]));
     for (const [expressId, meshes] of model.elementMeshes) {
       const element = elementById.get(expressId);
@@ -875,6 +915,19 @@ export function BIMViewer() {
           {status && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900/70 text-gray-200 text-sm gap-2 pointer-events-none">
               <Loader2 className="animate-spin" size={18} /> {status}
+            </div>
+          )}
+
+          {viewportHealth && (
+            <div className="absolute bottom-3 left-3 max-w-[70%] space-y-1 pointer-events-none">
+              {viewportHealth.warning && (
+                <div role="alert" className="rounded border border-amber-400 bg-amber-100/95 px-2 py-1 text-[11px] font-medium text-amber-900">
+                  {viewportHealth.warning}
+                </div>
+              )}
+              <div className="inline-block rounded-full bg-gray-900/80 px-2.5 py-1 text-[10px] text-gray-200 border border-gray-600">
+                {viewportHealth.buildingId} · {viewportHealth.meshCount} meshes · {viewportHealth.size[0].toFixed(1)}×{viewportHealth.size[2].toFixed(1)}×{viewportHealth.size[1].toFixed(1)}m
+              </div>
             </div>
           )}
 

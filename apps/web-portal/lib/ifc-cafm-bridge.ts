@@ -90,6 +90,14 @@ export interface LoadedBimModel {
   spaceMeshes: Map<number, THREE.Mesh[]>;
   /** Merged shell / passive-distribution meshes with triangle-range lookups. */
   batchedMeshes: THREE.Mesh[];
+  /** Shifted world-space bounds of the core building cluster (outliers excluded). */
+  framingBounds: BimBox;
+  /** Total meshes added to the group (batched + individual + spaces). */
+  meshCount: number;
+  /** Elements discarded as spatial outliers (>500 m from the core cluster). */
+  discardedOutliers: number;
+  /** False when batching threw and individual meshes were used instead. */
+  batched: boolean;
   dispose: () => void;
 }
 
@@ -115,6 +123,9 @@ const PASSIVE_DISTRIBUTION_TYPES = new Set([
   "IFCCABLECARRIERSEGMENT", "IFCCABLECARRIERFITTING", "IFCCABLESEGMENT",
   "IFCFLOWSEGMENT", "IFCFLOWFITTING",
 ]);
+
+/** Elements whose centre lies further than this from the core P5–P95 cluster are dropped. */
+const OUTLIER_DISTANCE_M = 500;
 
 const MEP_CATEGORY_HINTS = [
   "mechanical equipment", "electrical equipment", "duct accessories", "plumbing fixtures",
@@ -252,39 +263,63 @@ interface GeometryChunk {
   indices: Uint32Array;
   colorKey: number;
   alpha: number;
+  /** True when any source normal was zero / non-finite and must be recomputed. */
+  needsNormals: boolean;
 }
 
-function extractChunk(api: WebIFC.IfcAPI, modelID: number, placed: WebIFC.PlacedGeometry): GeometryChunk {
+function extractChunk(api: WebIFC.IfcAPI, modelID: number, placed: WebIFC.PlacedGeometry): GeometryChunk | null {
+  const m = placed.flatTransformation;
+  if (!m || m.length < 16) return null;
+  for (let i = 0; i < 16; i++) if (!Number.isFinite(m[i])) return null;
   const geometry = api.GetGeometry(modelID, placed.geometryExpressID);
   const vertices = api.GetVertexArray(geometry.GetVertexData(), geometry.GetVertexDataSize());
-  const indices = new Uint32Array(api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize()));
-  const count = vertices.length / 6;
+  const sourceIndices = api.GetIndexArray(geometry.GetIndexData(), geometry.GetIndexDataSize());
+  const count = Math.floor(vertices.length / 6);
   const positions = new Float32Array(count * 3);
   const normals = new Float32Array(count * 3);
-  const m = placed.flatTransformation;
+  const valid = new Uint8Array(count);
+  let needsNormals = false;
   for (let v = 0; v < count; v++) {
     const px = vertices[v * 6], py = vertices[v * 6 + 1], pz = vertices[v * 6 + 2];
     const nx = vertices[v * 6 + 3], ny = vertices[v * 6 + 4], nz = vertices[v * 6 + 5];
-    positions[v * 3] = m[0] * px + m[4] * py + m[8] * pz + m[12];
-    positions[v * 3 + 1] = m[1] * px + m[5] * py + m[9] * pz + m[13];
-    positions[v * 3 + 2] = m[2] * px + m[6] * py + m[10] * pz + m[14];
+    const x = m[0] * px + m[4] * py + m[8] * pz + m[12];
+    const y = m[1] * px + m[5] * py + m[9] * pz + m[13];
+    const z = m[2] * px + m[6] * py + m[10] * pz + m[14];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    valid[v] = 1;
+    positions[v * 3] = x;
+    positions[v * 3 + 1] = y;
+    positions[v * 3 + 2] = z;
     // Rigid placement matrices: the rotation part transforms normals directly.
     const wx = m[0] * nx + m[4] * ny + m[8] * nz;
     const wy = m[1] * nx + m[5] * ny + m[9] * nz;
     const wz = m[2] * nx + m[6] * ny + m[10] * nz;
-    const length = Math.hypot(wx, wy, wz) || 1;
+    const length = Math.hypot(wx, wy, wz);
+    if (!Number.isFinite(length) || length < 1e-9) {
+      needsNormals = true;
+      continue;
+    }
     normals[v * 3] = wx / length;
     normals[v * 3 + 1] = wy / length;
     normals[v * 3 + 2] = wz / length;
   }
+  const kept: number[] = [];
+  for (let t = 0; t + 2 < sourceIndices.length; t += 3) {
+    const a = sourceIndices[t], b = sourceIndices[t + 1], c = sourceIndices[t + 2];
+    if (a >= count || b >= count || c >= count || !valid[a] || !valid[b] || !valid[c]) continue;
+    kept.push(a, b, c);
+  }
+  if (!kept.length) return null;
   const color = new THREE.Color(placed.color.x, placed.color.y, placed.color.z);
-  return { positions, normals, indices, colorKey: color.getHex(), alpha: placed.color.w };
+  return { positions, normals, indices: Uint32Array.from(kept), colorKey: color.getHex(), alpha: placed.color.w, needsNormals };
 }
 
-function expandBox(box: { min: number[]; max: number[] }, positions: Float32Array) {
-  for (let index = 0; index < positions.length; index += 3) {
+/** Expands a box only with vertices actually referenced by the chunk's triangles. */
+function expandBoxWithChunk(box: { min: number[]; max: number[] }, chunk: GeometryChunk) {
+  for (let i = 0; i < chunk.indices.length; i++) {
+    const base = chunk.indices[i] * 3;
     for (let axis = 0; axis < 3; axis++) {
-      const value = positions[index + axis];
+      const value = chunk.positions[base + axis];
       if (value < box.min[axis]) box.min[axis] = value;
       if (value > box.max[axis]) box.max[axis] = value;
     }
@@ -337,7 +372,11 @@ function mergeChunks(chunks: GeometryChunk[], withRanges?: number[]): { geometry
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  // Always 32-bit indices: merged batches regularly exceed 65,535 vertices.
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  if (chunks.some((chunk) => chunk.needsNormals)) geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
   return { geometry, ranges };
 }
 
@@ -349,7 +388,7 @@ export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string
   const api = await getIfcApi();
   onProgress?.("Decompressing & parsing IFC…");
   await new Promise((resolve) => setTimeout(resolve, 0));
-  const modelID = api.OpenModel(data, { COORDINATE_TO_ORIGIN: false });
+  const modelID = api.OpenModel(data, { COORDINATE_TO_ORIGIN: true, USE_FAST_BOOLS: true } as WebIFC.LoaderSettings);
   try {
     // ---- Metadata & spatial tree ----
     const unitScale = lengthUnitScale(api, modelID);
@@ -398,11 +437,11 @@ export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string
       const box = elementBoxes.get(mesh.expressID) ?? freshBox();
       for (let index = 0; index < mesh.geometries.size(); index++) {
         const chunk = extractChunk(api, modelID, mesh.geometries.get(index));
-        expandBox(box, chunk.positions);
-        expandBox(overall, chunk.positions);
+        if (!chunk) continue;
+        expandBoxWithChunk(box, chunk);
         chunks.push(chunk);
       }
-      if (!chunks.length) return;
+      if (!chunks.length || !Number.isFinite(box.min[0] + box.max[0] + box.min[1] + box.max[1] + box.min[2] + box.max[2])) return;
       elementBoxes.set(mesh.expressID, box);
       elementChunks.set(mesh.expressID, [...(elementChunks.get(mesh.expressID) ?? []), ...chunks]);
     });
@@ -411,13 +450,46 @@ export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string
       const box = spaceBoxes.get(mesh.expressID) ?? freshBox();
       for (let index = 0; index < mesh.geometries.size(); index++) {
         const chunk = extractChunk(api, modelID, mesh.geometries.get(index));
-        expandBox(box, chunk.positions);
+        if (!chunk) continue;
+        expandBoxWithChunk(box, chunk);
         chunks.push(chunk);
       }
-      if (!chunks.length) return;
+      if (!chunks.length || !Number.isFinite(box.min[0] + box.max[0] + box.min[1] + box.max[1] + box.min[2] + box.max[2])) return;
       spaceBoxes.set(mesh.expressID, box);
       spaceChunks.set(mesh.expressID, [...(spaceChunks.get(mesh.expressID) ?? []), ...chunks]);
     });
+
+    // ---- Outlier-resistant core cluster: P5–P95 of element centres, padded by 500 m ----
+    const percentile = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))];
+    const centreOf = (box: { min: number[]; max: number[] }, axis: number) => (box.min[axis] + box.max[axis]) / 2;
+    const clusterLow = [0, 0, 0], clusterHigh = [0, 0, 0];
+    if (elementBoxes.size) {
+      for (let axis = 0; axis < 3; axis++) {
+        const sorted = [...elementBoxes.values()].map((box) => centreOf(box, axis)).sort((a, b) => a - b);
+        clusterLow[axis] = percentile(sorted, 0.05) - OUTLIER_DISTANCE_M;
+        clusterHigh[axis] = percentile(sorted, 0.95) + OUTLIER_DISTANCE_M;
+      }
+    }
+    const inCluster = (box: { min: number[]; max: number[] }) =>
+      [0, 1, 2].every((axis) => centreOf(box, axis) >= clusterLow[axis] && centreOf(box, axis) <= clusterHigh[axis]);
+    let discardedOutliers = 0;
+    for (const [expressId, box] of [...elementBoxes]) {
+      if (inCluster(box)) continue;
+      elementBoxes.delete(expressId);
+      elementChunks.delete(expressId);
+      discardedOutliers++;
+    }
+    for (const [expressId, box] of [...spaceBoxes]) {
+      if (inCluster(box)) continue;
+      spaceBoxes.delete(expressId);
+      spaceChunks.delete(expressId);
+    }
+    for (const box of elementBoxes.values()) {
+      for (let axis = 0; axis < 3; axis++) {
+        overall.min[axis] = Math.min(overall.min[axis], box.min[axis]);
+        overall.max[axis] = Math.max(overall.max[axis], box.max[axis]);
+      }
+    }
 
     // ---- Storey elevations in meters, cross-checked against assigned geometry ----
     const observedMin = new Map<string, number>();
@@ -588,22 +660,35 @@ export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string
         batches.set(key, batch);
       }
     }
+    let batchingWorked = true;
     for (const batch of batches.values()) {
-      const { geometry, ranges } = mergeChunks(batch.chunks, batch.owners);
-      const material = new THREE.MeshLambertMaterial({
-        color: batch.colorKey,
-        side: THREE.DoubleSide,
-        transparent: batch.alpha < 1,
-        opacity: batch.alpha < 1 ? batch.alpha : 1,
-        depthWrite: batch.alpha >= 1,
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.batched = true;
-      mesh.userData.storeyName = batch.storeyName;
-      mesh.userData.ranges = ranges;
-      group.add(mesh);
-      batchedMeshes.push(mesh);
-      disposables.push({ geometry, material });
+      try {
+        const { geometry, ranges } = mergeChunks(batch.chunks, batch.owners);
+        if (!geometry.boundingSphere || !Number.isFinite(geometry.boundingSphere.radius)) {
+          geometry.dispose();
+          throw new Error("Merged batch has a non-finite bounding sphere.");
+        }
+        const material = new THREE.MeshLambertMaterial({
+          color: batch.colorKey,
+          side: THREE.DoubleSide,
+          transparent: batch.alpha < 1,
+          opacity: batch.alpha < 1 ? batch.alpha : 1,
+          depthWrite: batch.alpha >= 1,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData.batched = true;
+        mesh.userData.storeyName = batch.storeyName;
+        mesh.userData.ranges = ranges;
+        group.add(mesh);
+        batchedMeshes.push(mesh);
+        disposables.push({ geometry, material });
+      } catch (batchError) {
+        console.warn("BIM batching failed; falling back to individual meshes.", batchError);
+        batchingWorked = false;
+        batch.chunks.forEach((chunk, chunkIndex) => {
+          try { addIndividualMesh(batch.owners[chunkIndex], chunk, false); } catch { /* skip unrenderable chunk */ }
+        });
+      }
     }
     for (const [expressId, chunks] of spaceChunks) {
       for (const chunk of chunks) addIndividualMesh(expressId, chunk, true);
@@ -612,6 +697,14 @@ export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string
     elementChunks.clear();
     spaceChunks.clear();
 
+    const meshCount = group.children.length;
+    const framingBounds: BimBox = Number.isFinite(overall.min[0])
+      ? {
+        min: [overall.min[0] + group.position.x, overall.min[1] + group.position.y, overall.min[2] + group.position.z],
+        max: [overall.max[0] + group.position.x, overall.max[1] + group.position.y, overall.max[2] + group.position.z],
+      }
+      : { min: [-10, 0, -10], max: [10, 15, 10] };
+
     const index: BimModelIndex = { buildingGlobalId, buildingName, storeys, spaces, elements };
     const dispose = () => {
       for (const entry of disposables) {
@@ -619,7 +712,7 @@ export async function loadBimModel(data: Uint8Array, onProgress?: (stage: string
         entry.material.dispose();
       }
     };
-    return { index, group, elementMeshes, spaceMeshes, batchedMeshes, dispose };
+    return { index, group, elementMeshes, spaceMeshes, batchedMeshes, framingBounds, meshCount, discardedOutliers, batched: batchingWorked, dispose };
   } finally {
     api.CloseModel(modelID);
   }
@@ -722,7 +815,7 @@ export async function fetchIfcBuffer(
   updatedAt: string,
   onProgress?: (stage: string) => void,
 ): Promise<Uint8Array> {
-  const key = `${siteId}__${buildingId}`;
+  const key = `cafm-bim-v2:${siteId}__${buildingId}`;
   const cached = await readCachedModel(key);
   if (cached && cached.updatedAt === updatedAt) {
     const bytes = new Uint8Array(cached.buffer);
