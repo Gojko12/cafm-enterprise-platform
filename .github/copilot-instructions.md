@@ -1,17 +1,36 @@
-﻿# Enterprise CAFM, SmartPM & Workplace Platform — AI Engineering Laws
+# Enterprise CAFM, SmartPM & Workplace Platform — AI Engineering Laws
 
-## 1. Source of Truth
-Always read `docs/MASTER_SPEC.md` before designing schemas, UI views, or backend functions.
-Never write placeholder comments like `// TODO: implement logic` or mock calculations. Write complete, production-grade code.
+## Source of truth
+- Read `docs/MASTER_SPEC.md` before designing schemas, UI views, or backend functions.
+- No placeholder `// TODO` logic or mock calculations; write complete, production-grade code.
 
-## 2. Architecture & Folder Boundaries
-- `packages/shared-schema`: TypeScript interfaces & Zod schemas shared across Web and Cloud Functions (`Building`, `Floor`, `Room`, `Equipment`, `BaseWorkRequest`, `WR_Statuses`, `PM_ChecklistStandard`, `PM_Schedule`, `PM_WorkRequestStep`, `WorkSession`, `TechnicalAudit`, `RBAC`).
-- `services/functions-core`: TypeScript Firebase Cloud Functions v2 (SmartPM horizon generator, duplicate cycle check, SLA/Margin calculations, Excel `.xlsx` dry-run import/export).
-- `services/cad-bim-parser`: Python 3.11+ Cloud Functions using `ezdxf` and `shapely` to parse `.dxf`/`.dwg` room boundaries, match `RoomCode` text tags inside polygons, calculate exact net area in m2, and export GeoJSON/SVG polygons.
-- `apps/web-portal`: Next.js (App Router, TypeScript, Tailwind, TanStack Table) + 2D interactive floor plan viewer + 3D IFC viewer (`web-ifc` + Three.js).
-- `apps/mobile-app`: Offline-first Flutter app using local SQLite (`drift`) with background Firestore sync queue, QR scanner (`ScanEquipmentQR`), and in-place Multi-Select Equipment Picker.
+## Workspaces
+- `apps/web-portal`: Next.js portal (App Router, Tailwind) with `/api/cafm-state` and `/api/bim-models`.
+- `apps/mobile-app`: Vite/React offline PWA, exported into `apps/web-portal/public/mobile` by `node scripts/build-cloud.cjs`.
+- `packages/shared-schema`: shared TypeScript/Zod schemas (consumed from `dist/`; run `npm run build` there after schema changes).
+- `services/functions-core` (Cloud Functions) and `services/cad-bim-parser` (Python DXF/DWG parser).
 
-## 3. Non-Negotiable Domain Invariants
-1. **3-Tier Location Hierarchy**: `Building (bl_id)` -> `Floor (LevelName)` -> `Room (RoomCode)`. Selecting a Room or Floor MUST automatically resolve and populate parent IDs.
-2. **Percentage Status Engine (`WR_Statuses`)**: Every status transition must validate against the central `WR_Statuses` configuration (`50%` = Issued, `78%` = Technically Completed, `100%` = Closed/Approved) mapped to `ESAWorkType`.
-3. **SmartPM Generation**: Must prevent duplicate cycle WRs, auto-resolve `Equipment -> Room -> Floor -> Building`, set initial status to `50% Issued`, instantiate `PM_WorkRequestStep` and `PM_StepOption` records, and log every step change to an immutable `PM_StepAuditLog`.
+## Sites
+Official ESA sites: `01-ESTEC`, `02-ESOC` (flagship BIM & 2026 history), `03-HQ`, `04-ESRIN`, `05-ESAC`.
+
+## Domain invariants
+1. Location hierarchy `Building (bl_id)` -> `Floor (LevelName)` -> `Room (RoomCode)`; picking a Room/Floor resolves parent IDs.
+2. Status changes validate against central `WR_Statuses` (`50%` Issued, `78%` Technically Completed, `100%` Closed).
+3. SmartPM: no duplicate cycle WRs, auto-resolve Equipment -> Room -> Floor -> Building, start at `50% Issued`, log every step change.
+
+## Formatting & UX
+- Dates are strictly `DD-MM-YYYY` in all UI and exports.
+- Modals use a `max-h-[85vh]` flex-column card so 100% browser zoom never overflows.
+- Newly created Fast Jobs start at `50%` Issued.
+
+## Modular file cap
+Keep `.ts`/`.tsx` files under ~500 lines.
+- BIM UI/helpers: `apps/web-portal/components/modules/bim/` or `lib/bim/`.
+- Analytics calculators: `apps/web-portal/lib/analytics/` or `components/modules/analytics/`.
+- PM popup sub-panels: `apps/web-portal/components/modules/pm/`.
+- Split modules keep their original path as a facade so callers never change.
+
+## Encoding & verification
+- Never pipe UTF-8 source through PowerShell stdin; use file-editing tools.
+- Verify with `npx tsc --noEmit` (web-portal, mobile-app, shared-schema) and `node scripts/build-cloud.cjs`.
+- Bump `apps/mobile-app/src/version.ts` and the `public/sw.js` cache prefix whenever `apps/mobile-app` changes.

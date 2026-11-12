@@ -24,65 +24,15 @@ import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "./FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
 import { FastJobModal, type FastJobData } from "./FastJobModal";
+import { BimRightSidebar } from "./bim/BimRightSidebar";
+import { BimViewportOverlays } from "./bim/BimViewportOverlays";
+import { UploadIfcModal } from "./bim/UploadIfcModal";
+import {
+  COLOR_RED, COLOR_AMBER, COLOR_CYAN, COLOR_EMERALD, COLOR_VIOLET, COLOR_HIGHLIGHT, ALL_STOREYS, SAFE_BOUNDS,
+  ROOM_LEVEL_COLOR, COLOR_ROOM_HIGHLIGHT, elementMapOf, spaceMapOf, isFullyVisible, boxIsFinite, displayName,
+  type MeshOriginal, type ColorMode, type RoomLevel, type RoomHealth, type PickResult,
+} from "./bim/bim-viewport-math";
 
-const COLOR_RED = 0xdc2626;
-const COLOR_AMBER = 0xf59e0b;
-const COLOR_CYAN = 0x06b6d4;
-const COLOR_EMERALD = 0x10b981;
-const COLOR_VIOLET = 0x8b5cf6;
-const COLOR_HIGHLIGHT = 0x1d4ed8;
-const ALL_STOREYS = "All Storeys";
-const SAFE_BOUNDS = { min: [-10, 0, -10] as [number, number, number], max: [10, 15, 10] as [number, number, number] };
-
-interface MeshOriginal {
-  color: number;
-  opacity: number;
-  transparent: boolean;
-  depthWrite: boolean;
-}
-
-type ColorMode = "bim" | "status" | "heatmap";
-type RoomLevel = "red" | "amber" | "cyan" | "clear";
-const ROOM_LEVEL_COLOR: Record<RoomLevel, number> = { red: COLOR_RED, amber: COLOR_AMBER, cyan: COLOR_CYAN, clear: COLOR_EMERALD };
-const COLOR_ROOM_HIGHLIGHT = 0x22d3ee;
-
-interface RoomHealth {
-  level: RoomLevel;
-  wrs: BaseWorkRequest[];
-  freezes: LocationFreeze[];
-}
-
-type PickResult =
-  | { kind: "element"; expressId: number }
-  | { kind: "space"; expressId: number }
-  | null;
-
-const elementMapCache = new WeakMap<BimModelIndex, Map<number, BimElement>>();
-const spaceMapCache = new WeakMap<BimModelIndex, Map<number, BimSpace>>();
-function elementMapOf(index: BimModelIndex): Map<number, BimElement> {
-  let map = elementMapCache.get(index);
-  if (!map) { map = new Map(index.elements.map((element) => [element.expressId, element])); elementMapCache.set(index, map); }
-  return map;
-}
-function spaceMapOf(index: BimModelIndex): Map<number, BimSpace> {
-  let map = spaceMapCache.get(index);
-  if (!map) { map = new Map(index.spaces.map((space) => [space.expressId, space])); spaceMapCache.set(index, map); }
-  return map;
-}
-
-function isFullyVisible(object: THREE.Object3D): boolean {
-  for (let cursor: THREE.Object3D | null = object; cursor; cursor = cursor.parent) if (!cursor.visible) return false;
-  return true;
-}
-
-function boxIsFinite(box: THREE.Box3): boolean {
-  return !box.isEmpty() && [box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].every(Number.isFinite);
-}
-
-function displayName(element: BimElement): string {
-  const name = element.name.split(":")[0]?.trim();
-  return name || element.typeName || element.ifcType;
-}
 
 export function BIMViewer() {
   const { data, setData } = useCafmStore();
@@ -1282,384 +1232,96 @@ export function BIMViewer() {
             </div>
           )}
 
-          {viewportHealth && (
-            <div className="absolute bottom-3 left-3 max-w-[70%] space-y-1 pointer-events-none">
-              {viewportHealth.warning && (
-                <div role="alert" className="rounded border border-amber-400 bg-amber-100/95 px-2 py-1 text-[11px] font-medium text-amber-900">
-                  {viewportHealth.warning}
-                </div>
-              )}
-              <div className="inline-block rounded-full bg-gray-900/80 px-2.5 py-1 text-[10px] text-gray-200 border border-gray-600">
-                {viewportHealth.buildingId} · {viewportHealth.meshCount} meshes · {viewportHealth.size[0].toFixed(1)}×{viewportHealth.size[2].toFixed(1)}×{viewportHealth.size[1].toFixed(1)}m
-              </div>
-            </div>
-          )}
-
-          {/* Camera presets, Laser Measure, Issue Pins */}
-          <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1 rounded-lg border border-gray-600 bg-gray-900/85 p-1 text-[11px] text-gray-100 shadow-lg">
-            {([["iso", "3D Iso"], ["top", "Top Plan"], ["front", "Front"], ["right", "Right"]] as const).map(([view, label]) => (
-              <button key={view} onClick={() => setCameraView(view)} className="rounded px-2 py-1 hover:bg-gray-700">{label}</button>
-            ))}
-            <span className="mx-0.5 h-4 w-px bg-gray-600" />
-            <button onClick={() => { setMeasureMode((value) => !value); setMeasurePoints([]); }} aria-pressed={measureMode}
-              className={`rounded px-2 py-1 ${measureMode ? "bg-yellow-500 text-gray-900 font-semibold" : "hover:bg-gray-700"}`}>Measure</button>
-            <button onClick={() => setPinsOn((value) => !value)} aria-pressed={pinsOn}
-              className={`rounded px-2 py-1 ${pinsOn ? "bg-red-600 text-white font-semibold" : "hover:bg-gray-700"}`}>Issue Pins</button>
-            {measurePoints.length > 0 && <button onClick={() => setMeasurePoints([])} className="rounded px-2 py-1 hover:bg-gray-700">Clear</button>}
-          </div>
-
-          {isolate && (
-            <div className="absolute top-14 left-3 flex items-center gap-2 rounded-full border border-cyan-500 bg-gray-900/90 px-3 py-1 text-[11px] text-cyan-100 shadow-lg">
-              <span>Isolated: {isolate.label}</span>
-              <label className="flex items-center gap-1">Padding {isolatePadding.toFixed(1)}m
-                <input type="range" min={0.5} max={4} step={0.5} value={isolatePadding} onChange={(event) => setIsolatePadding(Number(event.target.value))} className="h-1 w-20 cursor-pointer" />
-              </label>
-              <button onClick={() => setIsolate(null)} className="font-semibold hover:text-white">× Clear</button>
-            </div>
-          )}
-
-          {measurePoints.length === 2 && (() => {
-            const delta = measurePoints[1].clone().sub(measurePoints[0]);
-            const dist = delta.length();
-            const horiz = Math.hypot(delta.x, delta.z);
-            return (
-              <div ref={(el) => setOverlayEl("measure", el)} className="absolute left-0 top-0 z-10 invisible -translate-x-1/2 -translate-y-full whitespace-nowrap rounded bg-yellow-400 px-2 py-1 text-[11px] font-semibold text-gray-900 shadow-lg">
-                {dist.toFixed(2)} m ({Math.round(dist * 1000)} mm) · ΔXY {horiz.toFixed(2)}m · ΔH {Math.abs(delta.y).toFixed(2)}m
-                <button onClick={() => setMeasurePoints([])} className="ml-2 underline">Clear</button>
-              </div>
-            );
-          })()}
-
-          {pinsOn && issuePins.map((pin) => (
-            <button key={pin.key} ref={(el) => setOverlayEl(pin.key, el)}
-              onClick={() => (pin.kind === "element" ? selectAndFly(pin.expressId) : selectRoom(pin.expressId, true))}
-              className="absolute left-0 top-0 z-10 invisible -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg ring-1 ring-white/70"
-              style={{ background: `#${pin.color.toString(16).padStart(6, "0")}` }}>
-              ● {pin.label}
-            </button>
-          ))}
-
-          {/* Viewport Controls Overlay */}
-          <div className="absolute top-3 right-3 w-56 max-h-[calc(100%-1.5rem)] overflow-y-auto rounded-lg border border-gray-300 bg-white/95 p-3 shadow-lg space-y-2 text-xs">
-            <div className="font-semibold text-gray-700 border-b pb-1.5">Viewport Controls</div>
-            <div className="flex gap-1.5">
-              <button onClick={resetCamera} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 px-2 py-1 hover:bg-gray-100">
-                <RefreshCw size={12} /> Reset Camera
-              </button>
-              <button onClick={() => { if (selection !== null) flyToElement(selection); else if (roomSelection !== null) flyToRoom(roomSelection); }} disabled={selection === null && roomSelection === null} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 disabled:opacity-40">
-                <Crosshair size={12} /> Fit Selected
-              </button>
-            </div>
-            <label className="block font-medium text-gray-700">
-              Storey Filter
-              <select value={storeyFilter} onChange={(event) => setStoreyFilter(event.target.value)} className="mt-1 w-full rounded border border-gray-300 px-1.5 py-1 bg-white">
-                <option value={ALL_STOREYS}>{ALL_STOREYS}</option>
-                {index?.storeys.map((storey) => <option key={storey.expressId} value={storey.name}>{storey.name}</option>)}
-              </select>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer font-medium text-gray-700">
-              <input type="checkbox" checked={xray} onChange={(event) => setXray(event.target.checked)} className="rounded border-gray-300" />
-              X-Ray Shell Mode
-            </label>
-            {xray && (
-              <div>
-                <label className="text-gray-600">Shell opacity: {xrayOpacity}%</label>
-                <input type="range" min={0} max={85} step={5} value={xrayOpacity} onChange={(event) => setXrayOpacity(Number(event.target.value))} className="w-full h-1.5 cursor-pointer" />
-              </div>
-            )}
-            <div>
-              <label className="font-medium text-gray-700">Explode Storeys: {explodeGap}m</label>
-              <input type="range" min={0} max={14} step={1} value={explodeGap} onChange={(event) => setExplodeGap(Number(event.target.value))} className="w-full h-1.5 cursor-pointer" />
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer font-medium text-gray-700">
-              <input type="checkbox" checked={clipEnabled} onChange={(event) => setClipEnabled(event.target.checked)} className="rounded border-gray-300" />
-              Clipping Plane
-            </label>
-            {clipEnabled && (
-              <div>
-                <label className="text-gray-600">Section height: {clipPercent}%</label>
-                <input type="range" min={0} max={100} value={clipPercent} onChange={(event) => setClipPercent(Number(event.target.value))} className="w-full h-1.5 cursor-pointer" />
-              </div>
-            )}
-            <div className="font-medium text-gray-700">
-              Color Mode
-              <div className="mt-1 flex rounded border border-gray-300 overflow-hidden">
-                <button onClick={() => setColorMode("bim")} aria-pressed={colorMode === "bim"} className={`flex-1 px-1.5 py-1 ${colorMode === "bim" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>BIM Default</button>
-                <button onClick={() => setColorMode("status")} aria-pressed={colorMode === "status"} className={`flex-1 px-1.5 py-1 ${colorMode === "status" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Live Status</button>
-                <button onClick={() => { setColorMode("heatmap"); setXray(true); }} aria-pressed={colorMode === "heatmap"} className={`flex-1 px-1.5 py-1 ${colorMode === "heatmap" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Room Heatmap</button>
-              </div>
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer font-medium text-gray-700">
-              <input type="checkbox" checked={showSpaces} onChange={(event) => setShowSpaces(event.target.checked)} className="rounded border-gray-300" />
-              Show Room Volumes (IfcSpace)
-            </label>
-            {colorMode === "heatmap" && (
-              <div className="border-t pt-1.5 space-y-0.5 text-[11px] text-gray-600">
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#dc2626" }} /> Overdue WR / Audit in room</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#f59e0b" }} /> Open WR in room</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#06b6d4" }} /> Active Freeze Period</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#10b981" }} /> Healthy / Clear</p>
-              </div>
-            )}
-            {colorMode === "status" && (
-              <div className="border-t pt-1.5 space-y-0.5 text-[11px] text-gray-600">
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#dc2626" }} /> Overdue WR / Unfavourable finding</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#f59e0b" }} /> Open 50% / 55% WR</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#06b6d4" }} /> Active Freeze Period</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#10b981" }} /> Linked &amp; Healthy</p>
-                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#8b5cf6" }} /> Unassigned MEP element</p>
-              </div>
-            )}
-          </div>
+          <BimViewportOverlays
+            viewportHealth={viewportHealth}
+            index={index}
+            selection={selection}
+            roomSelection={roomSelection}
+            isolate={isolate}
+            setIsolate={setIsolate}
+            isolatePadding={isolatePadding}
+            setIsolatePadding={setIsolatePadding}
+            measureMode={measureMode}
+            setMeasureMode={setMeasureMode}
+            measurePoints={measurePoints}
+            setMeasurePoints={setMeasurePoints}
+            pinsOn={pinsOn}
+            setPinsOn={setPinsOn}
+            issuePins={issuePins}
+            setOverlayEl={setOverlayEl}
+            setCameraView={setCameraView}
+            resetCamera={resetCamera}
+            flyToElement={flyToElement}
+            flyToRoom={flyToRoom}
+            selectAndFly={selectAndFly}
+            selectRoom={selectRoom}
+            storeyFilter={storeyFilter}
+            setStoreyFilter={setStoreyFilter}
+            xray={xray}
+            setXray={setXray}
+            xrayOpacity={xrayOpacity}
+            setXrayOpacity={setXrayOpacity}
+            explodeGap={explodeGap}
+            setExplodeGap={setExplodeGap}
+            clipEnabled={clipEnabled}
+            setClipEnabled={setClipEnabled}
+            clipPercent={clipPercent}
+            setClipPercent={setClipPercent}
+            colorMode={colorMode}
+            setColorMode={setColorMode}
+            showSpaces={showSpaces}
+            setShowSpaces={setShowSpaces}
+          />
         </div>
 
-        {/* Right Sidebar */}
-        <div className="w-[26rem] flex flex-col rounded-lg border border-gray-300 bg-white shadow-lg overflow-hidden">
-          <div className="border-b border-gray-200 p-2 space-y-2">
-            <div className="flex rounded border border-gray-300 overflow-hidden text-xs font-medium">
-              <button onClick={() => setTab("linked")} aria-pressed={tab === "linked"} className={`flex-1 px-2 py-1.5 ${tab === "linked" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Linked EQ ({linkedRows.length})</button>
-              <button onClick={() => setTab("unassigned")} aria-pressed={tab === "unassigned"} className={`flex-1 px-2 py-1.5 ${tab === "unassigned" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Unassigned IFC ({unassignedRows.length})</button>
-              <button onClick={() => setTab("rooms")} aria-pressed={tab === "rooms"} className={`flex-1 px-2 py-1.5 ${tab === "rooms" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Rooms ({roomRows.length})</button>
-            </div>
-            <div className="relative">
-              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search elements, EQ IDs, rooms…" className="w-full rounded border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
-            </div>
-          </div>
-
-          {/* Element list */}
-          <div ref={sidebarListRef} className="flex-1 overflow-y-auto divide-y divide-gray-100">
-            {tab === "linked" && linkedRows.map((element) => {
-              const link = links.get(element.expressId)!;
-              const color = statusColorByCode.get(link.equipmentCode) ?? COLOR_EMERALD;
-              return (
-                <button key={element.expressId} onClick={() => selectAndFly(element.expressId)}
-                  className={`block w-full px-3 py-2 text-left text-xs hover:bg-blue-50 ${selection === element.expressId ? "bg-blue-100" : ""}`}>
-                  <span className="font-semibold text-gray-900 flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 rounded-full" style={{ background: `#${color.toString(16).padStart(6, "0")}` }} />
-                    {link.equipmentCode} · {displayName(element)}
-                  </span>
-                  <span className="text-gray-500">{element.storeyName}{element.roomCode ? ` · ${element.roomCode}` : ""}{link.source === "mark" ? " · Revit Mark" : " · In-app link"}</span>
-                </button>
-              );
-            })}
-            {tab === "unassigned" && unassignedRows.map((element) => (
-              <button key={element.expressId} onClick={() => selectAndFly(element.expressId)}
-                className={`block w-full px-3 py-2 text-left text-xs hover:bg-violet-50 ${selection === element.expressId ? "bg-violet-100" : ""}`}>
-                <span className="font-semibold text-gray-900">{displayName(element)}</span>
-                <span className="block text-gray-500">{element.ifcType}{element.category ? ` · ${element.category}` : ""} · {element.storeyName}{element.roomCode ? ` · ${element.roomCode}` : ""}</span>
-              </button>
-            ))}
-            {tab === "rooms" && roomRows.map((space) => {
-              const level = roomHealth.get(space.expressId)?.level ?? "clear";
-              const dot = level === "clear" ? "#10b981" : `#${ROOM_LEVEL_COLOR[level].toString(16).padStart(6, "0")}`;
-              const active = roomSelection === space.expressId;
-              return (
-                <button key={space.expressId} data-room-id={space.expressId} onClick={() => selectRoom(space.expressId, true)}
-                  aria-pressed={active}
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-                    event.preventDefault();
-                    const sibling = (event.key === "ArrowDown" ? event.currentTarget.nextElementSibling : event.currentTarget.previousElementSibling) as HTMLElement | null;
-                    sibling?.focus();
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-xs hover:bg-cyan-50 focus:outline-none focus:bg-cyan-50 ${active ? "bg-cyan-100 border-l-4 border-cyan-600" : ""}`}>
-                  <span className="font-semibold text-gray-900 flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 rounded-full" style={{ background: dot }} />
-                    {space.code}
-                  </span>
-                  <span className="block text-gray-500">{space.longName} · {space.storeyName}</span>
-                </button>
-              );
-            })}
-            {tab === "linked" && !linkedRows.length && <p className="p-3 text-xs text-gray-500">No linked equipment in this view.</p>}
-            {tab === "unassigned" && !unassignedRows.length && <p className="p-3 text-xs text-gray-500">Every MEP element has an EQ ID. 🎉</p>}
-            {tab === "rooms" && !roomRows.length && <p className="p-3 text-xs text-gray-500">No IfcSpace rooms detected.</p>}
-          </div>
-
-          {/* Selected Element Action Card */}
-          {selectedElement && (
-            <div className="border-t border-gray-300 bg-gray-50 p-3 space-y-2 text-xs max-h-[45%] overflow-y-auto">
-              <div className="flex items-start justify-between">
-                <strong className="text-sm text-gray-900">{selectedLink ? `${selectedLink.equipmentCode} · ` : ""}{displayName(selectedElement)}</strong>
-                <button aria-label="Clear selection" onClick={() => setSelection(null)}><X size={14} /></button>
-              </div>
-              <p className="text-gray-600">
-                {selectedElement.ifcType}{selectedElement.category ? ` · ${selectedElement.category}` : ""}<br />
-                {selectedEquipment
-                  ? <>Location: {selectedEquipment.bl_id} &gt; {selectedEquipment.LevelName} &gt; {selectedEquipment.RoomCode}</>
-                  : <>Storey: {selectedElement.storeyName || "—"} · Room: {selectedElement.roomCode || "—"}</>}<br />
-                IfcGlobalId: <span className="font-mono">{selectedElement.globalId}</span>
-              </p>
-              <button onClick={() => isolateTarget("element", selectedElement.expressId, selectedLink?.equipmentCode ?? displayName(selectedElement))}
-                aria-pressed={isolate?.kind === "element" && isolate.expressId === selectedElement.expressId}
-                className={`w-full rounded border px-2 py-1.5 font-semibold ${isolate?.kind === "element" && isolate.expressId === selectedElement.expressId ? "border-cyan-600 bg-cyan-600 text-white" : "border-gray-300 bg-white text-gray-800 hover:bg-gray-100"}`}>
-                {isolate?.kind === "element" && isolate.expressId === selectedElement.expressId ? "Clear Isolation Box" : "Isolate Box"}
-              </button>
-
-              {!selectedLink && selectedElement.isAssignable && (
-                <div className="space-y-1.5">
-                  {!assignOpen
-                    ? (
-                      <div className="flex gap-1.5">
-                        <button onClick={() => setAssignOpen(true)} disabled={busy} className="flex-1 rounded bg-blue-600 px-2 py-1.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-                          Assign Existing EQ ID
-                        </button>
-                        <button onClick={() => void createNewEquipment(selectedElement)} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-emerald-600 px-2 py-1.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                          <Plus size={12} /> Create New CAFM Equipment
-                        </button>
-                      </div>
-                    )
-                    : (
-                      <div className="rounded border border-blue-300 bg-white p-2 space-y-1.5">
-                        <input autoFocus value={assignQuery} onChange={(event) => setAssignQuery(event.target.value)} placeholder="Search equipment code or name…" className="w-full rounded border border-gray-300 px-2 py-1" />
-                        <div className="max-h-28 overflow-y-auto divide-y divide-gray-100">
-                          {assignCandidates.slice(0, 50).map((asset) => (
-                            <button key={asset.EquipmentCode} onClick={() => void assignExisting(selectedElement, asset.EquipmentCode)} disabled={busy}
-                              className="block w-full px-1.5 py-1 text-left hover:bg-blue-50 disabled:opacity-50">
-                              <span className="font-semibold">{asset.EquipmentCode}</span> · {asset.EquipmentName}
-                            </button>
-                          ))}
-                          {!assignCandidates.length && <p className="px-1.5 py-1 text-gray-500">No equipment matches.</p>}
-                        </div>
-                        <button onClick={() => setAssignOpen(false)} className="text-gray-600 underline">Cancel</button>
-                      </div>
-                    )}
-                </div>
-              )}
-
-              {selectedLink && (
-                <div className="space-y-2">
-                  <div className="flex gap-1.5">
-                    <button onClick={() => { setAssignOpen(true); }} disabled={busy} className="flex-1 rounded border border-blue-400 bg-white px-2 py-1.5 font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-                      Change EQ ID
-                    </button>
-                    <button onClick={() => void unassign(selectedElement)} disabled={busy} className="flex-1 rounded border border-red-300 bg-white px-2 py-1.5 font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">
-                      Unassign EQ ID
-                    </button>
-                  </div>
-                  {assignOpen && (
-                    <div className="rounded border border-blue-300 bg-white p-2 space-y-1.5">
-                      <input autoFocus value={assignQuery} onChange={(event) => setAssignQuery(event.target.value)} placeholder="Search equipment code or name…" className="w-full rounded border border-gray-300 px-2 py-1" />
-                      <div className="max-h-28 overflow-y-auto divide-y divide-gray-100">
-                        {assignCandidates.slice(0, 50).map((asset) => (
-                          <button key={asset.EquipmentCode} onClick={() => void assignExisting(selectedElement, asset.EquipmentCode)} disabled={busy}
-                            className="block w-full px-1.5 py-1 text-left hover:bg-blue-50 disabled:opacity-50">
-                            <span className="font-semibold">{asset.EquipmentCode}</span> · {asset.EquipmentName}
-                          </button>
-                        ))}
-                      </div>
-                      <button onClick={() => setAssignOpen(false)} className="text-gray-600 underline">Cancel</button>
-                    </div>
-                  )}
-                  <div>
-                    <p className="font-semibold text-gray-800">Open WRs ({selectedOpenWRs.length})</p>
-                    {selectedOpenWRs.length
-                      ? selectedOpenWRs.map((wr) => (
-                        <button key={wr.WR_ID} onClick={() => setWrPopup(wr)} className="block w-full rounded px-1.5 py-1 text-left hover:bg-blue-50">
-                          <span className="font-medium text-blue-700 underline">{wr.WR_ID}</span> · {wr.WR_Type} · {wr.Percentage}% · Due {formatDateDDMMYYYY(wr.DueDate) || "—"}
-                        </button>
-                      ))
-                      : <p className="text-gray-500">No open work requests.</p>}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-800">SmartPM Schedules ({selectedSchedules.length})</p>
-                    {selectedSchedules.length
-                      ? selectedSchedules.map((schedule) => (
-                        <p key={schedule.ScheduleId} className="px-1.5 py-0.5 text-gray-700">
-                          PMS {schedule.ScheduleId} · {schedule.ChecklistCode} · Next Occurrence {formatDateDDMMYYYY(schedule.NextDueDate) || "—"}
-                        </p>
-                      ))
-                      : <p className="text-gray-500">No SmartPM schedules target this equipment.</p>}
-                  </div>
-                  <div className="flex gap-1.5">
-                    <button onClick={() => { setFastJobLocation(null); setFastJobOpen(true); }} className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
-                      <Plus size={12} /> Create Fast Job
-                    </button>
-                    <button onClick={() => router.push(`/equipment?eq=${encodeURIComponent(selectedLink.equipmentCode)}`)} className="flex-1 rounded border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-800 hover:bg-gray-100">
-                      Open in Equipment Registry
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Selected Room Inspector Card */}
-          {selectedSpace && !selectedElement && (() => {
-            const box = spaceWorldBox(selectedSpace.expressId);
-            const size = box ? box.getSize(new THREE.Vector3()) : null;
-            const cafmRoom = data.rooms.find((room) => room.bl_id === buildingId && room.RoomCode === selectedSpace.code);
-            const isolated = isolate?.kind === "room" && isolate.expressId === selectedSpace.expressId;
-            const freezes = selectedRoomHealth?.freezes ?? [];
-            const openWrs = selectedRoomHealth?.wrs ?? [];
-            return (
-              <div className="border-t border-gray-300 bg-gray-50 p-3 space-y-2 text-xs max-h-[55%] overflow-y-auto">
-                <div className="flex items-start justify-between">
-                  <strong className="text-sm text-gray-900">{selectedSpace.code}{selectedSpace.longName ? ` · ${selectedSpace.longName}` : ""}</strong>
-                  <button aria-label="Clear room selection" onClick={() => { setRoomSelection(null); if (isolate?.kind === "room") setIsolate(null); }}><X size={14} /></button>
-                </div>
-                <p className="text-gray-600">
-                  Storey: {selectedSpace.storeyName || "—"}<br />
-                  {size
-                    ? <>Dimensions: {size.x.toFixed(1)} × {size.z.toFixed(1)} × {size.y.toFixed(1)} m · Est. floor area {(size.x * size.z).toFixed(1)} m²<br /></>
-                    : <>Dimensions: —<br /></>}
-                  IfcGlobalId: <span className="font-mono">{selectedSpace.globalId}</span>
-                </p>
-                {freezes.map((freeze) => (
-                  <span key={freeze.id ?? freeze.title} className="block rounded border border-cyan-400 bg-cyan-50 px-2 py-1 font-medium text-cyan-900">
-                    ❄ Active Freeze: {freeze.title} · {formatFreezePeriodWindow(freeze.startDateTime, freeze.endDateTime)}
-                  </span>
-                ))}
-                <div className="flex gap-1.5">
-                  <button onClick={() => isolateTarget("room", selectedSpace.expressId, selectedSpace.code)} aria-pressed={isolated}
-                    className={`flex-1 rounded border px-2 py-1.5 font-semibold ${isolated ? "border-cyan-600 bg-cyan-600 text-white" : "border-gray-300 bg-white text-gray-800 hover:bg-gray-100"}`}>
-                    {isolated ? "Clear Room Box" : "Isolate Room Box"}
-                  </button>
-                  <button onClick={() => flyToRoom(selectedSpace.expressId)} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-800 hover:bg-gray-100">
-                    <Crosshair size={12} /> Fit Room
-                  </button>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800">Equipment in Room ({roomElements.length})</p>
-                  <div className="max-h-24 overflow-y-auto divide-y divide-gray-100 rounded border border-gray-200 bg-white">
-                    {roomElements.map((element) => {
-                      const link = links.get(element.expressId);
-                      return (
-                        <button key={element.expressId} onClick={() => selectAndFly(element.expressId)} className="block w-full px-1.5 py-1 text-left hover:bg-blue-50">
-                          <span className="font-semibold">{link ? link.equipmentCode : "Unassigned"}</span> · {displayName(element)}
-                        </button>
-                      );
-                    })}
-                    {!roomElements.length && <p className="px-1.5 py-1 text-gray-500">No equipment located in this room.</p>}
-                  </div>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800">Open WRs &amp; Schedules in Room ({openWrs.length + roomSchedules.length})</p>
-                  {openWrs.map((wr) => (
-                    <button key={wr.WR_ID} onClick={() => setWrPopup(wr)} className="block w-full rounded px-1.5 py-1 text-left hover:bg-blue-50">
-                      <span className="font-medium text-blue-700 underline">{wr.WR_ID}</span> · {wr.WR_Type} · {wr.Percentage}% · Due {formatDateDDMMYYYY(wr.DueDate) || "—"}
-                    </button>
-                  ))}
-                  {roomSchedules.map((schedule) => (
-                    <p key={schedule.ScheduleId} className="px-1.5 py-0.5 text-gray-700">
-                      PMS {schedule.ScheduleId} · {schedule.ChecklistCode} · Next {formatDateDDMMYYYY(schedule.NextDueDate) || "—"}
-                    </p>
-                  ))}
-                  {!openWrs.length && !roomSchedules.length && <p className="text-gray-500">No open work requests or schedules.</p>}
-                </div>
-                <button
-                  onClick={() => {
-                    setFastJobLocation({ bl_id: buildingId, levelName: cafmRoom?.LevelName ?? selectedSpace.storeyName, roomCode: selectedSpace.code });
-                    setFastJobOpen(true);
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
-                  <Plus size={12} /> Create Room Fast Job
-                </button>
-              </div>
-            );
-          })()}
-        </div>
+        <BimRightSidebar
+          selection={selection}
+          setSelection={setSelection}
+          roomSelection={roomSelection}
+          setRoomSelection={setRoomSelection}
+          isolate={isolate}
+          setIsolate={setIsolate}
+          tab={tab}
+          setTab={setTab}
+          search={search}
+          setSearch={setSearch}
+          sidebarListRef={sidebarListRef}
+          linkedRows={linkedRows}
+          unassignedRows={unassignedRows}
+          roomRows={roomRows}
+          links={links}
+          statusColorByCode={statusColorByCode}
+          roomHealth={roomHealth}
+          selectedElement={selectedElement}
+          selectedSpace={selectedSpace}
+          selectedRoomHealth={selectedRoomHealth}
+          selectedLink={selectedLink}
+          selectedEquipment={selectedEquipment}
+          selectedOpenWRs={selectedOpenWRs}
+          selectedSchedules={selectedSchedules}
+          roomElements={roomElements}
+          roomSchedules={roomSchedules}
+          assignOpen={assignOpen}
+          setAssignOpen={setAssignOpen}
+          assignQuery={assignQuery}
+          setAssignQuery={setAssignQuery}
+          assignCandidates={assignCandidates}
+          busy={busy}
+          data={data}
+          buildingId={buildingId}
+          router={router}
+          setWrPopup={setWrPopup}
+          setFastJobLocation={setFastJobLocation}
+          setFastJobOpen={setFastJobOpen}
+          spaceWorldBox={spaceWorldBox}
+          flyToRoom={flyToRoom}
+          selectAndFly={selectAndFly}
+          selectRoom={selectRoom}
+          isolateTarget={isolateTarget}
+          assignExisting={assignExisting}
+          unassign={unassign}
+          createNewEquipment={createNewEquipment}
+        />
       </div>
 
       {uploadOpen && (
@@ -1692,154 +1354,6 @@ export function BIMViewer() {
         <LJWorkRequestPopup workRequest={actualPopupWr} onClose={() => setWrPopup(null)} onNavigate={navigatePopup} />
       )}
       <FastJobModal isOpen={fastJobOpen} onClose={() => setFastJobOpen(false)} onSubmit={createFastJob} initialLocation={fastJobLocation} />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Upload .IFC Model modal
-// ---------------------------------------------------------------------------
-
-interface UploadPreview {
-  buildingName: string;
-  storeys: string[];
-  spaces: BimSpace[];
-  taggedCount: number;
-  untaggedAssignableCount: number;
-  elementCount: number;
-}
-
-function UploadIfcModal({ siteId, buildings, onClose, onImported }: {
-  siteId: string;
-  buildings: Building[];
-  onClose: () => void;
-  onImported: (buildingId: string, buildingNameFromIfc: string) => Promise<void> | void;
-}) {
-  const [targetBuildingId, setTargetBuildingId] = useState<string>("__new__");
-  const [fileName, setFileName] = useState("");
-  const [stepBytes, setStepBytes] = useState<Uint8Array | null>(null);
-  const [preview, setPreview] = useState<UploadPreview | null>(null);
-  const [parsing, setParsing] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [error, setError] = useState("");
-  const [dragActive, setDragActive] = useState(false);
-
-  const handleFile = async (file: File) => {
-    setError("");
-    setPreview(null);
-    const lower = file.name.toLowerCase();
-    if (!lower.endsWith(".ifc") && !lower.endsWith(".ifc.gz")) { setError("Choose a .ifc or .ifc.gz file."); return; }
-    setParsing(true);
-    try {
-      let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
-      if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = await gunzipBytes(bytes);
-      const header = new TextDecoder().decode(bytes.slice(0, 64)).trimStart();
-      if (!header.startsWith("ISO-10303-21")) throw new Error("The file is not a valid IFC STEP (ISO-10303-21) file.");
-      setFileName(file.name);
-      setStepBytes(bytes);
-      const model = await loadBimModel(bytes);
-      try {
-        setPreview({
-          buildingName: model.index.buildingName,
-          storeys: model.index.storeys.map((storey) => storey.name),
-          spaces: model.index.spaces,
-          taggedCount: model.index.elements.filter((element) => element.mark).length,
-          untaggedAssignableCount: model.index.elements.filter((element) => element.isAssignable && !element.mark).length,
-          elementCount: model.index.elements.length,
-        });
-      } finally {
-        model.dispose();
-      }
-    } catch (parseError) {
-      setError(parseError instanceof Error ? parseError.message : "Could not parse the .ifc file.");
-      setStepBytes(null);
-      setFileName("");
-    } finally {
-      setParsing(false);
-    }
-  };
-
-  const sanitizeId = (value: string) => value.trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-
-  const importModel = async () => {
-    if (!stepBytes || !preview) { setError("Choose and parse a .ifc file first."); return; }
-    const buildingId = targetBuildingId === "__new__" ? sanitizeId(preview.buildingName) : targetBuildingId;
-    if (!buildingId) { setError("The IFCBUILDING has no usable name; choose an existing target building."); return; }
-    setImporting(true);
-    setError("");
-    try {
-      // Gzip client-side so a 67MB .ifc uploads as a ~7-15MB .ifc.gz archive.
-      const gz = await gzipBytes(stepBytes);
-      const payload = gz ?? stepBytes;
-      const form = new FormData();
-      form.set("siteId", siteId);
-      form.set("buildingId", buildingId);
-      form.set("file", new Blob([payload as BlobPart], { type: gz ? "application/gzip" : "application/x-step" }), gz ? `${buildingId}.ifc.gz` : `${buildingId}.ifc`);
-      const response = await fetch("/api/bim-models", { method: "POST", body: form });
-      const body: unknown = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(body && typeof body === "object" && "error" in body ? String(body.error) : "The upload failed.");
-      }
-      await onImported(buildingId, preview.buildingName);
-    } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "The upload failed.");
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Upload IFC model">
-      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <strong className="text-sm">Upload .IFC Model</strong>
-          <button aria-label="Close" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="space-y-3 p-4 text-xs">
-          <label className="block font-medium text-gray-700">
-            Target Building
-            <select value={targetBuildingId} onChange={(event) => setTargetBuildingId(event.target.value)} className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 bg-white">
-              <option value="__new__">— Create new Building from IFCBUILDING —</option>
-              {buildings.map((building) => <option key={building.bl_id} value={building.bl_id}>{building.bl_id} · {building.Name}</option>)}
-            </select>
-          </label>
-          <div
-            onDragOver={(event) => { event.preventDefault(); setDragActive(true); }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-              const file = event.dataTransfer.files?.[0];
-              if (file) void handleFile(file);
-            }}
-            className={`rounded border-2 border-dashed p-5 text-center ${dragActive ? "border-blue-500 bg-blue-50" : "border-gray-300"}`}
-          >
-            <Box className="mx-auto mb-1 text-gray-400" size={22} />
-            <p className="text-gray-600">{fileName || "Drag & drop a .ifc / .ifc.gz file here, or"}</p>
-            <label className="mt-1 inline-block cursor-pointer rounded bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-700">
-              Browse…
-              <input type="file" accept=".ifc,.gz" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleFile(file); }} />
-            </label>
-          </div>
-          {parsing && <p className="flex items-center gap-1.5 text-gray-600"><Loader2 className="animate-spin" size={13} /> Parsing the IFC model…</p>}
-          {preview && (
-            <div className="rounded border border-emerald-300 bg-emerald-50 p-2.5 space-y-1 text-emerald-900">
-              <p><strong>IFCBUILDING:</strong> {preview.buildingName || "—"}</p>
-              <p><strong>Storeys ({preview.storeys.length}):</strong> {preview.storeys.join(", ") || "—"}</p>
-              <p><strong>IfcSpace Rooms ({preview.spaces.length}):</strong> {preview.spaces.map((space) => space.code).join(", ") || "—"}</p>
-              <p><strong>Elements:</strong> {preview.elementCount} total · {preview.taggedCount} Mark-tagged · {preview.untaggedAssignableCount} untagged assignable</p>
-            </div>
-          )}
-          {error && <p role="alert" className="rounded border border-red-300 bg-red-50 px-2 py-1.5 text-red-800">{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2 border-t px-4 py-3">
-          <button onClick={onClose} className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100">Cancel</button>
-          <button onClick={() => void importModel()} disabled={!preview || importing || parsing}
-            className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-            {importing ? <Loader2 className="animate-spin" size={13} /> : <Upload size={13} />} Import Model
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

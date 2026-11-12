@@ -32,6 +32,15 @@ import { buildCoordinationItems } from "@/lib/pm-coordination";
 import { PmClosureRequirements } from "@/components/modules/PmClosureRequirements";
 import { applyClosureRequirements, emptyClosureDraft, hasClosureSelection, type ClosureDraft } from "@/lib/pm-closure-requirements";
 import { canUpdatePmsRequirementsFromWr } from "@/lib/pm-requirements-guard";
+import { PMDetailsPanel } from "./pm/PMDetailsPanel";
+import { PMHistoryFooter } from "./pm/PMHistoryFooter";
+import { PMKpiPanel } from "./pm/PMKpiPanel";
+import { PMDocumentsPanel } from "./pm/PMDocumentsPanel";
+import { PMChecklistSummaryPanel } from "./pm/PMChecklistSummaryPanel";
+import { PMStakeholderAlignmentSection } from "./pm/PMStakeholderAlignmentSection";
+import { PMFollowUpPanel } from "./pm/PMFollowUpPanel";
+import { PMAuditLogPanel } from "./pm/PMAuditLogPanel";
+import { PMSmartChecklistPanel } from "./pm/PMSmartChecklistPanel";
 
 const TABS = [
   "Work request details",
@@ -653,69 +662,7 @@ export function PMWorkRequestPopup({
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <PmScope wr={workRequest} />
-          {wrFreezes.length > 0 && <div className="mb-3"><FreezeBadge freezes={wrFreezes} /></div>}          {activeTab === "Work request details" && <div className="space-y-4">
-            <WRDetailsEditor workRequest={workRequest} />
-            {renderGroup("Work Request",
-              <>
-                {renderField("WR ID", workRequest.WR_ID)}
-                {renderField("Work request status", workRequest.WorkRequestStatus)}
-                {renderField("Start date (Date To Perform)", formatDateDDMMYYYY(workRequest.StartDate))}
-                {renderField("Start date (TBD)", workRequest.StartDateTBD)}
-                {renderField("created date", formatDateDDMMYYYY(workRequest.CreatedDate))}
-              </>,
-              <>
-                {renderField("ESA Work Type", workRequest.ESAWorkType)}
-                {renderField("Work request substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}
-                {renderField("Due date", formatDateDDMMYYYY(workRequest.DueDate))}
-                {renderField("Margin date", formatDateDDMMYYYY(workRequest.MarginDate))}
-                {renderField("Trade name", workRequest.TradeName)}
-                {renderField("Expected hours", workRequest.ExpectedHours)}
-              </>,
-            )}
-            {renderGroup("Work Location",
-              <>
-                {renderField("Room code", workRequest.RoomCode)}
-                {renderField("Level name", workRequest.LevelName)}
-                {renderField("bl id", workRequest.bl_id)}
-              </>,
-              <>{renderField("Problem location", workRequest.ProblemLocation)}</>,
-            )}
-            {renderGroup("Equipment",
-              <>
-                {renderField("Equipment code", equipment.map((item) => item.EquipmentCode).join(", "))}
-                {renderField("Local equipment code", equipment.map((item) => item.LocalEquipmentCode).filter(Boolean).join(", "))}
-                {renderField("Equipment name", equipment.map((item) => item.EquipmentName).join(", "))}
-                {renderField("Equipment Standard Description", equipment.map((item) => item.EquipmentStandardDescription).filter(Boolean).join(", "))}
-                {renderField("Equipment standard ID", equipment.map((item) => item.EquipmentStandardId).filter(Boolean).join(", "))}
-              </>,
-              <div>
-                <dt className="text-xs font-medium text-slate-500">Is installation</dt>
-                {equipment.map((item) => <label key={item.EquipmentCode} className="mt-2 flex items-center gap-2 text-sm">
-                  <span>{item.EquipmentCode}</span>
-                  <select aria-label={`Is installation ${item.EquipmentCode}`} value={String(item.IsInstallation)}
-                    onChange={(event) => setInstallation(item.EquipmentCode, event.target.value === "true")}
-                    className="rounded border px-2 py-1">
-                    <option value="true">Yes</option><option value="false">No</option>
-                  </select>
-                </label>)}
-                {!equipment.length && <dd className="mt-1 text-sm">—</dd>}
-              </div>,
-            )}
-            {renderGroup("Preventive Maintenance Procedure Details",
-              <>
-                {renderField("PMP ID Original", workRequest.PMPIdOriginal)}
-                {renderField("PMP ID Smart", workRequest.PMPIdSmart)}
-                {renderField("PM Procedure Description", workRequest.PMProcedureDescription ?? blueprint?.MaintenanceReason)}
-                {renderField("PM Procedure Description SMART", workRequest.PMProcedureDescriptionSmart ?? blueprint?.Title)}
-                {renderField("Responsible company", workRequest.ResponsibleCompany)}
-                {renderField("Responsible person", workRequest.ResponsiblePerson)}
-              </>,
-              <>
-                {renderField("PMS ID Original", workRequest.PMSIdOriginal)}
-                {renderField("PMS ID Smart", workRequest.PMSIdSmart)}
-              </>,
-            )}
-          </div>}
+          {wrFreezes.length > 0 && <div className="mb-3"><FreezeBadge freezes={wrFreezes} /></div>}          {activeTab === "Work request details" && <PMDetailsPanel workRequest={workRequest} renderGroup={renderGroup} renderField={renderField} equipment={equipment} setInstallation={setInstallation} blueprint={blueprint} />}
 
           {activeTab === "Labor, parts & Completion" && <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -758,301 +705,21 @@ export function PMWorkRequestPopup({
             </div>
           </div>}
 
-          {activeTab === "KPI & Others" && <div className="grid gap-4 md:grid-cols-2">
-            <section className="rounded border bg-white p-4">
-              <h3 className="mb-3 font-semibold">SLA &amp; KPI</h3>
-              {renderField("SLA status", workRequest.DueDate && new Date(workRequest.DueDate) < new Date()
-                ? "Overdue"
-                : workRequest.MarginDate && new Date(workRequest.MarginDate) < new Date()
-                  ? "Margin"
-                  : "On-Time")}
-              {renderField("On-Hold 55% reason", workRequest.FreezeReason ?? workRequest.PlannedFreezeText)}
-              <label className="mt-3 block text-sm">Downtime (minutes)
-                <input type="number" min="0" value={workRequest.DowntimeMinutes ?? 0}
-                  onChange={(event) => updateWorkRequest((current) => ({
-                    ...current, DowntimeMinutes: Math.max(0, Number(event.target.value)),
-                  }), `Downtime KPI updated by ${actorName}`)}
-                  className="mt-1 block w-full rounded border px-3 py-2" />
-              </label>
-              <label className="mt-3 block text-sm">KPI notes
-                <textarea value={workRequest.KPINotes ?? ""}
-                  onChange={(event) => updateWorkRequest((current) => ({ ...current, KPINotes: event.target.value }))}
-                  className="mt-1 block min-h-24 w-full rounded border p-3" />
-              </label>
-            </section>
-            <section className="rounded border bg-white p-4">
-              <h3 className="mb-3 font-semibold">Work Request Metrics</h3>
-              {renderField("Expected hours", workRequest.ExpectedHours)}
-              {renderField("Effective working time (hours)", (laborRows(workRequest, data.craftspeople).reduce((sum, item) => sum + item.effective, 0) / 60).toFixed(2))}
-              {renderField("Total work session time (minutes)", workRequest.TotalTimeMinutes)}
-              {renderField("Estimated cost (EUR)", workRequest.EstimatedCostEur)}
-              {renderField("Actual cost (EUR)", workRequest.ActualCostEur)}
-            </section>
-          </div>}
+          {activeTab === "KPI & Others" && <PMKpiPanel workRequest={workRequest} renderField={renderField} updateWorkRequest={updateWorkRequest} actorName={actorName} craftspeople={data.craftspeople} />}
 
-          {activeTab === "Attached Documents" && <section className="space-y-4 rounded border bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="font-semibold">Attached Documents</h3>
-              <PhotoCapture className="w-full max-w-xs" onPhotos={(urls) => updateWorkRequest((current) => ({
-                ...current,
-                Attachments: [...(current.Attachments ?? []), ...urls.map((dataUrl, n) => ({ id: crypto.randomUUID(), name: `photo-${Date.now()}-${n + 1}.jpg`, type: "image/jpeg", dataUrl }))],
-              }), `${urls.length} photo${urls.length === 1 ? "" : "s"} added by ${actorName}`)} />
-                            <label className="cursor-pointer rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">
-                              + New WR Document
-                <input className="sr-only" type="file" onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) addDocument(file);
-                  event.target.value = "";
-                }} />
-              </label>
-            </div>
-            <input aria-label="Filter documents by Name" placeholder="Name" value={documentFilter}
-              onChange={(event) => setDocumentFilter(event.target.value)} className="rounded border px-3 py-2" />
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[500px] text-left text-sm">
-                <thead className="bg-slate-50"><tr><th className="p-3">Name</th><th className="p-3">Type</th><th className="p-3">Actions</th></tr></thead>
-                <tbody>{(workRequest.Attachments ?? []).filter((item) =>
-                  item.name.toLowerCase().includes(documentFilter.toLowerCase()),
-                ).map((item) => <tr key={item.id} className="border-t">
-                  <td className="p-3">{item.name}</td><td className="p-3">{item.type || "File"}</td>
-                  <td className="space-x-3 p-3">
-                    <a href={item.dataUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-700 underline">Open</a>
-                    <button type="button" onClick={() => removeDocument(item.id, item.name)} className="font-medium text-red-700">Delete</button>
-                  </td>
-                </tr>)}
-                {!workRequest.Attachments?.length && <tr><td colSpan={3} className="p-5 text-center text-slate-500">No attached documents.</td></tr>}
-                {!!workRequest.Attachments?.length && !workRequest.Attachments.some((item) => item.name.toLowerCase().includes(documentFilter.toLowerCase())) &&
-                  <tr><td colSpan={3} className="p-5 text-center text-slate-500">No documents match this filter.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </section>}
+          {activeTab === "Attached Documents" && <PMDocumentsPanel workRequest={workRequest} updateWorkRequest={updateWorkRequest} actorName={actorName} addDocument={addDocument} removeDocument={removeDocument} documentFilter={documentFilter} setDocumentFilter={setDocumentFilter} />}
 
-          {activeTab === "Checklist" && <section className="space-y-3 rounded border bg-white p-4">
-            <h3 className="font-semibold">Checklist summary</h3>
-            <p className="text-sm text-slate-600">Standard: {blueprint?.Title ?? checklistStandard ?? "Not selected"}</p>
-            {checklistSteps.map((step, index) => {
-              const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
-              return <article key={step.StepId} className="rounded border p-3">
-                <p className="font-medium">{index + 1}. {step.Title}</p>
-                {(answer?.lastCorrectedBy || step.lastCorrectedBy) && <p className="text-xs text-amber-800" title={answer?.lastCorrectedAt ?? step.lastCorrectedAt}>✎ Corrected by {answer?.lastCorrectedBy ?? step.lastCorrectedBy}</p>}
-                <p className="text-sm text-slate-600">{answer
-                  ? Array.isArray(answer.value)
-                    ? answer.value.join(", ")
-                    : String(answer.value)
-                  : "Not answered"}</p>
-                {answer && <span className={`mt-2 inline-block rounded px-2 py-1 text-xs font-semibold ${answer.passed
-                  ? "bg-green-100 text-green-800"
-                  : "bg-red-100 text-red-800"}`}>{answer.passed ? "Favourable" : "Unfavourable"}</span>}
-              </article>;
-            })}
-            {!checklistSteps.length && <p className="text-sm text-slate-500">No checklist standard is linked to this work request.</p>}
-          </section>}
+          {activeTab === "Checklist" && <PMChecklistSummaryPanel workRequest={workRequest} blueprint={blueprint} checklistStandard={checklistStandard} checklistSteps={checklistSteps} />}
 
-          {activeTab === "Team Alignment & Notices" && <section className="space-y-3 rounded border bg-slate-50 p-4" aria-label="Team Alignment and Notices">
-            {coordinationItem ? <PmCoordinationWorkspace item={coordinationItem} /> : <p className="text-sm text-slate-600">No stakeholder teams or notices are tagged on this PM schedule. Tag them in SmartPM → Stakeholder Alignment &amp; Notices.</p>}
-            {closureBox}
-          </section>}
-          {activeTab === "PM Follow-up" && <section className="space-y-4 rounded border bg-white p-4">
-            <h3 className="font-semibold">Create FastJob</h3>
-            <p className="text-sm text-slate-600">New Fast Jobs are linked to this PM and inherit its equipment and location. Fast Jobs are limited to costs below 750 EUR.</p>
-            <div className="grid gap-3 md:grid-cols-[2fr_1fr_auto]">
-              <input aria-label="Fast Job description" value={fastJobDescription}
-                onChange={(event) => setFastJobDescription(event.target.value)} placeholder="Description"
-                className="rounded border px-3 py-2" />
-              <select aria-label="Fast Job urgency" value={fastJobUrgency}
-                onChange={(event) => setFastJobUrgency(event.target.value)} className="rounded border px-3 py-2">
-                {["Low", "Normal", "High", "Urgent"].map((item) => <option key={item}>{item}</option>)}
-              </select>
-              <button type="button" disabled={!permissions?.canOpenFollowUpFJ} onClick={addFollowUp}
-                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-40">Create FastJob</button>
-            </div>
-            <input aria-label="Filter follow-up Fast Jobs" placeholder="Filter follow-up Fast Jobs..."
-              value={followUpFilter} onChange={(event) => setFollowUpFilter(event.target.value)}
-              className="rounded border px-3 py-2" />
-            <label className="block text-sm">Originating checklist step <select aria-label="Originating checklist step" value={fastJobStep} onChange={(event) => setFastJobStep(event.target.value)} className="rounded border px-3 py-2"><option value="">General follow-up</option>{checklistSteps.map((step) => <option key={step.StepId} value={step.StepId}>{step.Title}</option>)}</select></label>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[950px] text-left text-sm">
-                <thead className="bg-slate-50"><tr>
-                  {["FJ WR ID", "Title", "Status", "Substatus %", "Originating checklist step", "Due date", "Start date", "Actions"].map((title) => <th key={title} className="p-3">{title}</th>)}
-                </tr></thead>
-                <tbody>{linkedFastJobs.filter((job) =>
-                  `${job.WR_ID} ${job.Description} ${job.ProblemLocation ?? ""}`.toLowerCase().includes(followUpFilter.toLowerCase()),
-                ).map((job) => <tr key={job.WR_ID} className="border-t">
-                  <td className="p-3">{job.WR_ID}</td><td className="p-3">{job.Description}</td>
-                  <td className="p-3">{job.WorkRequestStatus} · {job.WorkRequestSubstatus}</td><td className="p-3">{job.Percentage}%</td>
-                  <td className="p-3">{job.originatingChecklistStepLabel ?? job.originatingChecklistStepId ?? "—"}</td><td className="p-3">{job.DueDate ? formatDateDDMMYYYY(job.DueDate) : "—"}</td>
-                  <td className="p-3">{job.StartDate ? formatDateDDMMYYYY(job.StartDate) : "—"}</td>
-                  <td className="space-x-2 p-3">
-                    <button type="button" onClick={() => onNavigate(job.WR_ID)} className="text-blue-700 underline">Open FJ →</button>
-                    {job.WR_Type === "FJ" && !job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onEscalateToLJ(job)} className="text-orange-700 underline">Escalate to LJ</button>}
-                    {job.EscalatedToLJ_WR_ID && <button type="button" onClick={() => onNavigate(job.EscalatedToLJ_WR_ID!)} className="text-orange-700 underline">Open LJ</button>}
-                  </td>
-                </tr>)}
-                {!linkedFastJobs.length && <tr><td colSpan={8} className="p-5 text-center text-slate-500">No linked Follow-Up Fast Jobs.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-            {linkedLongJobs.length > 0 && <div className="space-y-1 rounded border p-3"><h4 className="font-semibold">Linked Long Jobs</h4>{linkedLongJobs.map((job) => <p key={job.WR_ID}><button type="button" className="text-blue-700 underline" onClick={() => onNavigate(job.WR_ID)}>Open LJ {job.WR_ID} →</button> · {job.Description} · {job.Percentage}%</p>)}</div>}
-          </section>}
+          {activeTab === "Team Alignment & Notices" && <PMStakeholderAlignmentSection coordinationItem={coordinationItem} closureBox={closureBox} />}
+          {activeTab === "PM Follow-up" && <PMFollowUpPanel canOpenFollowUpFJ={permissions?.canOpenFollowUpFJ} fastJobDescription={fastJobDescription} setFastJobDescription={setFastJobDescription} fastJobUrgency={fastJobUrgency} setFastJobUrgency={setFastJobUrgency} addFollowUp={addFollowUp} followUpFilter={followUpFilter} setFollowUpFilter={setFollowUpFilter} fastJobStep={fastJobStep} setFastJobStep={setFastJobStep} checklistSteps={checklistSteps} linkedFastJobs={linkedFastJobs} linkedLongJobs={linkedLongJobs} onNavigate={onNavigate} onEscalateToLJ={onEscalateToLJ} />}
 
-          {activeTab === "AuditLog" && <section className="space-y-4 rounded border bg-white p-4">
-            <QAAuditPanel wr={workRequest} />
-            <QAChecklistReview key={workRequest.WR_ID} wr={workRequest} />
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px] text-left text-sm">
-                <thead className="bg-slate-50"><tr><th className="p-3">Timestamp</th><th className="p-3">Performed by</th><th className="p-3">Action</th><th className="p-3">Step reference</th><th className="p-3">Details</th></tr></thead>
-                <tbody>{auditRows.map((entry) => <tr key={entry.id} className="border-t">
-                  <td className="p-3">{formatDateTimeDDMMYYYY(entry.timestamp)}</td><td className="p-3">{entry.performedBy}</td>
-                  <td className="p-3">{entry.actionType}</td><td className="p-3">{entry.stepReference || "—"}</td><td className="p-3">{entry.details}</td>
-                </tr>)}
-                {!auditRows.length && <tr><td colSpan={5} className="p-5 text-center text-slate-500">No audit records.</td></tr>}</tbody>
-              </table>
-            </div>
-          </section>}
+          {activeTab === "AuditLog" && <PMAuditLogPanel workRequest={workRequest} auditRows={auditRows} />}
 
-          {activeTab === "Checklist - Smart PM" && <section className="space-y-4 rounded border bg-white p-4">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              {permissions?.canDefineChecklistPM ? <label className="block text-sm font-medium">Checklist Standard
-                <select aria-label="Checklist Standard" value={checklistStandard}
-                  onChange={(event) => chooseChecklist(event.target.value)}
-                  className="mt-1 block min-w-64 rounded border px-3 py-2">
-                  <option value="">Select checklist standard</option>
-                  {data.blueprints.filter((item) => !item.SiteId || item.SiteId === workRequest.SiteId)
-                    .map((item) => <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.Title}</option>)}
-                </select>
-              </label> : <p className="text-sm">Checklist Standard: {blueprint?.Title ?? checklistStandard ?? "Not selected"}</p>}
-              <button type="button" disabled={!checklistSteps.length}
-                onClick={() => setExecutorOpen(true)}
-                className="rounded bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Execute Checklist</button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <input aria-label="Filter checklist steps" value={stepFilter}
-                onChange={(event) => setStepFilter(event.target.value)} placeholder="Filter checklist steps..."
-                className="rounded border px-3 py-2" />
-              <select aria-label="Filter completed checklist steps" value={stepCompletionFilter}
-                onChange={(event) => setStepCompletionFilter(event.target.value)} className="rounded border px-3 py-2">
-                <option value="all">All completion states</option><option value="yes">Is completed: Yes</option><option value="no">Is completed: No</option>
-              </select>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] text-left text-sm">
-                <thead className="bg-slate-50"><tr>
-                  {["Sequence", "Checklist step", "Expected value Unit", "Measured value", "Is completed", "Craftperson comment", "Result"].map((title) => <th key={title} className="p-3">{title}</th>)}
-                </tr></thead>
-                <tbody>{checklistSteps.filter((step) => {
-                  const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
-                  const isComplete = !!getChecklistFinding(workRequest, step.StepId);
-                  return `${step.Title} ${step.StepId}`.toLowerCase().includes(stepFilter.toLowerCase()) &&
-                    (stepCompletionFilter === "all" || (stepCompletionFilter === "yes") === isComplete);
-                }).map((step, index) => {
-                  const answer = workRequest.ChecklistResults?.find((item) => item.stepId === step.StepId);
-                  const finding = getChecklistFinding(workRequest, step.StepId);
-                  const shownValue = answer
-                    ? Array.isArray(answer.value) ? answer.value.join(", ") : String(answer.value)
-                    : "—";
-                  const originSteps = checklistSteps.filter((item) => item.originFrequency === step.originFrequency);
-                  const sectionStart = originSteps[0]?.StepId === step.StepId;
-                  return <React.Fragment key={step.StepId}>{sectionStart && step.originFrequency && <tr className="bg-slate-100"><th colSpan={7} className="p-3"><FrequencyPill code={step.originFrequency} /> {step.isInherited ? "Included routine checks (inherited)" : "Additional maintenance checks"} · {originSteps.length} steps</th></tr>}<tr className="border-t">
-                    <td className="p-3">{index + 1}</td><td className="p-3"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title}{step.replacesStepLabel && <p className="text-xs text-amber-800">{step.replacesStepLabel}</p>}{(answer?.lastCorrectedBy || step.lastCorrectedBy) && <p className="text-xs text-amber-800" title={answer?.lastCorrectedAt ?? step.lastCorrectedAt}>✎ Corrected by {answer?.lastCorrectedBy ?? step.lastCorrectedBy}</p>}</td>
-                    <td className="p-3">{step.Unit ? `${step.MinThreshold ?? "—"}–${step.MaxThreshold ?? "—"} ${step.Unit}` : step.Unit ?? "—"}</td>
-                    <td className="p-3">{shownValue}</td><td className="p-3">{finding ? "Yes" : "No"}</td>
-                    <td className="p-3">{answer?.comment ?? "—"}</td>
-                    <td className="p-3">
-                      {finding && <span className={`rounded px-2 py-1 text-xs font-semibold ${finding === "Favourable" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                        {finding}
-                      </span>}
-                      {answer?.photoPaths?.map((photo) => <img key={photo} src={photo} alt={`Failure evidence for ${step.Title}`} className="mt-2 max-h-20 max-w-32 rounded object-cover" />)}
-                    </td>
-                  </tr></React.Fragment>;
-                })}
-                {!checklistSteps.length && <tr><td colSpan={7} className="p-5 text-center text-slate-500">No checklist steps are available.</td></tr>}
-              </tbody></table>
-            </div>
-          </section>}
+          {activeTab === "Checklist - Smart PM" && <PMSmartChecklistPanel canDefineChecklistPM={permissions?.canDefineChecklistPM} checklistStandard={checklistStandard} chooseChecklist={chooseChecklist} blueprints={data.blueprints} workRequest={workRequest} blueprint={blueprint} checklistSteps={checklistSteps} setExecutorOpen={setExecutorOpen} stepFilter={stepFilter} setStepFilter={setStepFilter} stepCompletionFilter={stepCompletionFilter} setStepCompletionFilter={setStepCompletionFilter} />}
         </main>
 
-        <ResizableHistory>
-          <footer className="px-4 py-3">
-          <section>
-            <button type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)}
-              className="flex w-full items-center justify-between py-2 text-left font-semibold">
-              <span>History</span><span>{historyOpen ? "−" : "+"}</span>
-            </button>
-            {historyOpen && <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ["all", "All"],
-                  ["comment", "Human Comments Only"],
-                  ["log", "Automatic Logs Only"],
-                ] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={historyFilter === value}
-                  onClick={() => setHistoryFilter(value)}
-                  className={`rounded px-3 py-1 text-xs ${historyFilter === value ? "bg-blue-700 text-white" : "bg-slate-100 text-slate-700"}`}>{label}</button>)}
-              </div>
-              <div className="flex gap-2"><input aria-label="Write a comment" placeholder="Write a comment..." value={message} onChange={(event) => setMessage(event.target.value)} className="min-w-0 flex-1 rounded border p-1" /><button type="button" disabled={!message.trim()} onClick={addComment} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-50">Post</button></div>
-              <div className="space-y-2">
-                {visibleHistory.map((entry) => <article key={entry.id} className="rounded border p-2 text-xs">
-                  <div className="text-slate-500">{entry.actorName} ({entry.actorRole}) · {formatDateTimeDDMMYYYY(entry.createdAt)} · {entry.kind === "comment" ? "Human comment" : "Automatic log"}</div>
-                  {editingComment === entry.id
-                    ? <div className="mt-2 space-y-2">
-                      <textarea aria-label="Edit history comment" value={commentDraft}
-                        onChange={(event) => setCommentDraft(event.target.value)} className="w-full rounded border p-2" />
-                      <button type="button" onClick={() => saveCommentEdit(entry.id)} className="text-blue-700">Save</button>
-                      <button type="button" onClick={() => setEditingComment(null)} className="ml-3">Cancel</button>
-                    </div>
-                    : <p className="whitespace-pre-wrap">{entry.text}</p>}
-                  {entry.kind === "comment" && entry.actorId === actorId && editingComment !== entry.id &&
-                    <button type="button" onClick={() => { setEditingComment(entry.id); setCommentDraft(entry.text); }} className="mt-1 text-blue-700">Edit</button>}
-                  {(entry.editHistory?.length ?? 0) > 0 && <details className="mt-1">
-                    <summary className="cursor-pointer text-slate-600">(Edited) Previous Versions</summary>
-                    {newestFirst(entry.editHistory ?? [], (version) => version.timestamp).map((version, index) => <div key={`${entry.id}-${index}`} className="mt-1 border-t pt-1">
-                      <span className="text-slate-500">{formatDateTimeDDMMYYYY(version.timestamp)}</span>
-                      <p className="whitespace-pre-wrap">{version.text}</p>
-                    </div>)}
-                  </details>}
-                </article>)}
-              </div>
-            </div>}
-          </section>
-          <section className="border-t pt-3">
-            <button type="button" aria-expanded={checklistHistoryOpen} onClick={() => setChecklistHistoryOpen((value) => !value)}
-              className="flex w-full items-center justify-between py-2 text-left font-semibold">
-              <span>Checklist history</span><span>{checklistHistoryOpen ? "−" : "+"}</span>
-            </button>
-            {checklistHistoryOpen && <div className="space-y-2">
-              <div className="grid gap-2 md:grid-cols-5">
-                {([
-                  ["timestamp", "Timestamp"],
-                  ["performedBy", "Performed by"],
-                  ["actionType", "Action type"],
-                  ["stepReference", "Step reference"],
-                  ["details", "Details"],
-                ] as const).map(([field, label]) => <input key={field} aria-label={`Filter ${label}`}
-                  placeholder={`Filter ${label}`} value={historyFilters[field]}
-                  onChange={(event) => setHistoryFilters((current) => ({ ...current, [field]: event.target.value }))}
-                  className="min-w-0 rounded border px-2 py-1 text-xs" />)}
-              </div>
-              <div className="max-h-40 overflow-auto">
-                <table className="w-full min-w-[700px] text-left text-xs">
-                  <thead className="bg-slate-50"><tr>
-                    {["Timestamp", "Performed by", "Action type", "Step reference", "Details"].map((title) => <th key={title} className="p-2">{title}</th>)}
-                  </tr></thead>
-                  <tbody>{checklistHistory.filter((entry) =>
-                    entry.timestamp.toLowerCase().includes(historyFilters.timestamp.toLowerCase()) &&
-                    entry.performedBy.toLowerCase().includes(historyFilters.performedBy.toLowerCase()) &&
-                    entry.actionType.toLowerCase().includes(historyFilters.actionType.toLowerCase()) &&
-                    (entry.stepReference ?? "").toLowerCase().includes(historyFilters.stepReference.toLowerCase()) &&
-                    entry.details.toLowerCase().includes(historyFilters.details.toLowerCase()),
-                  ).map((entry) => <tr key={entry.id} className="border-t">
-                    <td className="p-2">{formatDateTimeDDMMYYYY(entry.timestamp)}</td><td className="p-2">{entry.performedBy}</td>
-                    <td className="p-2">{entry.actionType}</td><td className="p-2">{entry.stepReference ?? "—"}</td><td className="p-2">{entry.details}</td>
-                  </tr>)}</tbody>
-                </table>
-              </div>
-            </div>}
-          </section>
-        </footer>
-        </ResizableHistory>
+        <PMHistoryFooter historyOpen={historyOpen} setHistoryOpen={setHistoryOpen} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} message={message} setMessage={setMessage} addComment={addComment} visibleHistory={visibleHistory} editingComment={editingComment} setEditingComment={setEditingComment} commentDraft={commentDraft} setCommentDraft={setCommentDraft} saveCommentEdit={saveCommentEdit} actorId={actorId} checklistHistoryOpen={checklistHistoryOpen} setChecklistHistoryOpen={setChecklistHistoryOpen} historyFilters={historyFilters} setHistoryFilters={setHistoryFilters} checklistHistory={checklistHistory} />
       </section>
 
       {assignModalOpen && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-4">
