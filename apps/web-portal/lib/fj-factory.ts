@@ -20,6 +20,8 @@ export interface FastJobData {
   requestorEmail?: string;
   requestorPhone?: string;
   requestorDepartment?: string;
+  /** True only when the work was already finished on the spot; the job is then logged at 78% with the time spent. */
+  completedOnSpot?: boolean;
 }
 import { computeFjSla, slaStoredDate } from "./fj-sla";
 import { getSiteSlaConfig } from "./fj-satisfaction";
@@ -29,6 +31,9 @@ export interface FjActor { userId?: string; displayName: string; role: string; p
 export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: DemoData; actor: FjActor; source?: string }): BaseWorkRequest {
   const issuedStatus = WR_Statuses.find((entry) => entry.Percentage === 50 && entry.ESAWorkType === "Corrective Maintenance");
   if (!issuedStatus) throw new Error("Issued status configuration is missing.");
+  const completedStatus = job.completedOnSpot ? WR_Statuses.find((entry) => entry.Percentage === 78 && entry.ESAWorkType === "Corrective Maintenance") : undefined;
+  if (job.completedOnSpot && !completedStatus) throw new Error("Technically completed status configuration is missing.");
+  const status = completedStatus ?? issuedStatus;
   const createdAt = job.createdAt || new Date().toISOString();
   const trade = job.tradeName || "Electrical";
   const urgencyCode: UrgencyCode = job.urgencyCode ?? "NORMAL";
@@ -45,9 +50,9 @@ export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: De
     Description: job.description,
     ProblemLocation: `${job.bl_id} / ${job.levelName} / ${job.roomCode}`,
     CreatedDate: createdAt.slice(0, 10),
-    WorkRequestStatus: issuedStatus.WorkRequestStatus,
-    WorkRequestSubstatus: issuedStatus.WorkRequestSubstatus,
-    Percentage: issuedStatus.Percentage,
+    WorkRequestStatus: status.WorkRequestStatus,
+    WorkRequestSubstatus: status.WorkRequestSubstatus,
+    Percentage: status.Percentage,
     SiteId: ctx.siteId,
     bl_id: job.bl_id,
     LevelName: job.levelName,
@@ -75,7 +80,7 @@ export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: De
     CreatedBy: ctx.actor.userId ?? "current-user",
     IsFrozen: false,
     EquipmentCodes: job.equipmentCode ? [job.equipmentCode] : [],
-    TotalTimeMinutes: job.timeSpentMinutes,
+    TotalTimeMinutes: job.completedOnSpot ? job.timeSpentMinutes : 0,
     StartDateTBD: false,
     RequiresSAT: false,
     RequiresDrawingUpdate: false,
@@ -85,7 +90,7 @@ export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: De
     Attachments: job.photoUrl ? [{ id: crypto.randomUUID(), name: job.photoName ?? "fast-job-photo", type: job.photoType || "image/unknown", dataUrl: job.photoUrl }] : [],
     Activity: [
       { id: crypto.randomUUID(), kind: "log", actorId: ctx.actor.userId ?? "current-user", actorName, actorRole: ctx.actor.role, createdAt,
-        text: `${ctx.source ?? "Fast Job created"} at 50% by ${actorName}${onBehalf ? ` on behalf of ${job.requestorName}${job.intakeChannel ? ` via ${job.intakeChannel}` : ""}` : ""} · ${sla.targetLabel}` },
+        text: `${ctx.source ?? "Fast Job created"} at ${status.Percentage}% by ${actorName}${onBehalf ? ` on behalf of ${job.requestorName}${job.intakeChannel ? ` via ${job.intakeChannel}` : ""}` : ""} · ${sla.targetLabel}` },
       ...(sla.deferredToNextBusinessDay ? [{ id: crypto.randomUUID(), kind: "log" as const, actorId: ctx.actor.userId ?? "current-user", actorName, actorRole: ctx.actor.role, createdAt,
         text: "Created outside business days: SLA clock starts next business day at 08:00." }] : []),
       ...(job.photoUrl ? [{ id: crypto.randomUUID(), kind: "log" as const, actorId: ctx.actor.userId ?? "current-user", actorName, actorRole: ctx.actor.role, createdAt,

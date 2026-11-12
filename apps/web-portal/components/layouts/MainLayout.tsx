@@ -27,7 +27,6 @@ const NAV_ITEMS = [
     { href: "/work-requests#PM", label: "Preventive Maintenance", icon: Wrench },
     { href: "/work-requests#FJ", label: "Fast Jobs", icon: Wrench },
     { href: "/work-requests#LJ", label: "Long Jobs", icon: Wrench },
-    { href: "/site-role-assignments", label: "Site Role Assignments", icon: Lock },
     { href: "/smart-pm", label: "SmartPM", icon: Zap },
     { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
     { href: "/audit-assurance", label: "Audit & Assurance", icon: Clipboard },
@@ -36,7 +35,7 @@ const NAV_ITEMS = [
   { section: "Administration", items: [
     { href: "/import-export", label: "Import/Export", icon: Upload },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
-    { href: "/admin/rbac", label: "Users & Permissions", icon: Lock },
+    { href: "/admin/rbac", label: "People & Permissions", icon: Lock },
     { href: "/sla-settings", label: "SLA Settings", icon: Calendar },
   ]},
 ];

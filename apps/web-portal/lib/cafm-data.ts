@@ -1,7 +1,7 @@
 import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, QAAuditReport, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
 import type { AuditCampaign, AuditFinding, AuditInspection, AuditSettings, AuditTemplate, AuditImport } from "./audit-assurance-types";
 import type { AuditAssurance } from "./equipment-inspection";
-import type { SuppressedPmOccurrence, BlueprintAuditEntry, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, SiteSlaConfig } from "@cafm/shared-schema";
+import type { SuppressedPmOccurrence, BlueprintAuditEntry, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, SiteSlaConfig, CifmPerson } from "@cafm/shared-schema";
 
 type AssignmentRole = "ESA_TM" | "ESA_CCM" | "TRADE_TM" | "TRADE_CM" | "ESA_TO" | "ESA_LJM" | "ESA_DO" | "ESA_IM";
 export interface TradeRoleMapping {
@@ -62,6 +62,7 @@ export interface DemoData {
   ljStageMatrix?: Record<string, "act" | "notify" | "none" | "P" | "O">;
   featurePermissionOverrides?: Record<string, boolean>;
   siteSlaConfig?: SiteSlaConfig;
+  cifmPeople?: CifmPerson[];
   fjNotifications?: { id: string; wrId: string; recipient: string; createdAt: string; kind: "FJ_DISSATISFACTION"; message: string; read?: boolean }[];
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];

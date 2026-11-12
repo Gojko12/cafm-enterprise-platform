@@ -12,6 +12,7 @@ export * from "./sla.js";
 export * from "./site-role-assignments.js";
 export * from "./dispatch.js";
 export * from "./user-access-profile.js";
+export * from "./cifm-person.js";
 export * from "./date-format.js";
 export * from "./pm-coordination.js";
 export { QAInspectorAssignmentSchema } from "./qa-inspector.js";

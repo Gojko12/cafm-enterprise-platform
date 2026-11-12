@@ -28,6 +28,10 @@ import { FeaturePermissionMatrix, LJRoleActionMatrix } from "./RBACMatrices";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { StakeholderCatalogSection } from "@/components/modules/StakeholderCatalog";
 import { CLASSICAL_TRADES, PLATFORM_SITE_IDS } from "@cafm/shared-schema";
+import type { CifmPerson } from "@cafm/shared-schema";
+import { CifmDirectoryTab, FmAccessModal, FmStaffTable, SiteAdminCards } from "./PeopleDirectory";
+import { TradeManagerAssignments } from "@/components/modules/TradeManagerAssignments";
+import { UserAccessMatrix } from "@/components/modules/UserAccessMatrix";
 
 const LJ_ROLES: LJRole[] = [
   "ESA_TO",
@@ -67,23 +71,27 @@ const LJ_ROLE_ACTIONS: Record<LJRole, string[]> = {
   ],
 };
 
-type ConsoleTab =  "users" | "features" | "stages" | "trade-managers" | "teams";
+type ConsoleTab = "directory" | "fm-roles" | "capabilities" | "stages" | "teams";
 const CONSOLE_TABS: { id: ConsoleTab; label: string }[] = [
-  { id: "users", label: "1. Users & Site Access" },
-  { id: "features", label: "2. Feature Permissions" },
-  { id: "stages", label: "3. Long Job Stage Matrix (0%–100%)" },
-  { id: "trade-managers", label: "4. Trade Managers" },
+  { id: "directory", label: "1. CIFM People Directory (All Employees)" },
+  { id: "fm-roles", label: "2. FM Roles, Trades & Site Admins" },
+  { id: "capabilities", label: "3. Role Capabilities & Permissions" },
+  { id: "stages", label: "4. Long Job Stage Matrix (0%–100%)" },
   { id: "teams", label: "5. Teams & Notices (Newsflash)" },
 ];
+const LEGACY_TAB_IDS: Record<string, ConsoleTab> = { users: "directory", features: "capabilities", "trade-managers": "fm-roles" };
 
 export function RBACDashboard() {
   const { data, setData } = useCafmStore();
   const { activeSiteId } = useSiteContext();
   const searchParams = useSearchParams();
-  const requestedTab = searchParams.get("tab");
+  const requestedTab = searchParams.get("tab") ?? "";
   const [activeTab, setActiveTabState] = useState<ConsoleTab>(
-    CONSOLE_TABS.some((tab) => tab.id === requestedTab) ? (requestedTab as ConsoleTab) : "users",
+    CONSOLE_TABS.some((tab) => tab.id === requestedTab) ? (requestedTab as ConsoleTab) : LEGACY_TAB_IDS[requestedTab] ?? "directory",
   );
+  const [fmView, setFmView] = useState<"people" | "trades">("people");
+  const [capView, setCapView] = useState<"modules" | "operations">("modules");
+  const [fmEditing, setFmEditing] = useState<CifmPerson | null>(null);
   const setActiveTab = (tab: ConsoleTab) => {
     setActiveTabState(tab);
     window.history.replaceState(null, "", `?tab=${tab}`);
@@ -132,7 +140,18 @@ export function RBACDashboard() {
         ))}
       </div>
 
-      {activeTab === "users" && <>
+      {activeTab === "directory" && <CifmDirectoryTab onGrantFm={setFmEditing} />}
+      {fmEditing && <FmAccessModal person={fmEditing} onClose={() => setFmEditing(null)} />}
+
+      {activeTab === "fm-roles" && <>
+      <SiteAdminCards />
+      <div className="flex gap-2">
+        {([["people", "FM People & Access"], ["trades", "Long Job Main / Deputy by Trade"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setFmView(id)} className={`rounded px-3 py-1.5 text-sm ${fmView === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>))}
+      </div>
+      {fmView === "people" && <>
+      <FmStaffTable onEdit={setFmEditing} />
+      <details className="rounded-lg border bg-white p-3"><summary className="cursor-pointer text-sm font-semibold">Login accounts &amp; legacy site access for {activeSiteId}</summary>
       <UserAccessMonitor
         users={users}
         profiles={data.userAccessProfiles.filter((item) => item.siteId === activeSiteId)}
@@ -145,13 +164,22 @@ export function RBACDashboard() {
         expandedUser={expandedUser}
         setExpandedUser={setExpandedUser}
       />
+      </details>
+      </>}
       </>}
 
-      {activeTab === "features" && <FeaturePermissionMatrix canEdit={canEditMatrices} />}
+      {activeTab === "capabilities" && <>
+      <div className="flex gap-2">
+        {([["modules", "Module & Feature Permissions"], ["operations", "Operational Capabilities (Create FJ, Claim WR, Inspections…)"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setCapView(id)} className={`rounded px-3 py-1.5 text-sm ${capView === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>))}
+      </div>
+      {capView === "modules" && <FeaturePermissionMatrix canEdit={canEditMatrices} />}
+      {capView === "operations" && <UserAccessMatrix key={activeSiteId} mode="roles" />}
+      </>}
 
       {activeTab === "stages" && <LJRoleActionMatrix canEdit={canEditMatrices} />}
 
-      {activeTab === "trade-managers" && (
+      {activeTab === "fm-roles" && fmView === "trades" && <>
       <section className="bg-white border rounded-lg p-4 space-y-3">
         <h2 className="text-lg font-semibold">Trade Managers — {activeSiteId}</h2>
         <p className="text-sm text-gray-600">Main / Deputy manager and notification contacts for each trade. Changes are saved automatically.</p>
@@ -189,7 +217,8 @@ export function RBACDashboard() {
           </table>
         </div>
       </section>
-      )}
+      <TradeManagerAssignments />
+      </>}
 
       {activeTab === "teams" && <StakeholderCatalogSection />}
     </div>

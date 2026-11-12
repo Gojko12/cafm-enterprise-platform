@@ -14,6 +14,7 @@ import { withSnowdonShowcase } from "./snowdon-seed";
 import { ensureAnalyticsHistorySeeded } from "./analytics-history-seed";
 import { withCoordinationShowcase } from "./pm-coordination-seed";
 import { withPeopleDirectory } from "./people-seed";
+import { withCifmDirectory } from "./cifm-people";
 import { usernameForRole } from "./people-directory";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
@@ -30,7 +31,7 @@ export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
   const site = normalizeSiteId(requestedSite) ?? requestedSite;
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
-  data = withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(migrateLegacySiteIds(data))))));
+  data = withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(migrateLegacySiteIds(data)))))));
   return {
     ...data,
     siteSlaConfig: data.siteSlaConfig?.siteId === site ? data.siteSlaConfig : undefined,

@@ -10,7 +10,7 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
+import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 
@@ -171,6 +171,7 @@ const stateSchema = z.object({
   ljStageMatrix: z.record(z.string().regex(/^\d{1,3}:[A-Z_]+$/), z.enum(["act", "notify", "none", "P", "O"])).optional(),
   featurePermissionOverrides: z.record(z.string().regex(/^[A-Za-z_]+\|[A-Za-z]+\.[A-Za-z]+$/), z.boolean()).optional(),
   siteSlaConfig: SiteSlaConfigSchema.optional(),
+  cifmPeople: z.array(CifmPersonSchema).optional(),
   fjNotifications: z.array(z.object({
     id: z.string().min(1), wrId: z.string().min(1), recipient: z.string().min(1), createdAt: z.string().min(1),
     kind: z.literal("FJ_DISSATISFACTION"), message: z.string(), read: z.boolean().optional(),
