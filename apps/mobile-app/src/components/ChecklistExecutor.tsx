@@ -1,4 +1,5 @@
 import { notify } from "../lib/toast";
+import { PhotoCapture } from "../../../web-portal/components/common/PhotoCapture";
 import React, { useEffect, useState } from "react";
 import { BaseWorkRequest } from "@cafm/shared-schema";
 
@@ -135,17 +136,6 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
 
     if (isOutOfRange) {
       setStepFailed(true);
-    }
-  };
-
-  const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setFailurePhoto(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
     }
   };
 
@@ -408,19 +398,7 @@ export const ChecklistExecutor: React.FC<ChecklistExecutorProps> = ({
                   </button>
                 </div>
               ) : (
-                <label className="block">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handlePhotoCapture}
-                    capture="environment"
-                    className="hidden"
-                    aria-label="Capture failure photo"
-                  />
-                  <div className="w-full px-4 py-6 border-2 border-dashed border-red-300 rounded-lg text-center cursor-pointer hover:border-red-500">
-                    <p className="text-sm text-red-700">Tap to capture photo</p>
-                  </div>
-                </label>
+                <PhotoCapture multiple={false} onPhotos={(urls) => setFailurePhoto(urls[0] ?? null)} />
               )}
             </div>
 

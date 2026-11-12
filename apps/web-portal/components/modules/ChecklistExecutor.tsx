@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import type { BaseWorkRequest, PM_ScheduleStep } from "@cafm/shared-schema";
+import { PhotoCapture, PhotoThumbs } from "@/components/common/PhotoCapture";
 
 type StepResult = NonNullable<BaseWorkRequest["ChecklistResults"]>[number];
 
@@ -112,25 +113,17 @@ export function ChecklistExecutor({ isOpen, workRequestId, steps, initialResults
       {step.InputType === "FreeText" && <textarea aria-label="Observation" value={typeof result?.value === "string" ? result.value : ""} onChange={(event) => answer(event.target.value, true)} className="w-full border rounded p-2" />}
       {result && step.InputType !== "FreeText" && <span className={`inline-block px-3 py-1 rounded font-semibold ${result.passed ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{result.passed ? "FAVOURABLE" : "UNFAVOURABLE"}</span>}
       {result && !result.passed && <>
-        {step.RequiresPhotoOnFailure && <label className="block">Failure photo required
-          <input type="file" accept="image/*" onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onerror = () => alert("Could not read the failure photo.");
-            const stepId = step.StepId;
-            reader.onload = () => {
-              const latest = resultsRef.current.find((entry) => entry.stepId === stepId);
-              if (!latest || typeof reader.result !== "string") {
-                alert("Could not attach the failure photo to this step.");
-                return;
-              }
-              save({ ...latest, photoPaths: [reader.result] });
-            };
-            reader.readAsDataURL(file);
+        {step.RequiresPhotoOnFailure && <div className="block"><span className="block text-sm">Failure photo required</span>
+          <PhotoCapture className="max-w-sm" onPhotos={(urls) => {
+            const latest = resultsRef.current.find((entry) => entry.stepId === step.StepId);
+            if (!latest) { alert("Could not attach the failure photo to this step."); return; }
+            save({ ...latest, photoPaths: [...(latest.photoPaths ?? []), ...urls] });
           }} />
-          {result.photoPaths?.map((photo) => <img key={photo} src={photo} alt="Failure evidence" className="max-h-32" />)}
-        </label>}
+          <PhotoThumbs photos={result.photoPaths ?? []} alt="Failure evidence" onRemove={(n) => {
+            const latest = resultsRef.current.find((entry) => entry.stepId === step.StepId);
+            if (latest) save({ ...latest, photoPaths: (latest.photoPaths ?? []).filter((_, k) => k !== n) });
+          }} />
+        </div>}
         {step.RequiresCommentOnFailure && <label className="block">Failure comment required
           <textarea value={result.comment ?? ""} onChange={(event) => save({ ...result, comment: event.target.value })} className="block w-full border rounded p-2" />
         </label>}

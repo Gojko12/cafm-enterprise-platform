@@ -26,6 +26,7 @@ import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { hasOpenQARework } from "@/lib/qa-settings";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { PmCoordinationWorkspace } from "@/components/modules/PmCoordinationWorkspace";
 import { buildCoordinationItems } from "@/lib/pm-coordination";
 import { PmClosureRequirements } from "@/components/modules/PmClosureRequirements";
@@ -792,8 +793,12 @@ export function PMWorkRequestPopup({
           {activeTab === "Attached Documents" && <section className="space-y-4 rounded border bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="font-semibold">Attached Documents</h3>
-              <label className="cursor-pointer rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">
-                + New WR Document
+              <PhotoCapture className="w-full max-w-xs" onPhotos={(urls) => updateWorkRequest((current) => ({
+                ...current,
+                Attachments: [...(current.Attachments ?? []), ...urls.map((dataUrl, n) => ({ id: crypto.randomUUID(), name: `photo-${Date.now()}-${n + 1}.jpg`, type: "image/jpeg", dataUrl }))],
+              }), `${urls.length} photo${urls.length === 1 ? "" : "s"} added by ${actorName}`)} />
+                            <label className="cursor-pointer rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">
+                              + New WR Document
                 <input className="sr-only" type="file" onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) addDocument(file);

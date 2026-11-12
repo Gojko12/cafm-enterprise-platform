@@ -1,7 +1,8 @@
 ﻿"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { X, Camera } from "lucide-react";
+import { X } from "lucide-react";
+import { PhotoCapture } from "@/components/common/PhotoCapture";
 import type { CifmPerson, UrgencyCode } from "@cafm/shared-schema";
 import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
@@ -32,7 +33,7 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
   const [selectedLevelName, setSelectedLevelName] = useState("");
   const [selectedRoomCode, setSelectedRoomCode] = useState("");
   const [description, setDescription] = useState("");
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoFile, setPhotoFile] = useState<{ name: string; type: string } | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>();
   const { activeSiteId, activePerson } = useSiteContext();
   const { data } = useCafmStore();
@@ -95,26 +96,10 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
     }
   };
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setPhotoFile(file);
-      const reader = new FileReader();
-      setPhotoPreview(undefined);
-      reader.onerror = () => {
-        setPhotoFile(null);
-        alert("Could not read the selected photo.");
-      };
-      reader.onload = () => {
-        if (typeof reader.result !== "string") {
-          setPhotoFile(null);
-          alert("Could not read the selected photo.");
-          return;
-        }
-        setPhotoPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
+  const handlePhotos = (urls: string[]) => {
+    if (!urls[0]) return;
+    setPhotoFile({ name: `photo-${Date.now()}.jpg`, type: "image/jpeg" });
+    setPhotoPreview(urls[0]);
   };
 
   const handleReset = () => {
@@ -266,10 +251,7 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
 
               <div className="flex flex-wrap items-center gap-3">
                 {!photoPreview ? (
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-blue-500 hover:bg-blue-50">
-                    <Camera size={16} className="text-gray-400" /> 📷 Attach Photo (Optional)
-                    <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
-                  </label>
+                  <PhotoCapture multiple={false} onPhotos={handlePhotos} className="w-56" />
                 ) : (
                   <div className="flex items-center gap-2">
                     <img src={photoPreview} alt="Preview" className="h-10 w-10 rounded border border-gray-300 object-cover" />

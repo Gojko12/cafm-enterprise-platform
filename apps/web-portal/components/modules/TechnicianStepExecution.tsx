@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
+import { PhotoCapture, PhotoThumbs } from "../common/PhotoCapture";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
 
@@ -50,18 +51,8 @@ export function TechnicianStepExecution({ step, actor, actorRole, update }: {
     <label className="block"><input type="checkbox" checked={completed} onChange={(event) => setCompleted(event.target.checked)} /> Completed</label>
     <label className="block">Finding <select value={finding} onChange={(event) => setFinding(event.target.value)} className="rounded border p-1"><option value="">Not specified</option><option value="yes">Favourable</option><option value="no">Unfavourable</option></select></label>
     <label className="block">Technician Step Comment<textarea className="block w-full rounded border p-2" value={comment} onChange={(event) => setComment(event.target.value)} /></label>
-    <label className="inline-block cursor-pointer rounded border px-2 py-1">📷 + Add Photo<input type="file" accept="image/*" className="hidden" disabled={reading} onChange={(event) => {
-      const file = event.target.files?.[0]; event.target.value = "";
-      if (!file) return;
-      if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Choose an image no larger than 2 MB."); return; }
-      setReading(true); setError("");
-      const reader = new FileReader();
-      reader.onload = () => { if (!mounted.current) return; const result = reader.result; if (typeof result === "string") setPhotos((items) => [...items, result]); else setError("Could not read photo."); };
-      reader.onerror = () => { if (mounted.current) setError("Could not read photo."); };
-      reader.onloadend = () => { if (mounted.current) setReading(false); };
-      reader.readAsDataURL(file);
-    }} /></label>
-    <p>{photos.length} photo(s)</p>
+    <PhotoCapture className="max-w-sm" disabled={reading} onPhotos={(urls) => { setError(""); setPhotos((items) => [...items, ...urls]); }} />
+    <PhotoThumbs photos={photos} alt="Step photo" onRemove={(n) => setPhotos((items) => items.filter((_, k) => k !== n))} />
     {error && <p role="alert" className="text-rose-700">{error}</p>}
     <div className="flex gap-2"><button disabled={reading} className="rounded bg-blue-700 px-2 py-1 text-white" onClick={save}>Save execution</button><button disabled={reading} onClick={() => setEditing(false)}>Cancel</button></div>
   </div>;

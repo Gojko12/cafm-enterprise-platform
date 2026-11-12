@@ -21,6 +21,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { DissatisfactionPanel, RatingEmailModal } from "@/components/modules/FJSatisfactionPanels";
 import { isCompletedFj } from "@/lib/fj-satisfaction";
 
@@ -215,7 +216,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           <button onClick={post} disabled={!message.trim()} className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50">Post</button>
         </div>}
         {tab === "Attached Documents" && <section className="space-y-4 rounded border bg-white p-4">
-          <h3 className="font-semibold">Attached Documents</h3><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New WR Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
+          <h3 className="font-semibold">Attached Documents</h3><PhotoCapture className="my-2 max-w-xs" onPhotos={(urls) => update((wr) => ({ ...wr, Attachments: [...(wr.Attachments ?? []), ...urls.map((dataUrl, n) => ({ id: crypto.randomUUID(), name: `photo-${Date.now()}-${n + 1}.jpg`, type: "image/jpeg", dataUrl }))] }), `${urls.length} photo${urls.length === 1 ? "" : "s"} added by ${actorName}`)} /><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New WR Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
           {(workRequest.Attachments ?? []).map((doc) => <div key={doc.id} className="flex items-center justify-between border-b py-3"><span>{doc.name}</span><div className="flex gap-3"><a href={doc.dataUrl} target="_blank" rel="noreferrer" onClick={() => update((wr) => wr, `Document '${doc.name}' opened by ${actorName}`)} className="text-blue-700 underline">Open</a><button onClick={() => update((wr) => ({ ...wr, Attachments: (wr.Attachments ?? []).filter((item) => item.id !== doc.id) }), `Document '${doc.name}' deleted by ${actorName}`)} className="text-red-700">Delete</button></div></div>)}
         </section>}
         {tab === "Technician To-Do & AI Task List" && <TechnicianTodoList wr={workRequest} update={update} />}

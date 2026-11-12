@@ -1,6 +1,7 @@
 "use client";
 import React, { useState } from "react";
 import type { Equipment } from "@cafm/shared-schema";
+import { PhotoCapture, PhotoThumbs } from "../../common/PhotoCapture";
 import type { AuditCampaign, AuditInspection } from "../../../lib/audit-assurance-types";
 import { calculateEquipmentInspectionSummary, classifications, type CheckpointResult, type CheckpointTemplate, type EquipmentInspectionSheet, type KmisConfig } from "../../../lib/equipment-inspection";
 
@@ -16,14 +17,7 @@ export function EquipmentInspectionEditor({ asset, campaign, route, template, co
   const summary = calculateEquipmentInspectionSummary(rows.filter((r): r is CheckpointResult => r.classification !== ""), config);
   const scored = (["N0", "N1", "N2", "N3", "N4"] as const).some((key) => summary.weightedSummary[key] > 0);
   const update = (index: number, patch: Partial<DraftRow>) => setRows((current) => current.map((row, i) => i === index ? { ...row, ...patch } : row));
-  const photo = (index: number, file?: File) => {
-    if (!file) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 2 * 1024 * 1024) { setError("Select a PNG, JPEG or WebP under 2 MB."); return; }
-    const reader = new FileReader();
-    reader.onerror = () => setError("Photo could not be read.");
-    reader.onload = () => { if (typeof reader.result === "string") update(index, { photoUrls: [...rows[index].photoUrls, reader.result] }); else setError("Photo could not be read."); };
-    reader.readAsDataURL(file);
-  };
+  const photo = (index: number, urls: string[]) => setRows((current) => current.map((row, i) => i === index ? { ...row, photoUrls: [...row.photoUrls, ...urls] } : row));
   const submit = async () => {
     setError("");
     if (!inspector.trim() || rows.some((r) => !r.classification)) { setError("Select an inspector and classify every checkpoint."); return; }
@@ -48,7 +42,7 @@ export function EquipmentInspectionEditor({ asset, campaign, route, template, co
       <label className="text-xs">Operational status <select className="rounded border p-1" disabled={busy} value={operational} onChange={(e) => setOperational(e.target.value as EquipmentInspectionSheet["operationalStatus"])}>{["Operational", "Degraded", "Non-Operational", "ST_NotTested", "NV_Inaccessible"].map((x) => <option key={x}>{x}</option>)}</select></label>
       <button disabled={busy} className="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-medium" onClick={() => setRows((current) => current.map((r) => r.classification ? r : { ...r, classification: "N0" }))}>Set unrated → N0</button>
     </div>
-    {rows.map((row, i) => <div key={row.checkpointId} className="space-y-1.5 rounded-xl border border-slate-200 p-2"><div className="flex justify-between gap-2 text-sm"><strong>{row.checkpointName}</strong><span className="text-[11px] text-slate-400">w {row.weight}</span></div><div className="flex flex-wrap gap-1">{classifications.map((v) => <button key={v} disabled={busy} aria-pressed={row.classification === v} style={{ backgroundColor: row.classification === v ? classificationColours[v] : "white", color: row.classification === v ? "white" : classificationColours[v], borderColor: classificationColours[v] }} className="min-h-[44px] min-w-[44px] rounded-full border px-3 text-sm font-semibold" onClick={() => update(i, { classification: v })}>{pill(v)}</button>)}</div><details className="text-xs" open={Boolean(row.comment || row.photoUrls.length)}><summary className="cursor-pointer text-slate-500">Comment / photo{row.photoUrls.length ? ` ? ${row.photoUrls.length} attached` : ""}</summary><div className="mt-1 flex items-center gap-2"><input disabled={busy} className="min-w-0 flex-1 rounded border p-1.5" placeholder="Inspector comment" value={row.comment} onChange={(e) => update(i, { comment: e.target.value })} /><label className="cursor-pointer rounded-full border px-3 py-1.5"><svg viewBox="0 0 24 24" className="mr-1 inline h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>Photo<input className="hidden" disabled={busy} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" onChange={(e) => photo(i, e.target.files?.[0])} /></label></div></details></div>)}
+    {rows.map((row, i) => <div key={row.checkpointId} className="space-y-1.5 rounded-xl border border-slate-200 p-2"><div className="flex justify-between gap-2 text-sm"><strong>{row.checkpointName}</strong><span className="text-[11px] text-slate-400">w {row.weight}</span></div><div className="flex flex-wrap gap-1">{classifications.map((v) => <button key={v} disabled={busy} aria-pressed={row.classification === v} style={{ backgroundColor: row.classification === v ? classificationColours[v] : "white", color: row.classification === v ? "white" : classificationColours[v], borderColor: classificationColours[v] }} className="min-h-[44px] min-w-[44px] rounded-full border px-3 text-sm font-semibold" onClick={() => update(i, { classification: v })}>{pill(v)}</button>)}</div><details className="text-xs" open={Boolean(row.comment || row.photoUrls.length)}><summary className="cursor-pointer text-slate-500">Comment / photo{row.photoUrls.length ? ` ? ${row.photoUrls.length} attached` : ""}</summary><div className="mt-1 flex items-center gap-2"><input disabled={busy} className="min-w-0 flex-1 rounded border p-1.5" placeholder="Inspector comment" value={row.comment} onChange={(e) => update(i, { comment: e.target.value })} /></div><PhotoCapture className="mt-1" disabled={busy} onPhotos={(urls) => photo(i, urls)} /><PhotoThumbs photos={row.photoUrls} alt="Checkpoint photo" onRemove={busy ? undefined : (n) => update(i, { photoUrls: row.photoUrls.filter((_, k) => k !== n) })} /></details></div>)}
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
     <button className="sticky bottom-20 min-h-[44px] w-full rounded-xl bg-blue-700 p-2 font-semibold text-white shadow-lg disabled:opacity-50 sm:static" disabled={busy || submitting} onClick={() => void submit()}>{submitLabel ?? (existing ? "\u2713 Save & Update Inspection + Sync Findings" : "\u2713 Complete Inspection & Auto-Generate Findings")}</button>
   </section>;

@@ -18,6 +18,7 @@ import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { useApp } from "@/lib/hooks/useApp";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { PhotoCapture } from "@/components/common/PhotoCapture";
 
 const TABS = [
   "Work request details & Roles",
@@ -503,7 +504,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
         </section>}
         {tab === TABS[6] && <TechnicianTodoList wr={workRequest} update={update} />}
         {tab === TABS[5] && <section className="space-y-4 rounded border bg-white p-4">
-          <h3 className="font-semibold">Attached Documents</h3><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New LJ Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
+          <h3 className="font-semibold">Attached Documents</h3><PhotoCapture className="my-2 max-w-xs" onPhotos={(urls) => update((wr) => ({ ...wr, Attachments: [...(wr.Attachments ?? []), ...urls.map((dataUrl, n) => ({ id: crypto.randomUUID(), name: `photo-${Date.now()}-${n + 1}.jpg`, type: "image/jpeg", dataUrl }))] }), `LJ ${urls.length} photo${urls.length === 1 ? "" : "s"} added by ${actorName}`)} /><label className="inline-flex cursor-pointer rounded bg-blue-700 px-4 py-2 text-white">+ New LJ Document<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) attach(file); e.currentTarget.value = ""; }} /></label>
           {(workRequest.Attachments ?? []).map((doc) => <div key={doc.id} className="flex items-center justify-between border-b py-3"><span>{doc.name}</span><div className="flex gap-3"><a href={doc.dataUrl} target="_blank" rel="noreferrer" onClick={() => update((wr) => wr, `LJ document '${doc.name}' opened by ${actorName}`)} className="text-blue-700 underline">Open</a><button onClick={() => update((wr) => ({ ...wr, Attachments: (wr.Attachments ?? []).filter((item) => item.id !== doc.id) }), `LJ document '${doc.name}' deleted by ${actorName}`)} className="text-red-700">Delete</button></div></div>)}
         </section>}
       </main>

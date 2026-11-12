@@ -1,4 +1,5 @@
 import { notify } from "../lib/toast";
+import { PhotoCapture } from "../../../web-portal/components/common/PhotoCapture";
 import React, { useState, useEffect } from "react";
 import { Equipment, BaseWorkRequest, Building, Floor, Room } from "@cafm/shared-schema";
 import { LocationEquipmentPickerGroup } from "./LocationEquipmentPickerGroup";
@@ -155,17 +156,6 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
           item.RoomCode === selected.RoomCode,
       ) ?? null,
     );
-  };
-
-  const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setFjPhoto(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
   };
 
   const getLocationDisplay = () => {
@@ -375,19 +365,7 @@ export const EquipmentInspectionView: React.FC<EquipmentInspectionViewProps> = (
                     </button>
                   </div>
                 ) : (
-                  <label className="block">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handlePhotoCapture}
-                      capture="environment"
-                      className="hidden"
-                      aria-label="Capture photo"
-                    />
-                    <div className="w-full px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg text-center cursor-pointer hover:border-blue-400 transition-colors">
-                      <p className="text-sm text-gray-600">Tap to capture photo</p>
-                    </div>
-                  </label>
+                  <PhotoCapture multiple={false} onPhotos={(urls) => setFjPhoto(urls[0] ?? null)} />
                 )}
               </div>
 

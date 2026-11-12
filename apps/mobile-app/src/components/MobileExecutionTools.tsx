@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
+import { PhotoCapture, PhotoThumbs } from "../../../web-portal/components/common/PhotoCapture";
 import { formatHumanDateTimeRange, formatPlannedRange } from "../lib/human-time";
 
 type Step = NonNullable<BaseWorkRequest["todoSteps"]>[number];
@@ -95,22 +96,15 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
 function TodoStep({ step, disabled, save, technician }: { step: Step; disabled: boolean; save: (changes: Partial<Step>) => Promise<boolean>; technician: string }) {
   const [comment, setComment] = useState(step.technicianComment ?? "");
   const [favourable, setFavourable] = useState(step.isFavourable === undefined ? "" : step.isFavourable ? "yes" : "no");
-  const [photo, setPhoto] = useState<string>();
+  const [photos, setPhotos] = useState<string[]>([]);
   const [error, setError] = useState("");
-  const readPhoto = (file?: File) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024) { setError("Choose an image no larger than 2 MB."); return; }
-    const reader = new FileReader();
-    reader.onerror = () => setError("Could not read the photo.");
-    reader.onload = () => { if (typeof reader.result === "string") { setPhoto(reader.result); setError(""); } else setError("Could not read the photo."); };
-    reader.readAsDataURL(file);
-  };
   return <div className="space-y-2 rounded border p-3"><strong>{step.order}. {step.title}</strong>{step.instruction && <p>{step.instruction}</p>}<p>{step.completed ? `Completed by ${step.completedBy ?? "technician"}` : "Pending"}</p>
     <label className="block">Finding <select className="rounded border" value={favourable} onChange={(e) => setFavourable(e.target.value)}><option value="">Not specified</option><option value="yes">Favourable</option><option value="no">Unfavourable</option></select></label>
     <label className="block">Comment<textarea className="block w-full rounded border p-2" value={comment} onChange={(e) => setComment(e.target.value)} /></label>
-    <label className="inline-block cursor-pointer rounded border px-2 py-1">📷 Add photo<input className="hidden" type="file" accept="image/*" onChange={(e) => { readPhoto(e.target.files?.[0]); e.target.value = ""; }} /></label>
-    {photo && <p>Photo ready to save.</p>}{step.photoUrls?.map((url, i) => <a className="mr-2 text-blue-700 underline" key={i} href={url} target="_blank" rel="noreferrer">Photo {i + 1}</a>)}
+    <PhotoCapture className="max-w-sm" onPhotos={(urls) => { setPhotos((current) => [...current, ...urls]); setError(""); }} />
+    <PhotoThumbs photos={photos} alt="New photo" onRemove={(i) => setPhotos((current) => current.filter((_, n) => n !== i))} />
+    <PhotoThumbs photos={step.photoUrls ?? []} alt="Saved photo" />
     {error && <p role="alert" className="text-red-700">{error}</p>}
-    <button disabled={disabled} className="block rounded bg-slate-800 px-3 py-2 text-white disabled:opacity-50" onClick={() => void save({ completed: true, completedBy: technician, completedAt: new Date().toISOString(), technicianComment: comment.trim() || undefined, isFavourable: favourable === "" ? undefined : favourable === "yes", ...(photo ? { photoUrls: [...(step.photoUrls ?? []), photo] } : {}) }).then((saved) => { if (saved) setPhoto(undefined); })}>Save completed step</button>
+    <button disabled={disabled} className="block rounded bg-slate-800 px-3 py-2 text-white disabled:opacity-50" onClick={() => void save({ completed: true, completedBy: technician, completedAt: new Date().toISOString(), technicianComment: comment.trim() || undefined, isFavourable: favourable === "" ? undefined : favourable === "yes", ...(photos.length ? { photoUrls: [...(step.photoUrls ?? []), ...photos] } : {}) }).then((saved) => { if (saved) setPhotos([]); })}>Save completed step</button>
   </div>;
 }
