@@ -8,11 +8,11 @@ import {
   Box, Crosshair, Download, Loader2, Plus, RefreshCw, Search, Upload, X,
 } from "lucide-react";
 import { formatDateDDMMYYYY, WR_Statuses } from "@cafm/shared-schema";
-import type { BaseWorkRequest, Building, Equipment, Floor, Room } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Building, Equipment, Floor, LocationFreeze, Room } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { getUnfavourableStepCount } from "@/lib/wr-signals";
-import { freezeLocations, localNowIso } from "@/lib/location-freezes";
+import { formatFreezePeriodWindow, freezeLocations, localNowIso } from "@/lib/location-freezes";
 import { fetchBimModels, type BimModelInfo } from "@/components/common/LocateInBim";
 import {
   bimLinkKey, expressIdFromBatchedHit, fetchIfcBuffer, findMissingSyncItems, gunzipBytes, gzipBytes,
@@ -38,6 +38,44 @@ interface MeshOriginal {
   opacity: number;
   transparent: boolean;
   depthWrite: boolean;
+}
+
+type ColorMode = "bim" | "status" | "heatmap";
+type RoomLevel = "red" | "amber" | "cyan" | "clear";
+const ROOM_LEVEL_COLOR: Record<RoomLevel, number> = { red: COLOR_RED, amber: COLOR_AMBER, cyan: COLOR_CYAN, clear: COLOR_EMERALD };
+const COLOR_ROOM_HIGHLIGHT = 0x22d3ee;
+
+interface RoomHealth {
+  level: RoomLevel;
+  wrs: BaseWorkRequest[];
+  freezes: LocationFreeze[];
+}
+
+type PickResult =
+  | { kind: "element"; expressId: number }
+  | { kind: "space"; expressId: number }
+  | null;
+
+const elementMapCache = new WeakMap<BimModelIndex, Map<number, BimElement>>();
+const spaceMapCache = new WeakMap<BimModelIndex, Map<number, BimSpace>>();
+function elementMapOf(index: BimModelIndex): Map<number, BimElement> {
+  let map = elementMapCache.get(index);
+  if (!map) { map = new Map(index.elements.map((element) => [element.expressId, element])); elementMapCache.set(index, map); }
+  return map;
+}
+function spaceMapOf(index: BimModelIndex): Map<number, BimSpace> {
+  let map = spaceMapCache.get(index);
+  if (!map) { map = new Map(index.spaces.map((space) => [space.expressId, space])); spaceMapCache.set(index, map); }
+  return map;
+}
+
+function isFullyVisible(object: THREE.Object3D): boolean {
+  for (let cursor: THREE.Object3D | null = object; cursor; cursor = cursor.parent) if (!cursor.visible) return false;
+  return true;
+}
+
+function boxIsFinite(box: THREE.Box3): boolean {
+  return !box.isEmpty() && [box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].every(Number.isFinite);
 }
 
 function displayName(element: BimElement): string {
@@ -66,11 +104,20 @@ export function BIMViewer() {
   const [selection, setSelection] = useState<number | null>(null);
   const [storeyFilter, setStoreyFilter] = useState<string>(ALL_STOREYS);
   const [xray, setXray] = useState(false);
+  const [xrayOpacity, setXrayOpacity] = useState(15);
+  const [explodeGap, setExplodeGap] = useState(0);
   const [clipEnabled, setClipEnabled] = useState(false);
   const [clipPercent, setClipPercent] = useState(100);
   const [viewportHealth, setViewportHealth] = useState<{ buildingId: string; meshCount: number; size: [number, number, number]; warning: string } | null>(null);
-  const [colorMode, setColorMode] = useState<"bim" | "status">("bim");
+  const [colorMode, setColorMode] = useState<ColorMode>("bim");
   const [showSpaces, setShowSpaces] = useState(false);
+  const [roomSelection, setRoomSelection] = useState<number | null>(null);
+  const [isolate, setIsolate] = useState<{ kind: "element" | "room"; expressId: number; label: string } | null>(null);
+  const [isolatePadding, setIsolatePadding] = useState(1.5);
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measurePoints, setMeasurePoints] = useState<THREE.Vector3[]>([]);
+  const [pinsOn, setPinsOn] = useState(false);
+  const [fastJobLocation, setFastJobLocation] = useState<{ bl_id: string; levelName: string; roomCode: string } | null>(null);
 
   // ---- Sidebar ----
   const [tab, setTab] = useState<"linked" | "unassigned" | "rooms">("linked");
@@ -96,6 +143,18 @@ export function BIMViewer() {
   const flyRef = useRef<{ fromPos: THREE.Vector3; toPos: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; start: number; duration: number } | null>(null);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const consumedDeepLink = useRef<string>("");
+  const activeClippingPlanesRef = useRef<THREE.Plane[]>([]);
+  const explodeGapRef = useRef(0);
+  explodeGapRef.current = explodeGap;
+  const measureGroupRef = useRef<THREE.Group | null>(null);
+  const roomHelperGroupRef = useRef<THREE.Group | null>(null);
+  const overlayElsRef = useRef(new Map<string, HTMLElement>());
+  const overlayAnchorsRef = useRef(new Map<string, THREE.Vector3>());
+  const sidebarListRef = useRef<HTMLDivElement | null>(null);
+  const setOverlayEl = useCallback((key: string, element: HTMLElement | null) => {
+    if (element) overlayElsRef.current.set(key, element);
+    else overlayElsRef.current.delete(key);
+  }, []);
 
   const siteEquipment = useMemo(() => data.equipment.filter((asset) => asset.SiteId === activeSiteId), [data.equipment, activeSiteId]);
   const equipmentByCode = useMemo(() => new Map(siteEquipment.map((asset) => [asset.EquipmentCode, asset])), [siteEquipment]);
@@ -134,6 +193,40 @@ export function BIMViewer() {
     return map;
   }, [links, data, activeSiteId, equipmentByCode]);
 
+  // ---- Live room health (drives sidebar dots, Room Heatmap and Issue Pins) ----
+  const roomHealth = useMemo(() => {
+    const result = new Map<number, RoomHealth>();
+    if (!index) return result;
+    const nowLocal = localNowIso();
+    const today = new Date().toISOString().slice(0, 10);
+    const activeFreezes = (data.locationFreezes ?? []).filter((freeze) =>
+      freeze.siteId === activeSiteId && freeze.startDateTime <= nowLocal && nowLocal <= freeze.endDateTime);
+    const wrsByRoom = new Map<string, BaseWorkRequest[]>();
+    for (const wr of data.workRequests) {
+      if (wr.SiteId !== activeSiteId || wr.Percentage >= 100) continue;
+      if (wr.bl_id && wr.bl_id !== buildingId) continue;
+      const roomCodes = new Set<string>();
+      if (wr.RoomCode) roomCodes.add(wr.RoomCode);
+      for (const code of wr.EquipmentCodes) {
+        const asset = equipmentByCode.get(code);
+        if (asset && asset.bl_id === buildingId && asset.RoomCode) roomCodes.add(asset.RoomCode);
+      }
+      for (const roomCode of roomCodes) wrsByRoom.set(roomCode, [...(wrsByRoom.get(roomCode) ?? []), wr]);
+    }
+    for (const space of index.spaces) {
+      const wrs = wrsByRoom.get(space.code) ?? [];
+      const freezes = activeFreezes.filter((freeze) => {
+        const locations = freezeLocations(freeze);
+        return locations.buildings.includes(buildingId) || locations.floors.includes(space.storeyName) || locations.rooms.includes(space.code);
+      });
+      const overdue = wrs.some((wr) => (wr.Percentage === 50 || wr.Percentage === 55) && !!wr.DueDate && wr.DueDate < today);
+      const unfavourable = wrs.some((wr) => getUnfavourableStepCount(wr, data) > 0);
+      const level: RoomLevel = overdue || unfavourable ? "red" : wrs.length ? "amber" : freezes.length ? "cyan" : "clear";
+      result.set(space.expressId, { level, wrs, freezes });
+    }
+    return result;
+  }, [index, data, activeSiteId, buildingId, equipmentByCode]);
+
   // ---- Three.js scene bootstrap ----
   useEffect(() => {
     const container = containerRef.current;
@@ -165,6 +258,7 @@ export function BIMViewer() {
     controlsRef.current = controls;
 
     let frame = 0;
+    const projected = new THREE.Vector3();
     const animate = (time: number) => {
       frame = requestAnimationFrame(animate);
       const fly = flyRef.current;
@@ -177,6 +271,16 @@ export function BIMViewer() {
       }
       controls.update();
       renderer.render(scene, camera);
+      // Project HTML overlays (issue pins, measurement badge) onto the canvas.
+      const width = container.clientWidth, height = container.clientHeight;
+      for (const [key, element] of overlayElsRef.current) {
+        const anchor = overlayAnchorsRef.current.get(key);
+        if (!anchor) { element.style.visibility = "hidden"; continue; }
+        projected.copy(anchor).project(camera);
+        const onScreen = projected.z < 1 && Math.abs(projected.x) <= 1.1 && Math.abs(projected.y) <= 1.1;
+        element.style.visibility = onScreen ? "visible" : "hidden";
+        if (onScreen) element.style.transform = `translate(${(projected.x * 0.5 + 0.5) * width}px, ${(-projected.y * 0.5 + 0.5) * height}px) translate(-50%, -100%)`;
+      }
     };
     frame = requestAnimationFrame(animate);
 
@@ -202,20 +306,18 @@ export function BIMViewer() {
     };
   }, []);
 
-  const fitCameraToBox = useCallback((inputBox: THREE.Box3, animated: boolean, isElement = false) => {
+  const fitCameraToBox = useCallback((inputBox: THREE.Box3, animated: boolean, isElement = false, viewDirection?: THREE.Vector3) => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
-    const finiteBox = (candidate: THREE.Box3 | null | undefined) =>
-      !!candidate && !candidate.isEmpty() &&
-      [candidate.min.x, candidate.min.y, candidate.min.z, candidate.max.x, candidate.max.y, candidate.max.z].every(Number.isFinite);
+    const finiteBox = (candidate: THREE.Box3 | null | undefined) => !!candidate && boxIsFinite(candidate);
     const box = finiteBox(inputBox) ? inputBox : new THREE.Box3(new THREE.Vector3(...SAFE_BOUNDS.min), new THREE.Vector3(...SAFE_BOUNDS.max));
     const sceneBox = finiteBox(modelBoxRef.current) ? modelBoxRef.current! : box;
     const center = box.getCenter(new THREE.Vector3());
     const targetRadius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
     const sceneRadius = Math.max(sceneBox.getSize(new THREE.Vector3()).length() / 2, targetRadius);
     const cameraDistance = isElement ? Math.max(targetRadius * 2.8, 2) : Math.max(targetRadius * 2.4, 8);
-    const direction = new THREE.Vector3(1, 0.75, 1).normalize();
+    const direction = (viewDirection ?? new THREE.Vector3(1, 0.75, 1)).clone().normalize();
     const targetPos = center.clone().add(direction.multiplyScalar(cameraDistance));
     // Dynamic near/far/orbit limits keep both 12m demo buildings and 67MB towers jitter-free.
     camera.near = Math.max(0.05, Math.min(0.25, targetRadius * 0.02));
@@ -240,35 +342,80 @@ export function BIMViewer() {
   }, []);
 
 
+  const storeyOffset = useCallback((storeyName: string): number => {
+    const storeys = loadedRef.current?.index.storeys;
+    if (!storeys) return 0;
+    return Math.max(storeys.findIndex((storey) => storey.name === storeyName), 0) * explodeGapRef.current;
+  }, []);
+
   const elementWorldBox = useCallback((expressId: number): THREE.Box3 | null => {
     // Element bboxes live in the parsed model space; the group only translates (no rotation/scale),
-    // so world = bbox + group.position. This also covers elements inside batched meshes.
+    // so world = bbox + group.position + storey explode offset. This also covers elements inside batched meshes.
     const model = loadedRef.current;
     if (!model) return null;
-    const element = model.index.elements.find((entry) => entry.expressId === expressId);
+    const element = elementMapOf(model.index).get(expressId);
     const offset = model.group.position;
     if (element?.bbox) {
+      const lift = offset.y + storeyOffset(element.storeyName);
       const box = new THREE.Box3(
-        new THREE.Vector3(element.bbox.min[0] + offset.x, element.bbox.min[1] + offset.y, element.bbox.min[2] + offset.z),
-        new THREE.Vector3(element.bbox.max[0] + offset.x, element.bbox.max[1] + offset.y, element.bbox.max[2] + offset.z),
+        new THREE.Vector3(element.bbox.min[0] + offset.x, element.bbox.min[1] + lift, element.bbox.min[2] + offset.z),
+        new THREE.Vector3(element.bbox.max[0] + offset.x, element.bbox.max[1] + lift, element.bbox.max[2] + offset.z),
       );
-      if (!box.isEmpty() && Number.isFinite(box.min.x + box.max.x + box.min.y + box.max.y + box.min.z + box.max.z)) return box;
+      if (boxIsFinite(box)) return box;
     }
     const meshes = model.elementMeshes.get(expressId);
     if (!meshes?.length) return null;
     const box = new THREE.Box3();
     for (const mesh of meshes) box.expandByObject(mesh);
     return box.isEmpty() ? null : box;
-  }, []);
+  }, [storeyOffset]);
+
+  const spaceWorldBox = useCallback((expressId: number): THREE.Box3 | null => {
+    const model = loadedRef.current;
+    if (!model) return null;
+    const space = spaceMapOf(model.index).get(expressId);
+    if (!space?.bbox) return null;
+    const offset = model.group.position;
+    const lift = offset.y + storeyOffset(space.storeyName);
+    const box = new THREE.Box3(
+      new THREE.Vector3(space.bbox.min[0] + offset.x, space.bbox.min[1] + lift, space.bbox.min[2] + offset.z),
+      new THREE.Vector3(space.bbox.max[0] + offset.x, space.bbox.max[1] + lift, space.bbox.max[2] + offset.z),
+    );
+    return boxIsFinite(box) ? box : null;
+  }, [storeyOffset]);
 
   const flyToElement = useCallback((expressId: number) => {
     const box = elementWorldBox(expressId);
     if (box) fitCameraToBox(box, true, true);
   }, [elementWorldBox, fitCameraToBox]);
 
+  const flyToRoom = useCallback((expressId: number) => {
+    const box = spaceWorldBox(expressId);
+    if (box) fitCameraToBox(box, true, true);
+  }, [spaceWorldBox, fitCameraToBox]);
+
+  /** Model framing box including the vertical growth from Exploded Storeys. */
+  const explodedModelBox = useCallback((): THREE.Box3 => {
+    const base = modelBoxRef.current;
+    const box = base && boxIsFinite(base) ? base.clone() : new THREE.Box3(new THREE.Vector3(...SAFE_BOUNDS.min), new THREE.Vector3(...SAFE_BOUNDS.max));
+    const storeyCount = loadedRef.current?.index.storeys.length ?? 0;
+    box.max.y += Math.max(storeyCount - 1, 0) * explodeGapRef.current;
+    return box;
+  }, []);
+
   const resetCamera = useCallback(() => {
-    fitCameraToBox(modelBoxRef.current ?? new THREE.Box3(), true);
-  }, [fitCameraToBox]);
+    fitCameraToBox(explodedModelBox(), true);
+  }, [fitCameraToBox, explodedModelBox]);
+
+  const setCameraView = useCallback((view: "iso" | "top" | "front" | "right") => {
+    const directions = {
+      iso: new THREE.Vector3(1, 0.75, 1),
+      top: new THREE.Vector3(0, 1, 0.001),
+      front: new THREE.Vector3(0, 0.12, 1),
+      right: new THREE.Vector3(1, 0.12, 0),
+    };
+    fitCameraToBox(explodedModelBox(), true, false, directions[view]);
+  }, [fitCameraToBox, explodedModelBox]);
 
   // ---- Model catalogue ----
   const refreshModels = useCallback(async (force = true) => {
@@ -319,6 +466,9 @@ export function BIMViewer() {
         setSelection(null);
         setClipEnabled(false);
         setClipPercent(100);
+        setRoomSelection(null);
+        setIsolate(null);
+        setMeasurePoints([]);
         setViewportHealth(null);
         setStoreyFilter(ALL_STOREYS);
         setStatus("Downloading BIM archive…");
@@ -414,7 +564,28 @@ export function BIMViewer() {
     requestAnimationFrame(() => flyToElement(entry.element.expressId));
   }, [searchParams, index, loaded, links, buildingId, flyToElement]);
 
-  // ---- Visual state application (visibility, X-Ray, slicing, overlays, clipping) ----
+  // ---- Exploded storeys: offset every mesh by its storey rank (scene-graph transform, no rebuild) ----
+  useEffect(() => {
+    const model = loadedRef.current;
+    if (!model || !index) return;
+    const rank = new Map(model.index.storeys.map((storey, position) => [storey.name, position]));
+    const lift = (storeyName: string) => (rank.get(storeyName) ?? 0) * explodeGap;
+    const elements = elementMapOf(model.index);
+    const spaces = spaceMapOf(model.index);
+    for (const [expressId, meshes] of model.elementMeshes) {
+      const offset = lift(elements.get(expressId)?.storeyName ?? "");
+      for (const mesh of meshes) mesh.position.y = offset;
+    }
+    for (const [expressId, meshes] of model.spaceMeshes) {
+      const offset = lift(spaces.get(expressId)?.storeyName ?? "");
+      for (const mesh of meshes) mesh.position.y = offset;
+    }
+    for (const mesh of model.batchedMeshes) mesh.position.y = lift(mesh.userData.storeyName as string);
+    model.group.updateMatrixWorld(true);
+    setMeasurePoints([]);
+  }, [explodeGap, index, loaded]);
+
+  // ---- Visual state application (visibility, X-Ray, slicing, overlays, clipping, isolation) ----
   useEffect(() => {
     const model = loadedRef.current;
     if (!model || !index) return;
@@ -424,16 +595,34 @@ export function BIMViewer() {
       plane.constant = modelBox.min.y + (clipPercent / 100) * (modelBox.max.y + 0.5 - modelBox.min.y);
     }
     const clipping = clipEnabled ? [plane] : null;
-    if (rendererRef.current) rendererRef.current.clippingPlanes = [];
-    const elementById = new Map(index.elements.map((element) => [element.expressId, element]));
+
+    // Revit-style 6-plane selection box (±X, ±Y, ±Z) applied globally on the renderer.
+    const isolatePlanes: THREE.Plane[] = [];
+    if (isolate) {
+      const target = isolate.kind === "room" ? spaceWorldBox(isolate.expressId) : elementWorldBox(isolate.expressId);
+      if (target) {
+        const min = target.min.clone().subScalar(isolatePadding);
+        const max = target.max.clone().addScalar(isolatePadding);
+        isolatePlanes.push(
+          new THREE.Plane(new THREE.Vector3(1, 0, 0), -min.x), new THREE.Plane(new THREE.Vector3(-1, 0, 0), max.x),
+          new THREE.Plane(new THREE.Vector3(0, 1, 0), -min.y), new THREE.Plane(new THREE.Vector3(0, -1, 0), max.y),
+          new THREE.Plane(new THREE.Vector3(0, 0, 1), -min.z), new THREE.Plane(new THREE.Vector3(0, 0, -1), max.z),
+        );
+      }
+    }
+    if (rendererRef.current) rendererRef.current.clippingPlanes = isolatePlanes;
+    activeClippingPlanesRef.current = [...(clipEnabled ? [plane] : []), ...isolatePlanes];
+
+    const ghostOpacity = xrayOpacity / 100;
+    const elementById = elementMapOf(model.index);
     for (const [expressId, meshes] of model.elementMeshes) {
       const element = elementById.get(expressId);
       const link = links.get(expressId);
-      const visible = !element || storeyFilter === ALL_STOREYS || element.storeyName === storeyFilter;
+      const inFilter = !element || storeyFilter === ALL_STOREYS || element.storeyName === storeyFilter;
       const ghost = xray && !!element && (element.isShell || (!element.isAssignable && !link));
       const selected = selection === expressId;
       for (const mesh of meshes) {
-        mesh.visible = visible;
+        mesh.visible = inFilter && !(ghost && !selected && xrayOpacity === 0);
         const material = mesh.material as THREE.MeshLambertMaterial;
         const original = mesh.userData.original as MeshOriginal | undefined;
         if (!original) continue;
@@ -452,7 +641,7 @@ export function BIMViewer() {
           material.depthWrite = true;
         } else if (ghost) {
           material.emissive.setHex(0x000000);
-          material.opacity = 0.15;
+          material.opacity = ghostOpacity;
           material.transparent = true;
           material.depthWrite = false;
         } else {
@@ -464,25 +653,52 @@ export function BIMViewer() {
         material.needsUpdate = true;
       }
     }
-    const spaceById = new Map(index.spaces.map((space) => [space.expressId, space]));
+    const spaceById = spaceMapOf(model.index);
     for (const [expressId, meshes] of model.spaceMeshes) {
       const space = spaceById.get(expressId);
-      const visible = showSpaces && (!space || storeyFilter === ALL_STOREYS || space.storeyName === storeyFilter);
+      const selectedRoom = roomSelection === expressId;
+      const heat = colorMode === "heatmap" ? roomHealth.get(expressId) : undefined;
+      const inFilter = !space || storeyFilter === ALL_STOREYS || space.storeyName === storeyFilter;
       for (const mesh of meshes) {
-        mesh.visible = visible;
-        (mesh.material as THREE.MeshLambertMaterial).clippingPlanes = clipping;
+        mesh.visible = selectedRoom || (inFilter && (showSpaces || colorMode === "heatmap"));
+        const material = mesh.material as THREE.MeshLambertMaterial;
+        const original = mesh.userData.original as MeshOriginal | undefined;
+        material.clippingPlanes = clipping;
+        if (selectedRoom) {
+          material.color.setHex(COLOR_ROOM_HIGHLIGHT);
+          material.emissive.setHex(0x0891b2);
+          material.emissiveIntensity = 0.6;
+          material.opacity = 0.34;
+          material.transparent = true;
+          material.depthWrite = false;
+        } else if (heat) {
+          material.color.setHex(ROOM_LEVEL_COLOR[heat.level]);
+          material.emissive.setHex(ROOM_LEVEL_COLOR[heat.level]);
+          material.emissiveIntensity = 0.35;
+          material.opacity = 0.45;
+          material.transparent = true;
+          material.depthWrite = false;
+        } else if (original) {
+          material.color.setHex(original.color);
+          material.emissive.setHex(0x000000);
+          material.opacity = original.opacity;
+          material.transparent = original.transparent;
+          material.depthWrite = original.depthWrite;
+        }
+        material.needsUpdate = true;
       }
     }
-    // Batched shell / passive-distribution meshes: storey slicing, X-Ray ghosting, clipping.
+    // Batched shell / passive-distribution meshes: storey slicing, adjustable X-Ray ghosting, clipping.
     for (const mesh of model.batchedMeshes) {
       const storeyName = mesh.userData.storeyName as string;
-      mesh.visible = storeyFilter === ALL_STOREYS || storeyName === storeyFilter;
+      const inFilter = storeyFilter === ALL_STOREYS || storeyName === storeyFilter;
+      mesh.visible = inFilter && !(xray && xrayOpacity === 0);
       const material = mesh.material as THREE.MeshLambertMaterial;
       const original = mesh.userData.original as MeshOriginal | undefined;
       if (!original) continue;
       material.clippingPlanes = clipping;
-      if (xray) {
-        material.opacity = 0.15;
+      if (xray && xrayOpacity > 0) {
+        material.opacity = ghostOpacity;
         material.transparent = true;
         material.depthWrite = false;
       } else {
@@ -492,7 +708,7 @@ export function BIMViewer() {
       }
       material.needsUpdate = true;
     }
-  }, [index, links, selection, storeyFilter, xray, clipEnabled, clipPercent, colorMode, showSpaces, statusColorByCode, loaded]);
+  }, [index, links, selection, roomSelection, storeyFilter, xray, xrayOpacity, clipEnabled, clipPercent, colorMode, showSpaces, statusColorByCode, roomHealth, isolate, isolatePadding, explodeGap, loaded, elementWorldBox, spaceWorldBox]);
 
   // ---- Selection outline (works for individual AND batched elements) ----
   useEffect(() => {
@@ -516,12 +732,160 @@ export function BIMViewer() {
         selectionHelperRef.current = null;
       }
     };
-  }, [selection, loaded, elementWorldBox]);
+  }, [selection, loaded, elementWorldBox, explodeGap]);
+
+  // ---- Room highlight: cyan outline (+ fallback translucent box when the IfcSpace has no mesh) ----
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !loaded || roomSelection === null) return;
+    const box = spaceWorldBox(roomSelection);
+    if (!box) return;
+    const group = new THREE.Group();
+    group.add(new THREE.Box3Helper(box.clone().expandByScalar(0.03), new THREE.Color(COLOR_ROOM_HIGHLIGHT)));
+    if (!loaded.spaceMeshes.get(roomSelection)?.length) {
+      const size = box.getSize(new THREE.Vector3());
+      const fallback = new THREE.Mesh(
+        new THREE.BoxGeometry(size.x, size.y, size.z),
+        new THREE.MeshBasicMaterial({ color: COLOR_ROOM_HIGHLIGHT, transparent: true, opacity: 0.2, depthWrite: false }),
+      );
+      fallback.position.copy(box.getCenter(new THREE.Vector3()));
+      group.add(fallback);
+    }
+    scene.add(group);
+    roomHelperGroupRef.current = group;
+    return () => {
+      scene.remove(group);
+      group.traverse((child) => {
+        const object = child as THREE.Mesh;
+        object.geometry?.dispose();
+        const material = object.material as THREE.Material | undefined;
+        material?.dispose();
+      });
+      roomHelperGroupRef.current = null;
+    };
+  }, [roomSelection, loaded, spaceWorldBox, explodeGap]);
+
+  // ---- Laser measure markers, dashed line ----
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !measurePoints.length) {
+      overlayAnchorsRef.current.delete("measure");
+      return;
+    }
+    const group = new THREE.Group();
+    const modelBox = modelBoxRef.current;
+    const radius = Math.max(0.08, (modelBox ? modelBox.getSize(new THREE.Vector3()).length() : 20) * 0.006);
+    for (const point of measurePoints) {
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false, transparent: true }),
+      );
+      marker.position.copy(point);
+      marker.renderOrder = 999;
+      group.add(marker);
+    }
+    if (measurePoints.length === 2) {
+      const geometry = new THREE.BufferGeometry().setFromPoints(measurePoints);
+      const line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: 0xfacc15, dashSize: radius * 3, gapSize: radius * 2, depthTest: false }));
+      line.computeLineDistances();
+      line.renderOrder = 998;
+      group.add(line);
+      overlayAnchorsRef.current.set("measure", measurePoints[0].clone().add(measurePoints[1]).multiplyScalar(0.5));
+    } else {
+      overlayAnchorsRef.current.delete("measure");
+    }
+    scene.add(group);
+    measureGroupRef.current = group;
+    return () => {
+      scene.remove(group);
+      group.traverse((child) => {
+        const object = child as THREE.Mesh;
+        object.geometry?.dispose();
+        (object.material as THREE.Material | undefined)?.dispose();
+      });
+      measureGroupRef.current = null;
+    };
+  }, [measurePoints]);
+
+  // ---- Issue pins: top 15 critical items (overdue equipment / rooms, frozen rooms) ----
+  const issuePins = useMemo(() => {
+    if (!pinsOn || !index) return [];
+    const inView = (storeyName: string) => storeyFilter === ALL_STOREYS || storeyName === storeyFilter;
+    const pins: { key: string; label: string; color: number; kind: "element" | "space"; expressId: number }[] = [];
+    for (const element of index.elements) {
+      const link = links.get(element.expressId);
+      if (!link || !inView(element.storeyName) || statusColorByCode.get(link.equipmentCode) !== COLOR_RED) continue;
+      pins.push({ key: `eq-${element.expressId}`, label: link.equipmentCode, color: COLOR_RED, kind: "element", expressId: element.expressId });
+    }
+    for (const level of ["red", "cyan"] as const) {
+      for (const space of index.spaces) {
+        if (!inView(space.storeyName) || roomHealth.get(space.expressId)?.level !== level) continue;
+        pins.push({ key: `room-${space.expressId}`, label: space.code, color: ROOM_LEVEL_COLOR[level], kind: "space", expressId: space.expressId });
+      }
+    }
+    return pins.slice(0, 15);
+  }, [pinsOn, index, links, statusColorByCode, roomHealth, storeyFilter]);
+
+  useEffect(() => {
+    const anchors = overlayAnchorsRef.current;
+    for (const key of [...anchors.keys()]) if (key !== "measure") anchors.delete(key);
+    if (!loaded) return;
+    for (const pin of issuePins) {
+      const box = pin.kind === "element" ? elementWorldBox(pin.expressId) : spaceWorldBox(pin.expressId);
+      if (!box) continue;
+      const center = box.getCenter(new THREE.Vector3());
+      anchors.set(pin.key, new THREE.Vector3(center.x, box.max.y, center.z));
+    }
+  }, [issuePins, loaded, explodeGap, elementWorldBox, spaceWorldBox]);
 
   // ---- Picking ----
   const onPointerDown = (event: React.PointerEvent) => {
     pointerRef.current = { x: event.clientX, y: event.clientY };
   };
+
+  /**
+   * Raycasts only what the user can actually see: hidden meshes and hit points clipped away by the
+   * Section plane / Selection Box are discarded, ghosted shell batches are transparent to clicks
+   * (X-Ray), and opaque shell hits block the ray. Room volumes yield to equipment inside the room.
+   */
+  const pickAt = (raycaster: THREE.Raycaster, model: LoadedBimModel, purpose: "select" | "measure"): { result: PickResult; point: THREE.Vector3 | null } => {
+    const pickables: THREE.Object3D[] = [];
+    for (const meshes of model.elementMeshes.values()) for (const mesh of meshes) pickables.push(mesh);
+    for (const mesh of model.batchedMeshes) pickables.push(mesh);
+    if (purpose === "select") for (const meshes of model.spaceMeshes.values()) for (const mesh of meshes) pickables.push(mesh);
+    const planes = activeClippingPlanesRef.current;
+    const elements = elementMapOf(model.index);
+    const spaces = spaceMapOf(model.index);
+    let spaceHit: { expressId: number; point: THREE.Vector3 } | null = null;
+    for (const hit of raycaster.intersectObjects(pickables, false)) {
+      const mesh = hit.object as THREE.Mesh;
+      if (!isFullyVisible(mesh)) continue;
+      if (!planes.every((plane) => plane.distanceToPoint(hit.point) >= -1e-4)) continue;
+      if (purpose === "measure") return { result: null, point: hit.point.clone() };
+      if (mesh.userData.isSpace) {
+        spaceHit ??= { expressId: mesh.userData.expressId as number, point: hit.point };
+        continue;
+      }
+      const expressId = mesh.userData.batched
+        ? expressIdFromBatchedHit(mesh, hit.faceIndex ?? 0)
+        : (mesh.userData.expressId as number);
+      const element = expressId === null ? undefined : elements.get(expressId);
+      if (!element) continue;
+      if (element.isShell) {
+        if (xray) continue;
+        break;
+      }
+      if (spaceHit) {
+        const room = spaces.get(spaceHit.expressId);
+        if (!room || element.roomCode !== room.code) break;
+      }
+      return { result: { kind: "element", expressId: element.expressId }, point: hit.point.clone() };
+    }
+    return spaceHit
+      ? { result: { kind: "space", expressId: spaceHit.expressId }, point: spaceHit.point.clone() }
+      : { result: null, point: null };
+  };
+
   const onPointerUp = (event: React.PointerEvent) => {
     const start = pointerRef.current;
     pointerRef.current = null;
@@ -537,21 +901,23 @@ export function BIMViewer() {
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(pointer, camera);
+    model.group.updateMatrixWorld(true);
     // Raycast only on clean clicks (<5px movement), never on hover/mousemove.
-    const pickables: THREE.Object3D[] = [];
-    for (const meshes of model.elementMeshes.values()) for (const mesh of meshes) if (mesh.visible) pickables.push(mesh);
-    for (const mesh of model.batchedMeshes) if (mesh.visible) pickables.push(mesh);
-    const hits = raycaster.intersectObjects(pickables, false);
-    const hit = hits[0];
-    const mesh = hit?.object as THREE.Mesh | undefined;
-    if (mesh) {
-      const expressId = mesh.userData.batched
-        ? expressIdFromBatchedHit(mesh, hit!.faceIndex ?? 0)
-        : (mesh.userData.expressId as number);
-      setSelection(expressId ?? null);
+    if (measureMode) {
+      const { point } = pickAt(raycaster, model, "measure");
+      if (point) setMeasurePoints((previous) => previous.length === 1 ? [previous[0], point] : [point]);
+      return;
+    }
+    const { result } = pickAt(raycaster, model, "select");
+    if (result?.kind === "element") {
+      setSelection(result.expressId);
+      setRoomSelection(null);
       setAssignOpen(false);
+    } else if (result?.kind === "space") {
+      selectRoom(result.expressId, false);
     } else {
       setSelection(null);
+      setRoomSelection(null);
     }
   };
 
@@ -830,6 +1196,22 @@ export function BIMViewer() {
     : [], [index, storeyFilter, query]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedElement = selection !== null && index ? index.elements.find((element) => element.expressId === selection) ?? null : null;
+  const selectedSpace = roomSelection !== null && index ? index.spaces.find((space) => space.expressId === roomSelection) ?? null : null;
+  const selectedRoomHealth = selectedSpace ? roomHealth.get(selectedSpace.expressId) ?? null : null;
+  const roomElements = useMemo(() => selectedSpace && index
+    ? index.elements.filter((element) => element.roomCode === selectedSpace.code && element.storeyName === selectedSpace.storeyName &&
+        (links.has(element.expressId) || element.isAssignable))
+    : [], [selectedSpace, index, links]);
+  const roomSchedules = useMemo(() => {
+    const codes = new Set(roomElements.map((element) => links.get(element.expressId)?.equipmentCode).filter((code): code is string => !!code));
+    return codes.size ? data.schedules.filter((schedule) => schedule.SiteId === activeSiteId && schedule.EquipmentCodes.some((code) => codes.has(code))) : [];
+  }, [roomElements, links, data.schedules, activeSiteId]);
+
+  useEffect(() => { if (selection !== null) setRoomSelection(null); }, [selection]);
+  useEffect(() => {
+    if (roomSelection === null || tab !== "rooms") return;
+    sidebarListRef.current?.querySelector(`[data-room-id="${roomSelection}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [roomSelection, tab]);
   const selectedLink = selection !== null ? links.get(selection) ?? null : null;
   const selectedEquipment = selectedLink ? equipmentByCode.get(selectedLink.equipmentCode) ?? null : null;
   const selectedOpenWRs = selectedLink
@@ -845,8 +1227,24 @@ export function BIMViewer() {
 
   const selectAndFly = (expressId: number) => {
     setSelection(expressId);
+    setRoomSelection(null);
     setAssignOpen(false);
     flyToElement(expressId);
+  };
+
+  function selectRoom(expressId: number, fly: boolean) {
+    setSelection(null);
+    setRoomSelection(expressId);
+    setTab("rooms");
+    setAssignOpen(false);
+    if (fly) flyToRoom(expressId);
+  }
+
+  const isolateTarget = (kind: "element" | "room", expressId: number, label: string) => {
+    if (isolate && isolate.kind === kind && isolate.expressId === expressId) { setIsolate(null); return; }
+    const box = kind === "room" ? spaceWorldBox(expressId) : elementWorldBox(expressId);
+    setIsolate({ kind, expressId, label });
+    if (box) fitCameraToBox(box.clone().expandByScalar(isolatePadding), true);
   };
 
   const actualPopupWr = wrPopup ? data.workRequests.find((wr) => wr.WR_ID === wrPopup.WR_ID && wr.SiteId === wrPopup.SiteId) ?? wrPopup : null;
@@ -911,7 +1309,7 @@ export function BIMViewer() {
       <div className="flex-1 flex gap-3 p-3 overflow-hidden">
         {/* 3D Viewport */}
         <div className="flex-1 relative rounded-lg border border-gray-300 overflow-hidden shadow-lg bg-gray-900">
-          <div ref={containerRef} className="absolute inset-0" onPointerDown={onPointerDown} onPointerUp={onPointerUp} />
+          <div ref={containerRef} className={`absolute inset-0 ${measureMode ? "cursor-crosshair" : ""}`} onPointerDown={onPointerDown} onPointerUp={onPointerUp} />
           {status && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900/70 text-gray-200 text-sm gap-2 pointer-events-none">
               <Loader2 className="animate-spin" size={18} /> {status}
@@ -931,14 +1329,58 @@ export function BIMViewer() {
             </div>
           )}
 
+          {/* Camera presets, Laser Measure, Issue Pins */}
+          <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1 rounded-lg border border-gray-600 bg-gray-900/85 p-1 text-[11px] text-gray-100 shadow-lg">
+            {([["iso", "3D Iso"], ["top", "Top Plan"], ["front", "Front"], ["right", "Right"]] as const).map(([view, label]) => (
+              <button key={view} onClick={() => setCameraView(view)} className="rounded px-2 py-1 hover:bg-gray-700">{label}</button>
+            ))}
+            <span className="mx-0.5 h-4 w-px bg-gray-600" />
+            <button onClick={() => { setMeasureMode((value) => !value); setMeasurePoints([]); }} aria-pressed={measureMode}
+              className={`rounded px-2 py-1 ${measureMode ? "bg-yellow-500 text-gray-900 font-semibold" : "hover:bg-gray-700"}`}>Measure</button>
+            <button onClick={() => setPinsOn((value) => !value)} aria-pressed={pinsOn}
+              className={`rounded px-2 py-1 ${pinsOn ? "bg-red-600 text-white font-semibold" : "hover:bg-gray-700"}`}>Issue Pins</button>
+            {measurePoints.length > 0 && <button onClick={() => setMeasurePoints([])} className="rounded px-2 py-1 hover:bg-gray-700">Clear</button>}
+          </div>
+
+          {isolate && (
+            <div className="absolute top-14 left-3 flex items-center gap-2 rounded-full border border-cyan-500 bg-gray-900/90 px-3 py-1 text-[11px] text-cyan-100 shadow-lg">
+              <span>Isolated: {isolate.label}</span>
+              <label className="flex items-center gap-1">Padding {isolatePadding.toFixed(1)}m
+                <input type="range" min={0.5} max={4} step={0.5} value={isolatePadding} onChange={(event) => setIsolatePadding(Number(event.target.value))} className="h-1 w-20 cursor-pointer" />
+              </label>
+              <button onClick={() => setIsolate(null)} className="font-semibold hover:text-white">× Clear</button>
+            </div>
+          )}
+
+          {measurePoints.length === 2 && (() => {
+            const delta = measurePoints[1].clone().sub(measurePoints[0]);
+            const dist = delta.length();
+            const horiz = Math.hypot(delta.x, delta.z);
+            return (
+              <div ref={(el) => setOverlayEl("measure", el)} className="absolute left-0 top-0 z-10 invisible -translate-x-1/2 -translate-y-full whitespace-nowrap rounded bg-yellow-400 px-2 py-1 text-[11px] font-semibold text-gray-900 shadow-lg">
+                {dist.toFixed(2)} m ({Math.round(dist * 1000)} mm) · ΔXY {horiz.toFixed(2)}m · ΔH {Math.abs(delta.y).toFixed(2)}m
+                <button onClick={() => setMeasurePoints([])} className="ml-2 underline">Clear</button>
+              </div>
+            );
+          })()}
+
+          {pinsOn && issuePins.map((pin) => (
+            <button key={pin.key} ref={(el) => setOverlayEl(pin.key, el)}
+              onClick={() => (pin.kind === "element" ? selectAndFly(pin.expressId) : selectRoom(pin.expressId, true))}
+              className="absolute left-0 top-0 z-10 invisible -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg ring-1 ring-white/70"
+              style={{ background: `#${pin.color.toString(16).padStart(6, "0")}` }}>
+              ● {pin.label}
+            </button>
+          ))}
+
           {/* Viewport Controls Overlay */}
-          <div className="absolute top-3 right-3 w-56 rounded-lg border border-gray-300 bg-white/95 p-3 shadow-lg space-y-2 text-xs">
+          <div className="absolute top-3 right-3 w-56 max-h-[calc(100%-1.5rem)] overflow-y-auto rounded-lg border border-gray-300 bg-white/95 p-3 shadow-lg space-y-2 text-xs">
             <div className="font-semibold text-gray-700 border-b pb-1.5">Viewport Controls</div>
             <div className="flex gap-1.5">
               <button onClick={resetCamera} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 px-2 py-1 hover:bg-gray-100">
                 <RefreshCw size={12} /> Reset Camera
               </button>
-              <button onClick={() => { if (selection !== null) flyToElement(selection); }} disabled={selection === null} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 disabled:opacity-40">
+              <button onClick={() => { if (selection !== null) flyToElement(selection); else if (roomSelection !== null) flyToRoom(roomSelection); }} disabled={selection === null && roomSelection === null} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 disabled:opacity-40">
                 <Crosshair size={12} /> Fit Selected
               </button>
             </div>
@@ -953,6 +1395,16 @@ export function BIMViewer() {
               <input type="checkbox" checked={xray} onChange={(event) => setXray(event.target.checked)} className="rounded border-gray-300" />
               X-Ray Shell Mode
             </label>
+            {xray && (
+              <div>
+                <label className="text-gray-600">Shell opacity: {xrayOpacity}%</label>
+                <input type="range" min={0} max={85} step={5} value={xrayOpacity} onChange={(event) => setXrayOpacity(Number(event.target.value))} className="w-full h-1.5 cursor-pointer" />
+              </div>
+            )}
+            <div>
+              <label className="font-medium text-gray-700">Explode Storeys: {explodeGap}m</label>
+              <input type="range" min={0} max={14} step={1} value={explodeGap} onChange={(event) => setExplodeGap(Number(event.target.value))} className="w-full h-1.5 cursor-pointer" />
+            </div>
             <label className="flex items-center gap-2 cursor-pointer font-medium text-gray-700">
               <input type="checkbox" checked={clipEnabled} onChange={(event) => setClipEnabled(event.target.checked)} className="rounded border-gray-300" />
               Clipping Plane
@@ -967,13 +1419,22 @@ export function BIMViewer() {
               Color Mode
               <div className="mt-1 flex rounded border border-gray-300 overflow-hidden">
                 <button onClick={() => setColorMode("bim")} aria-pressed={colorMode === "bim"} className={`flex-1 px-1.5 py-1 ${colorMode === "bim" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>BIM Default</button>
-                <button onClick={() => setColorMode("status")} aria-pressed={colorMode === "status"} className={`flex-1 px-1.5 py-1 ${colorMode === "status" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Live Maintenance Status</button>
+                <button onClick={() => setColorMode("status")} aria-pressed={colorMode === "status"} className={`flex-1 px-1.5 py-1 ${colorMode === "status" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Live Status</button>
+                <button onClick={() => { setColorMode("heatmap"); setXray(true); }} aria-pressed={colorMode === "heatmap"} className={`flex-1 px-1.5 py-1 ${colorMode === "heatmap" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Room Heatmap</button>
               </div>
             </div>
             <label className="flex items-center gap-2 cursor-pointer font-medium text-gray-700">
               <input type="checkbox" checked={showSpaces} onChange={(event) => setShowSpaces(event.target.checked)} className="rounded border-gray-300" />
               Show Room Volumes (IfcSpace)
             </label>
+            {colorMode === "heatmap" && (
+              <div className="border-t pt-1.5 space-y-0.5 text-[11px] text-gray-600">
+                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#dc2626" }} /> Overdue WR / Audit in room</p>
+                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#f59e0b" }} /> Open WR in room</p>
+                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#06b6d4" }} /> Active Freeze Period</p>
+                <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#10b981" }} /> Healthy / Clear</p>
+              </div>
+            )}
             {colorMode === "status" && (
               <div className="border-t pt-1.5 space-y-0.5 text-[11px] text-gray-600">
                 <p><span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#dc2626" }} /> Overdue WR / Unfavourable finding</p>
@@ -1001,7 +1462,7 @@ export function BIMViewer() {
           </div>
 
           {/* Element list */}
-          <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+          <div ref={sidebarListRef} className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {tab === "linked" && linkedRows.map((element) => {
               const link = links.get(element.expressId)!;
               const color = statusColorByCode.get(link.equipmentCode) ?? COLOR_EMERALD;
@@ -1023,12 +1484,28 @@ export function BIMViewer() {
                 <span className="block text-gray-500">{element.ifcType}{element.category ? ` · ${element.category}` : ""} · {element.storeyName}{element.roomCode ? ` · ${element.roomCode}` : ""}</span>
               </button>
             ))}
-            {tab === "rooms" && roomRows.map((space) => (
-              <div key={space.expressId} className="px-3 py-2 text-xs">
-                <span className="font-semibold text-gray-900">{space.code}</span>
-                <span className="block text-gray-500">{space.longName} · {space.storeyName}</span>
-              </div>
-            ))}
+            {tab === "rooms" && roomRows.map((space) => {
+              const level = roomHealth.get(space.expressId)?.level ?? "clear";
+              const dot = level === "clear" ? "#10b981" : `#${ROOM_LEVEL_COLOR[level].toString(16).padStart(6, "0")}`;
+              const active = roomSelection === space.expressId;
+              return (
+                <button key={space.expressId} data-room-id={space.expressId} onClick={() => selectRoom(space.expressId, true)}
+                  aria-pressed={active}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                    event.preventDefault();
+                    const sibling = (event.key === "ArrowDown" ? event.currentTarget.nextElementSibling : event.currentTarget.previousElementSibling) as HTMLElement | null;
+                    sibling?.focus();
+                  }}
+                  className={`block w-full px-3 py-2 text-left text-xs hover:bg-cyan-50 focus:outline-none focus:bg-cyan-50 ${active ? "bg-cyan-100 border-l-4 border-cyan-600" : ""}`}>
+                  <span className="font-semibold text-gray-900 flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full" style={{ background: dot }} />
+                    {space.code}
+                  </span>
+                  <span className="block text-gray-500">{space.longName} · {space.storeyName}</span>
+                </button>
+              );
+            })}
             {tab === "linked" && !linkedRows.length && <p className="p-3 text-xs text-gray-500">No linked equipment in this view.</p>}
             {tab === "unassigned" && !unassignedRows.length && <p className="p-3 text-xs text-gray-500">Every MEP element has an EQ ID. 🎉</p>}
             {tab === "rooms" && !roomRows.length && <p className="p-3 text-xs text-gray-500">No IfcSpace rooms detected.</p>}
@@ -1048,6 +1525,11 @@ export function BIMViewer() {
                   : <>Storey: {selectedElement.storeyName || "—"} · Room: {selectedElement.roomCode || "—"}</>}<br />
                 IfcGlobalId: <span className="font-mono">{selectedElement.globalId}</span>
               </p>
+              <button onClick={() => isolateTarget("element", selectedElement.expressId, selectedLink?.equipmentCode ?? displayName(selectedElement))}
+                aria-pressed={isolate?.kind === "element" && isolate.expressId === selectedElement.expressId}
+                className={`w-full rounded border px-2 py-1.5 font-semibold ${isolate?.kind === "element" && isolate.expressId === selectedElement.expressId ? "border-cyan-600 bg-cyan-600 text-white" : "border-gray-300 bg-white text-gray-800 hover:bg-gray-100"}`}>
+                {isolate?.kind === "element" && isolate.expressId === selectedElement.expressId ? "Clear Isolation Box" : "Isolate Box"}
+              </button>
 
               {!selectedLink && selectedElement.isAssignable && (
                 <div className="space-y-1.5">
@@ -1125,7 +1607,7 @@ export function BIMViewer() {
                       : <p className="text-gray-500">No SmartPM schedules target this equipment.</p>}
                   </div>
                   <div className="flex gap-1.5">
-                    <button onClick={() => setFastJobOpen(true)} className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
+                    <button onClick={() => { setFastJobLocation(null); setFastJobOpen(true); }} className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
                       <Plus size={12} /> Create Fast Job
                     </button>
                     <button onClick={() => router.push(`/equipment?eq=${encodeURIComponent(selectedLink.equipmentCode)}`)} className="flex-1 rounded border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-800 hover:bg-gray-100">
@@ -1136,6 +1618,81 @@ export function BIMViewer() {
               )}
             </div>
           )}
+
+          {/* Selected Room Inspector Card */}
+          {selectedSpace && !selectedElement && (() => {
+            const box = spaceWorldBox(selectedSpace.expressId);
+            const size = box ? box.getSize(new THREE.Vector3()) : null;
+            const cafmRoom = data.rooms.find((room) => room.bl_id === buildingId && room.RoomCode === selectedSpace.code);
+            const isolated = isolate?.kind === "room" && isolate.expressId === selectedSpace.expressId;
+            const freezes = selectedRoomHealth?.freezes ?? [];
+            const openWrs = selectedRoomHealth?.wrs ?? [];
+            return (
+              <div className="border-t border-gray-300 bg-gray-50 p-3 space-y-2 text-xs max-h-[55%] overflow-y-auto">
+                <div className="flex items-start justify-between">
+                  <strong className="text-sm text-gray-900">{selectedSpace.code}{selectedSpace.longName ? ` · ${selectedSpace.longName}` : ""}</strong>
+                  <button aria-label="Clear room selection" onClick={() => { setRoomSelection(null); if (isolate?.kind === "room") setIsolate(null); }}><X size={14} /></button>
+                </div>
+                <p className="text-gray-600">
+                  Storey: {selectedSpace.storeyName || "—"}<br />
+                  {size
+                    ? <>Dimensions: {size.x.toFixed(1)} × {size.z.toFixed(1)} × {size.y.toFixed(1)} m · Est. floor area {(size.x * size.z).toFixed(1)} m²<br /></>
+                    : <>Dimensions: —<br /></>}
+                  IfcGlobalId: <span className="font-mono">{selectedSpace.globalId}</span>
+                </p>
+                {freezes.map((freeze) => (
+                  <span key={freeze.id ?? freeze.title} className="block rounded border border-cyan-400 bg-cyan-50 px-2 py-1 font-medium text-cyan-900">
+                    ❄ Active Freeze: {freeze.title} · {formatFreezePeriodWindow(freeze.startDateTime, freeze.endDateTime)}
+                  </span>
+                ))}
+                <div className="flex gap-1.5">
+                  <button onClick={() => isolateTarget("room", selectedSpace.expressId, selectedSpace.code)} aria-pressed={isolated}
+                    className={`flex-1 rounded border px-2 py-1.5 font-semibold ${isolated ? "border-cyan-600 bg-cyan-600 text-white" : "border-gray-300 bg-white text-gray-800 hover:bg-gray-100"}`}>
+                    {isolated ? "Clear Room Box" : "Isolate Room Box"}
+                  </button>
+                  <button onClick={() => flyToRoom(selectedSpace.expressId)} className="flex-1 inline-flex items-center justify-center gap-1 rounded border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-800 hover:bg-gray-100">
+                    <Crosshair size={12} /> Fit Room
+                  </button>
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-800">Equipment in Room ({roomElements.length})</p>
+                  <div className="max-h-24 overflow-y-auto divide-y divide-gray-100 rounded border border-gray-200 bg-white">
+                    {roomElements.map((element) => {
+                      const link = links.get(element.expressId);
+                      return (
+                        <button key={element.expressId} onClick={() => selectAndFly(element.expressId)} className="block w-full px-1.5 py-1 text-left hover:bg-blue-50">
+                          <span className="font-semibold">{link ? link.equipmentCode : "Unassigned"}</span> · {displayName(element)}
+                        </button>
+                      );
+                    })}
+                    {!roomElements.length && <p className="px-1.5 py-1 text-gray-500">No equipment located in this room.</p>}
+                  </div>
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-800">Open WRs &amp; Schedules in Room ({openWrs.length + roomSchedules.length})</p>
+                  {openWrs.map((wr) => (
+                    <button key={wr.WR_ID} onClick={() => setWrPopup(wr)} className="block w-full rounded px-1.5 py-1 text-left hover:bg-blue-50">
+                      <span className="font-medium text-blue-700 underline">{wr.WR_ID}</span> · {wr.WR_Type} · {wr.Percentage}% · Due {formatDateDDMMYYYY(wr.DueDate) || "—"}
+                    </button>
+                  ))}
+                  {roomSchedules.map((schedule) => (
+                    <p key={schedule.ScheduleId} className="px-1.5 py-0.5 text-gray-700">
+                      PMS {schedule.ScheduleId} · {schedule.ChecklistCode} · Next {formatDateDDMMYYYY(schedule.NextDueDate) || "—"}
+                    </p>
+                  ))}
+                  {!openWrs.length && !roomSchedules.length && <p className="text-gray-500">No open work requests or schedules.</p>}
+                </div>
+                <button
+                  onClick={() => {
+                    setFastJobLocation({ bl_id: buildingId, levelName: cafmRoom?.LevelName ?? selectedSpace.storeyName, roomCode: selectedSpace.code });
+                    setFastJobOpen(true);
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
+                  <Plus size={12} /> Create Room Fast Job
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -1168,7 +1725,7 @@ export function BIMViewer() {
       {actualPopupWr && actualPopupWr.WR_Type === "LJ" && (
         <LJWorkRequestPopup workRequest={actualPopupWr} onClose={() => setWrPopup(null)} onNavigate={navigatePopup} />
       )}
-      <FastJobModal isOpen={fastJobOpen} onClose={() => setFastJobOpen(false)} onSubmit={createFastJob} />
+      <FastJobModal isOpen={fastJobOpen} onClose={() => setFastJobOpen(false)} onSubmit={createFastJob} initialLocation={fastJobLocation} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, Camera, Clock } from "lucide-react";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useCafmStore } from "@/lib/cafm-store";
@@ -10,6 +10,8 @@ interface FastJobModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit?: (data: FastJobData) => void;
+  /** Pre-fills the location step (e.g. from a selected 3D room). */
+  initialLocation?: { bl_id: string; levelName: string; roomCode: string } | null;
 }
 
 export interface FastJobData {
@@ -25,7 +27,7 @@ export interface FastJobData {
   createdAt: string;
 }
 
-export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
+export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: FastJobModalProps) {
   const [step, setStep] = useState<"select-location" | "create-job">("select-location");
   const [selectedEquipmentCodes, setSelectedEquipmentCodes] = useState<string[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState("");
@@ -56,6 +58,13 @@ export function FastJobModal({ isOpen, onClose, onSubmit }: FastJobModalProps) {
         item.RoomCode === selectedRoomCode,
     ) ?? null;
   const selectedEquipment = selectedEquipmentCodes[0] || "";
+
+  useEffect(() => {
+    if (!isOpen || !initialLocation) return;
+    setSelectedBuildingId(initialLocation.bl_id);
+    setSelectedLevelName(initialLocation.levelName);
+    setSelectedRoomCode(initialLocation.roomCode);
+  }, [isOpen, initialLocation]);
 
   if (!isOpen) return null;
 
