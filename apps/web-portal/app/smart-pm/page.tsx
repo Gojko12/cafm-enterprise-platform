@@ -17,6 +17,7 @@ import { FrequencyPill } from "@/components/common/PmFrequency";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
 import { PmSchedulesGrid } from "@/components/modules/PmSchedulesGrid";
 import { PmTargetPlans } from "@/components/modules/PmTargetPlans";
+import { StakeholderCatalogButton } from "@/components/modules/StakeholderCatalog";
 import { PmAssignmentModal } from "@/components/modules/PmAssignmentModal";
 import type { PMAssignment } from "@/components/modules/PmAssignmentModal";
 import { BlueprintChangeHistory, ChecklistChangeHistory } from "@/components/modules/BlueprintChangeHistory";
@@ -127,7 +128,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
   const matching = (value: string) => value.toLowerCase().includes(query.trim().toLowerCase());
   const showBlueprint = (bp: PM_ChecklistStandard) => { setSelectedBlueprint(bp.ChecklistCode); setCreating(undefined); };
   return <div className="mx-auto max-w-[1600px] space-y-4 p-4"><h1 className="text-2xl font-bold">SmartPM · Blueprints &amp; Target Plans</h1>
-    <nav className="flex flex-wrap gap-2" aria-label="SmartPM sections">{tabs.map((name, i) => <button key={name} aria-current={tab === i ? "page" : undefined} className={`${button} ${tab === i ? "border-blue-600 bg-blue-50 text-blue-800" : ""}`} onClick={() => setTab(i)}>{name}</button>)}</nav>
+    <nav className="flex flex-wrap gap-2" aria-label="SmartPM sections">{tabs.map((name, i) => <button key={name} aria-current={tab === i ? "page" : undefined} className={`${button} ${tab === i ? "border-blue-600 bg-blue-50 text-blue-800" : ""}`} onClick={() => setTab(i)}>{name}</button>)}<a className={button} href="/work-requests?view=hub#PM">📢 Team Alignment Hub</a><StakeholderCatalogButton /></nav>
     {error && <p role="alert" className="rounded bg-rose-100 p-3 text-rose-900">{error}</p>}{notice && <p role="status" className="rounded bg-emerald-50 p-3">{notice}</p>}{busy && <p role="status">Saving…</p>}
     {tab === 0 && <div className="flex flex-col items-start gap-4 md:flex-row"><aside className="w-full shrink-0 space-y-3 rounded-xl border bg-white p-3 md:w-80">
       <input aria-label="Search blueprint families" className={`${field} w-full`} placeholder="Search CB, family, title or trade" value={query} onChange={(e) => setQuery(e.target.value)} />

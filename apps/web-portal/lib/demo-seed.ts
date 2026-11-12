@@ -12,6 +12,7 @@ import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles } from "./acce
 import { seedAssurance, seedAuditTemplates } from "./audit-assurance-seed";
 import { withSnowdonShowcase } from "./snowdon-seed";
 import { ensureAnalyticsHistorySeeded } from "./analytics-history-seed";
+import { withCoordinationShowcase } from "./pm-coordination-seed";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
 export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
@@ -26,9 +27,12 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
 export function scopeData(data: DemoData, site: SiteId): DemoData {
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
-  data = ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(data)));
+  data = withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(data))));
   return {
     ...data,
+    stakeholderTeams: (data.stakeholderTeams ?? []).filter((item) => item.siteId === site),
+    coordinationRequirements: (data.coordinationRequirements ?? []).filter((item) => item.siteId === site),
+    pmCoordination: (data.pmCoordination ?? []).filter((item) => item.siteId === site),
     sites: [site],
     pmsOrderHighWatermark: Math.max(data.pmsOrderHighWatermark ?? 0, 0, ...data.schedules.map((order) => Number(order.ScheduleId))),
     blueprintHighWatermark: Math.max(data.blueprintHighWatermark ?? 0, 0, ...data.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))),

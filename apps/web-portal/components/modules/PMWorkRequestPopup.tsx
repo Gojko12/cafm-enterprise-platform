@@ -26,6 +26,8 @@ import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { hasOpenQARework } from "@/lib/qa-settings";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { PmCoordinationWorkspace } from "@/components/modules/PmCoordinationWorkspace";
+import { buildCoordinationItems } from "@/lib/pm-coordination";
 
 const TABS = [
   "Work request details",
@@ -36,6 +38,7 @@ const TABS = [
   "PM Follow-up",
   "AuditLog",
   "Checklist - Smart PM",
+  "Team Alignment & Notices",
 ] as const;
 
 const STATUS_CHOICES = [
@@ -70,6 +73,7 @@ export function PMWorkRequestPopup({
   const { permissions } = useActiveUserPermissions();
   const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const { currentRole } = useApp();
+  const coordinationItem = useMemo(() => buildCoordinationItems(data, 0).find((entry) => entry.wrId === workRequest.WR_ID), [data, workRequest.WR_ID]);
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(initialTab);
   useEffect(() => { setActiveTab(initialTab); }, [initialTab, workRequest.WR_ID]);
   const [checklistHistoryOpen, setChecklistHistoryOpen] = useState(true);
@@ -618,6 +622,7 @@ export function PMWorkRequestPopup({
                 : "border-transparent text-slate-600 hover:bg-slate-50"}`}>
               <span className="min-w-0 truncate">{tab}</span>
               {tab === "Checklist - Smart PM" && unfavourableCount > 0 && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 text-rose-900">{unfavourableCount}</span>}
+              {tab === "Team Alignment & Notices" && coordinationItem && <span className="shrink-0 rounded-full bg-slate-100 px-1.5">{coordinationItem.gate.state === "Cleared" ? "✅" : "⚠️"}</span>}
               {tab === "PM Follow-up" && linkedFastJobs.length > 0 && <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 text-indigo-900">{linkedFastJobs.length}</span>}
             </button>
           ))}
@@ -816,6 +821,9 @@ export function PMWorkRequestPopup({
             {!checklistSteps.length && <p className="text-sm text-slate-500">No checklist standard is linked to this work request.</p>}
           </section>}
 
+          {activeTab === "Team Alignment & Notices" && <section className="space-y-3 rounded border bg-slate-50 p-4" aria-label="Team Alignment and Notices">
+            {coordinationItem ? <PmCoordinationWorkspace item={coordinationItem} /> : <p className="text-sm text-slate-600">No stakeholder teams or notices are tagged on this PM schedule. Tag them in SmartPM → Stakeholder Alignment &amp; Notices.</p>}
+          </section>}
           {activeTab === "PM Follow-up" && <section className="space-y-4 rounded border bg-white p-4">
             <h3 className="font-semibold">Create FastJob</h3>
             <p className="text-sm text-slate-600">New Fast Jobs are linked to this PM and inherit its equipment and location. Fast Jobs are limited to costs below 750 EUR.</p>

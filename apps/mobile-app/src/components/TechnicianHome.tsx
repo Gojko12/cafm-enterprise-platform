@@ -2,7 +2,7 @@ import { notify } from "../lib/toast";
 import React, { useState, useEffect } from "react";
 import { FrequencyPill } from "../../../web-portal/components/common/PmFrequency";
 import { BaseWorkRequest, formatDateDDMMYYYY, pmTargetLabel } from "@cafm/shared-schema";
-import type { LocationFreeze } from "@cafm/shared-schema";
+import type { LocationFreeze, PmGateResult } from "@cafm/shared-schema";
 import { formatFreezePeriodWindow, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
 import { WRPreviewCard } from "./WRPreviewCard";
 import { isOverdue, localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
@@ -25,6 +25,7 @@ interface TechnicianHomeProps {
   agenda?: Agenda;
   onAgendaChange?: (agenda: Agenda) => void;
   freezes?: LocationFreeze[];
+  gate?: (wr: BaseWorkRequest) => PmGateResult | undefined;
   viewMode?: "card" | "compact";
   layout?: WrLayout;
   onLayoutChange?: (layout: WrLayout) => void;
@@ -57,6 +58,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   agenda: agendaProp,
   onAgendaChange,
   freezes = [],
+  gate,
   viewMode = "card",
   layout = "list",
   onLayoutChange,
@@ -201,6 +203,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                   wr={wr}
                   onClick={() => onOpenWR?.(wr.WR_ID || "")}
                 />
+                {(() => { const g = gate?.(wr); return g && <div className={`mb-2 rounded-lg border px-2.5 py-1.5 text-xs ${g.state === "Cleared" ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>{g.state === "Cleared" ? `✅ Cleared (${g.cleared.join(", ")})` : `⚠️ Pending Clearance: ${g.blockers.join(", ")}`}</div>; })()}
                 {freezesFor(wr).length > 0 && <div className="mb-2 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900"><strong>❄ Freeze Period</strong> · {freezesFor(wr)[0].title} · {formatFreezePeriodWindow(freezesFor(wr)[0].startDateTime, freezesFor(wr)[0].endDateTime, new Date(now))}</div>}
                 {(wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === technician && item.teamLeaderReply).map((item) => <p key={item.id} className="mb-2 rounded bg-blue-50 p-2 text-sm">💬 Team Leader ({item.status}): {item.teamLeaderReply}</p>)}
 

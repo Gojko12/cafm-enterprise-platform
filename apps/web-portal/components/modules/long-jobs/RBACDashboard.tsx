@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCafmStore, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { StakeholderCatalogSection } from "@/components/modules/StakeholderCatalog";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 
 const LJ_ROLES: LJRole[] = [
@@ -216,6 +217,8 @@ export function RBACDashboard() {
       {activeTab === "moduleRbac" && (
         <ModuleRBACMatrix />
       )}
+
+      <StakeholderCatalogSection />
     </div>
   );
 }

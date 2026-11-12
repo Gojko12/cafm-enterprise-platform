@@ -4,12 +4,13 @@ import React, { useEffect, useState } from "react";
 import { pmTargetLabel, pmTargetType, formatDateDDMMYYYY, getNextUnsuppressedOccurrence } from "@cafm/shared-schema";
 import type { PM_ChecklistStandard, PM_Schedule } from "@cafm/shared-schema";
 import type { DemoData } from "@/lib/cafm-data";
+import { ScheduleBadges } from "./PmStakeholderTagging";
 
 const columns = [
   ["id", "PMS #"], ["scope", "Target Scope"], ["target", "Equipment / Location"], ["building", "Building"],
   ["floor", "Floor"], ["room", "Room"], ["code", "Blueprint Code"], ["title", "Blueprint Title"],
   ["family", "Family / Mode"], ["trade", "Trade"], ["frequency", "Locked Freq"], ["anchor", "Cycle Date (Visit #1)"],
-  ["due", "Next Due"], ["technician", "Default Tech"],
+  ["due", "Next Due"], ["technician", "Default Tech"], ["alignment", "Teams & Notices"],
 ] as const;
 type Column = typeof columns[number][0];
 const ids = columns.map(([id]) => id);
@@ -32,6 +33,7 @@ export function PmSchedulesGrid({ orders, blueprints, data, selected, onSelect, 
   const [prefs, setPrefs] = useState<Prefs>({ order: [...ids], hidden: [] });
   const [ready, setReady] = useState(false), [error, setError] = useState("");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
+  const [teamFilter, setTeamFilter] = useState(""), [reqFilter, setReqFilter] = useState("");
   const [sort, setSort] = useState<{ id: Column; desc: boolean }>({ id: "id", desc: false });
   const [drag, setDrag] = useState<Column>();
   useEffect(() => { try { setPrefs(readPrefs()); } catch (problem) { setError(String(problem)); } setReady(true); }, []);
@@ -62,9 +64,10 @@ export function PmSchedulesGrid({ orders, blueprints, data, selected, onSelect, 
       case "anchor": return formatDateDDMMYYYY(order.cycleDate ?? order.anchorDate);
       case "due": return formatDateDDMMYYYY(getNextUnsuppressedOccurrence(order, orders, new Date().toISOString().slice(0, 10))?.date);
       case "technician": return order.defaultTechnicianNames?.join(", ") ?? "";
+      case "alignment": return [...(order.affectedTeamIds ?? []).map((tid) => data.stakeholderTeams?.find((item) => item.id === tid)?.code ?? tid), ...(order.requirementIds ?? []).map((rid) => data.coordinationRequirements?.find((item) => item.id === rid)?.code ?? rid)].join(", ");
     }
   };
-  const rows = orders.filter((order) => ids.every((id) => !filters[id] || value(order, id).toLowerCase().includes(filters[id]!.trim().toLowerCase())))
+  const rows = orders.filter((order) => (!teamFilter || order.affectedTeamIds?.includes(teamFilter)) && (!reqFilter || order.requirementIds?.includes(reqFilter)) && ids.every((id) => !filters[id] || value(order, id).toLowerCase().includes(filters[id]!.trim().toLowerCase())))
     .sort((a, b) => {
       const sortValue = (order: PM_Schedule) => sort.id === "anchor" ? order.cycleDate ?? order.anchorDate ?? "" :
         sort.id === "due" ? getNextUnsuppressedOccurrence(order, orders, new Date().toISOString().slice(0, 10))?.date ?? "" : value(order, sort.id);
@@ -73,7 +76,9 @@ export function PmSchedulesGrid({ orders, blueprints, data, selected, onSelect, 
   const visible = prefs.order.filter((id) => !prefs.hidden.includes(id));
   return <section className="space-y-3 rounded-xl border bg-white p-4">
     <div className="flex flex-wrap items-start gap-2"><strong>{rows.length} / {orders.length} PMS orders</strong>
-      <button className={button} onClick={() => setFilters({})}>Reset Filters</button>
+      <button className={button} onClick={() => { setFilters({}); setTeamFilter(""); setReqFilter(""); }}>Reset Filters</button>
+      <select aria-label="Filter by Team" className={button} value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}><option value="">Filter by Team</option>{(data.stakeholderTeams ?? []).filter((item) => item.siteId === orders[0]?.SiteId || !orders.length).map((item) => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
+      <select aria-label="Filter by Notice / Newsflash" className={button} value={reqFilter} onChange={(e) => setReqFilter(e.target.value)}><option value="">Filter by Notice / Newsflash</option>{(data.coordinationRequirements ?? []).filter((item) => item.siteId === orders[0]?.SiteId || !orders.length).map((item) => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
       <details className="relative"><summary className={`${button} cursor-pointer`}>Columns ⚙</summary><div className="absolute left-0 z-30 w-80 space-y-1 rounded border bg-white p-3 shadow-xl">
         <p className="text-xs">Select stays pinned first. Drag or use arrows.</p>
         {prefs.order.map((id, index) => <div key={id} draggable onDragStart={() => setDrag(id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (drag) move(drag, index); setDrag(undefined); }} className="flex items-center gap-2 rounded border p-1">
@@ -89,7 +94,7 @@ export function PmSchedulesGrid({ orders, blueprints, data, selected, onSelect, 
       <tr><th className="sticky left-0 bg-slate-50 p-2"><input type="checkbox" aria-label="Select all filtered PMS orders" checked={!!rows.length && rows.every((order) => selected.includes(order.ScheduleId))} onChange={(e) => onSelect(e.target.checked ? [...new Set([...selected, ...rows.map((order) => order.ScheduleId)])] : selected.filter((id) => !rows.some((order) => order.ScheduleId === id)))} /></th>
         {visible.map((id) => <th key={id} className="p-1"><input aria-label={`Filter ${columns.find(([item]) => item === id)![1]}`} className="w-full min-w-28 rounded border p-1 font-normal" value={filters[id] ?? ""} onChange={(e) => setFilters({ ...filters, [id]: e.target.value })} /></th>)}</tr></thead>
       <tbody>{rows.map((order) => <tr key={order.ScheduleId} className="border-t hover:bg-sky-50"><td className="sticky left-0 bg-white p-2"><input type="checkbox" aria-label={`Select PMS ${order.ScheduleId}`} checked={selected.includes(order.ScheduleId)} onChange={(e) => onSelect(e.target.checked ? [...selected, order.ScheduleId] : selected.filter((id) => id !== order.ScheduleId))} /></td>
-        {visible.map((id) => <td key={id} className="max-w-sm truncate p-2" title={value(order, id)}>{id === "target" ? <button className="text-blue-700 underline" onClick={() => onOpen(order)}>{value(order, id)}</button> : value(order, id)}</td>)}</tr>)}</tbody></table>
+        {visible.map((id) => <td key={id} className="max-w-sm truncate p-2" title={value(order, id)}>{id === "target" ? <button className="text-blue-700 underline" onClick={() => onOpen(order)}>{value(order, id)}</button> : id === "alignment" ? <ScheduleBadges order={order} /> : value(order, id)}</td>)}</tr>)}</tbody></table>
       {!rows.length && <p className="p-4">No PM orders match these filters.</p>}
     </div>}
   </section>;

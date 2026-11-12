@@ -23,9 +23,13 @@ import {
   WR_Statuses,
   LocationFreezeSchema,
   UserAccessProfileSchema,
+  SiteStakeholderTeamSchema,
+  SiteCoordinationRequirementSchema,
+  PmCoordinationRecordSchema,
+  evaluatePmGate,
   CLASSICAL_TRADES,
 } from "@cafm/shared-schema";
-import type { LocationFreeze, UserAccessProfile, TechnicianFieldUpdate } from "@cafm/shared-schema";
+import type { LocationFreeze, UserAccessProfile, TechnicianFieldUpdate, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, PM_Schedule } from "@cafm/shared-schema";
 import { z } from "zod";
 import { applyFilters, extractPctKey, matchesAgenda, useFilterStore } from "./lib/store";
 import { classifyEquipmentWRs } from "./lib/equipment-wrs";
@@ -51,6 +55,9 @@ const siteContextSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string(), Name: z.string(), LastName: z.string(), Trade: z.string(), HourlyRate: z.number(), SiteId: z.string() })),
   locationFreezes: z.array(LocationFreezeSchema),
   userAccessProfiles: z.array(UserAccessProfileSchema).default([]),
+  stakeholderTeams: z.array(SiteStakeholderTeamSchema).default([]),
+  coordinationRequirements: z.array(SiteCoordinationRequirementSchema).default([]),
+  pmCoordination: z.array(PmCoordinationRecordSchema).default([]),
 });
 type Technician = z.infer<typeof siteContextSchema>["craftspeople"][number];
 const normalizePerson = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -74,6 +81,15 @@ export default function App() {
   const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("");
   const [technicians, setTechnicians] = useState<z.infer<typeof siteContextSchema>["craftspeople"]>([]);
   const [freezes, setFreezes] = useState<LocationFreeze[]>([]);
+  const [coordination, setCoordination] = useState<{ teams: SiteStakeholderTeam[]; requirements: SiteCoordinationRequirement[]; records: PmCoordinationRecord[]; schedules: PM_Schedule[] }>({ teams: [], requirements: [], records: [], schedules: [] });
+  const pmGate = useCallback((wr: BaseWorkRequest) => {
+    if (wr.WR_Type !== "PM" || !wr.ScheduleId) return undefined;
+    const schedule = coordination.schedules.find((item) => item.ScheduleId === wr.ScheduleId && item.SiteId === wr.SiteId);
+    if (!schedule?.affectedTeamIds?.length && !schedule?.requirementIds?.length) return undefined;
+    const record = coordination.records.find((item) => item.wrId === wr.WR_ID || (item.pmsId === wr.ScheduleId && item.targetDate === (wr.DueDate ?? "").slice(0, 10)));
+    const gate = evaluatePmGate({ teamIds: schedule.affectedTeamIds, requirementIds: schedule.requirementIds, teams: coordination.teams, requirements: coordination.requirements, record });
+    return gate.state === "None" ? undefined : gate;
+  }, [coordination]);
   const [profiles, setProfiles] = useState<z.infer<typeof UserAccessProfileSchema>[]>([]);
   const [followUpDescription, setFollowUpDescription] = useState("");
   const [followUpStep, setFollowUpStep] = useState<{ id: string; label: string }>();
@@ -178,14 +194,15 @@ export default function App() {
 
   const refreshData = useCallback(async () => {
     const db = await getDB();
-    const [storedBuildings, storedFloors, storedRooms, storedEquipment, storedRequests, context] = await Promise.all([
+    const [storedBuildings, storedFloors, storedRooms, storedEquipment, storedRequests, context, storedSchedules] = await Promise.all([
       db.getAll("buildings"), db.getAll("floors"), db.getAll("rooms"),
-      db.getAll("equipment"), db.getAll("workRequests"), db.get("syncMetadata", `siteContext:${activeSiteId}`),
+      db.getAll("equipment"), db.getAll("workRequests"), db.get("syncMetadata", `siteContext:${activeSiteId}`), db.getAll("schedules"),
     ]);
     if (activeSelection.current.activeSiteId !== activeSiteId ||
         activeSelection.current.currentTechnicianId !== currentTechnicianId) return;
     const siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
-    const siteContext = context ? siteContextSchema.parse(JSON.parse(context.value)) : { craftspeople: [], locationFreezes: [], userAccessProfiles: [] };
+    const siteContext = context ? siteContextSchema.parse(JSON.parse(context.value)) : { craftspeople: [], locationFreezes: [], userAccessProfiles: [], stakeholderTeams: [], coordinationRequirements: [], pmCoordination: [] };
+    setCoordination({ teams: siteContext.stakeholderTeams.filter((item) => item.siteId === activeSiteId), requirements: siteContext.coordinationRequirements.filter((item) => item.siteId === activeSiteId), records: siteContext.pmCoordination.filter((item) => item.siteId === activeSiteId), schedules: storedSchedules.filter((item) => item.SiteId === activeSiteId) });
     const people = siteContext.craftspeople.filter((item) => item.SiteId === activeSiteId);
     setTechnicians(people);
     setFreezes(siteContext.locationFreezes.filter((item) => item.siteId === activeSiteId));
@@ -563,7 +580,7 @@ export default function App() {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
       case "hub":
-        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} allWorkRequests={siteWRs} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? () => openFollowUp() : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} allWorkRequests={siteWRs} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} gate={pmGate} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? () => openFollowUp() : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
         if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} startStep={checklistStart} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
@@ -672,6 +689,7 @@ export default function App() {
               technician={currentTechnicianId}
               now={now}
               freezes={freezes}
+              gate={pmGate}
               viewMode={wrViewMode}
               layout={wrLayout}
               onLayoutChange={changeLayout}

@@ -42,12 +42,13 @@ export function startTechnicianTimer(current: BaseWorkRequest, technician: strin
   return { ...current, timeSessions: [...(current.timeSessions ?? []), { id: crypto.randomUUID(), craftpersonId: technician, craftpersonName: technicianName, startedAt: now.toISOString(), durationMinutes: 0 }], ...(ahead ? { Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now.toISOString(), text: `Started ahead of scheduled slot: ${planned}.` }] } : {}) };
 }
 
-export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save, now }: {
+export function MobileExecutionTools({ wr, technician, technicianName, person, mode = "timer", save, now, confirmStart }: {
   wr: BaseWorkRequest;
   technician: string;
   technicianName: string;
   person?: { Name: string; LastName: string; Trade: string; HourlyRate: number };
   mode?: "timer" | "todo";
+  confirmStart?: () => boolean;
   now: number;
   save: (change: (current: BaseWorkRequest) => BaseWorkRequest, message: string) => Promise<void>;
 }) {
@@ -60,7 +61,7 @@ export function MobileExecutionTools({ wr, technician, technicianName, person, m
     catch (problem) { setError(problem instanceof Error ? problem.message : "Could not save your changes."); return false; }
     finally { setBusy(false); }
   };
-  const start = () => void execute((current) => startTechnicianTimer(current, technician, technicianName), "Started work timer.");
+  const start = () => { if (confirmStart && !confirmStart()) return; void execute((current) => startTechnicianTimer(current, technician, technicianName), "Started work timer."); };
   const stop = () => void execute((current) => {
     const running = (current.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
     if (!running) throw new Error("The running session is no longer available.");

@@ -3,6 +3,7 @@ import {
   BaseWorkRequestSchema, BuildingSchema, FloorSchema, RoomSchema, EquipmentSchema,
   PM_ChecklistStandardSchema, PM_ScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema,
   LocationFreezeSchema, SiteIdSchema, UserAccessProfileSchema,
+  SiteStakeholderTeamSchema, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema,
 } from "@cafm/shared-schema";
 import type {
   BaseWorkRequest, Building, Floor, Room, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId,
@@ -29,6 +30,9 @@ const stateSchema = z.object({
   craftspeople: z.array(z.object({ id: z.string().min(1), Name: z.string().min(1), LastName: z.string(), Trade: z.string(), HourlyRate: z.number().nonnegative(), SiteId: SiteIdSchema }).passthrough()).optional(),
   userAccessProfiles: z.array(UserAccessProfileSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
+  stakeholderTeams: z.array(SiteStakeholderTeamSchema).optional(),
+  coordinationRequirements: z.array(SiteCoordinationRequirementSchema).optional(),
+  pmCoordination: z.array(PmCoordinationRecordSchema).optional(),
   mobileMutationIds: z.array(z.string()).optional(),
   auditCampaigns: z.array(AuditCampaignSchema).optional(),
   auditFindings: z.array(AuditFindingSchema).optional(),
@@ -352,7 +356,7 @@ export async function synchronizePortal(
   for (const item of selected) await tx.objectStore("syncQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   for (const item of selectedPhotos) await tx.objectStore("photoQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: "lastSyncTime", value: syncedAt, updatedAt: syncedAt });
-  await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], userAccessProfiles: state.userAccessProfiles ?? [], locationFreezes: state.locationFreezes ?? [], suppressedPmOccurrences: state.suppressedPmOccurrences ?? [] }), updatedAt: syncedAt });
+  await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], userAccessProfiles: state.userAccessProfiles ?? [], locationFreezes: state.locationFreezes ?? [],   suppressedPmOccurrences: state.suppressedPmOccurrences ?? [], stakeholderTeams: state.stakeholderTeams ?? [], coordinationRequirements: state.coordinationRequirements ?? [], pmCoordination: state.pmCoordination ?? [] }), updatedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: `auditContext:${site}`, value: JSON.stringify({ auditCampaigns: state.auditCampaigns ?? [], auditFindings: state.auditFindings ?? [], auditInspections: state.auditInspections ?? [], auditSettings: state.auditSettings, auditTemplates: state.auditTemplates ?? [], auditAssurance: state.auditAssurance }), updatedAt: syncedAt });
   await tx.done;
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cafm-audit-sync", { detail: site }));

@@ -9,6 +9,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { activeAbsences, addDays, assignmentAbsences, calendarDate, fromWallMinutes, intervalFor, schedulePerson, unassignPerson, wallMinutes } from "@/lib/dispatch";
 import { HourlyTimeline } from "@/components/modules/HourlyTimeline";
+import { gateForWorkRequest } from "@/lib/pm-coordination";
 import { FieldAlerts } from "@/components/modules/FieldAlerts";
 import { QAReportNotifications } from "@/components/modules/QAReportNotifications";
 import type { TimelineSpotlight } from "@/components/modules/HourlyTimeline";
@@ -45,6 +46,14 @@ function SchedulerContent() {
   const { permissions } = useActiveUserPermissions();
   const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
+  const gates = useMemo(() => {
+    const map = new Map<string, { cleared: boolean; label: string }>();
+    for (const wr of data.workRequests) {
+      const gate = gateForWorkRequest(data, wr);
+      if (gate && gate.state !== "None") map.set(wr.WR_ID, { cleared: gate.state === "Cleared", label: gate.state });
+    }
+    return map;
+  }, [data]);
   const [date, setDate] = useState("2026-11-09");
   const [view, setView] = useState<"day" | "week" | "two" | "month">("week");
   const [trades, setTrades] = useState<string[] | null>(null);
@@ -239,7 +248,7 @@ function SchedulerContent() {
   };
   return <div className="space-y-2 p-3 text-xs">
     {!permissions?.canScheduleCraftperson && <p role="status" className="rounded bg-amber-100 p-2">Scheduling is read-only. Ask a site administrator for permission.</p>}
-    <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button><button className={button} aria-pressed={tab === "pms"} onClick={() => changeTab("pms")}>🔁 PMS Default Schedules &amp; Auto-Assign</button></div>
+    <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button><button className={button} aria-pressed={tab === "pms"} onClick={() => changeTab("pms")}>🔁 PMS Default Schedules &amp; Auto-Assign</button><a className={button} href="/work-requests?view=hub#PM">📢 Team Alignment Hub</a></div>
     {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
@@ -275,7 +284,7 @@ function SchedulerContent() {
     </div>
     <p>Shift Hours · <span className="bg-slate-100">Off-Shift</span> · <span className="bg-amber-100">🏖 Vacation</span> · <span className="bg-indigo-100">🎓 Training</span> · <span className="bg-rose-100">🤒 Sick Leave</span> · ❄ Location Freeze</p>
     <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} disputeMap={disputeMap} disputeMode={disputeMode} onDisputeMode={setDisputeMode} onOpen={setOpen} onShow={showRequest} onAssign={(id) => { setQuickPerson(""); setQuickDate(date); setQuickAssign(id); }} />
-      <HourlyTimeline dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
+      <HourlyTimeline gates={gates} dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
     {tab === "pms" && <PmsDefaultSchedules key={activeSiteId} onNotice={setNotice} />}

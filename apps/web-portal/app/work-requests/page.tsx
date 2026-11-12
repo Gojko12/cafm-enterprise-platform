@@ -10,6 +10,7 @@ import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
 import { FastJobModal, type FastJobData } from "@/components/modules/FastJobModal";
 import { PMWorkRequestPopup } from "@/components/modules/PMWorkRequestPopup";
+import { PmAlignmentHub, useCoordinationActionCount } from "@/components/modules/PmAlignmentHub";
 import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
 import { WRDataGrid } from "@/components/modules/WRDataGrid";
@@ -143,6 +144,9 @@ export default function WorkRequestsPage() {
   );
   const [selectedWR, setSelectedWR] = useState<BaseWorkRequest | null>(null);
   const [pmPopupWR, setPmPopupWR] = useState<BaseWorkRequest | null>(null);
+  const [pmView, setPmView] = useState<"queue" | "hub">("queue");
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("view") === "hub") setPmView("hub"); }, []);
+  const coordinationActionCount = useCoordinationActionCount(90);
   const [initialTab, setInitialTab] = useState<SignalTab>();
   const [signalFilter, setSignalFilter] = useState<"unfavourable" | "follow-up" | "parent" | null>(null);
   useEffect(() => { setSignalFilter(null); }, [activeSiteId, requestType]);
@@ -392,8 +396,24 @@ export default function WorkRequestsPage() {
     }
   };
 
+  const pmViewSwitcher = requestType === "PM" ? <div className="flex flex-wrap gap-2" role="group" aria-label="PM view">
+    <button type="button" aria-pressed={pmView === "queue"} onClick={() => setPmView("queue")} className={`rounded px-3 py-2 text-sm ${pmView === "queue" ? "bg-blue-600 text-white" : "border bg-white"}`}>PM Work Requests Queue</button>
+    <button type="button" aria-pressed={pmView === "hub"} onClick={() => setPmView("hub")} className={`rounded px-3 py-2 text-sm ${pmView === "hub" ? "bg-blue-600 text-white" : "border bg-white"}`}>Team Alignment &amp; Newsflash Hub ({coordinationActionCount} needing action)</button>
+  </div> : null;
+  if (requestType === "PM" && pmView === "hub") return (
+    <div className="space-y-6 p-6">
+      {pmViewSwitcher}
+      <PmAlignmentHub onOpenWR={(id) => {
+        const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId);
+        if (!target) return;
+        setInitialTab(undefined); setPmView("queue"); setPmPopupWR(target);
+      }} />
+    </div>
+  );
+
   return (
     <div className="space-y-6 p-6">
+      {pmViewSwitcher}
       <section className="bg-white border rounded-lg">
         <div className="min-h-10 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">

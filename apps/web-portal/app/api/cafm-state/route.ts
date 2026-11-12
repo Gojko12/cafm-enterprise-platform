@@ -10,7 +10,7 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
+import { SiteStakeholderTeamSchema, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 
@@ -165,6 +165,9 @@ const stateSchema = z.object({
   roleDefinitions: z.array(roleDefinitionSchema).optional(),
   craftpersonAbsences: z.array(CraftpersonAbsenceSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
+  stakeholderTeams: z.array(SiteStakeholderTeamSchema).optional(),
+  coordinationRequirements: z.array(SiteCoordinationRequirementSchema).optional(),
+  pmCoordination: z.array(PmCoordinationRecordSchema).optional(),
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),
@@ -257,6 +260,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
   if (state.auditImports?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
   if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
   if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
+  if (state.stakeholderTeams?.some((item) => item.siteId !== site) || state.coordinationRequirements?.some((item) => item.siteId !== site) || state.pmCoordination?.some((item) => item.siteId !== site)) return false;
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;
   if (state.locationFreezes?.some((item) => item.siteId !== site ||
     (item.buildingIds ? item.buildingIds.some((id) => !state.buildings.some((building) => building.bl_id === id)) ||

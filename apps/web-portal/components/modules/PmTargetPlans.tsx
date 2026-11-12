@@ -7,6 +7,7 @@ import type { PMPlanTarget } from "@/lib/pm-plan-targets";
 import { FrequencyPill } from "@/components/common/PmFrequency";
 import { PmCycleCalculator } from "./PmCycleCalculator";
 import { isUnstarted } from "@/lib/pm-suppression";
+import { ScheduleBadges, StakeholderTagEditor } from "./PmStakeholderTagging";
 
 const button = "rounded-lg border bg-white px-3 py-2 text-sm disabled:opacity-40";
 export function PmTargetPlans({ targets, orders, blueprints, requests, selected, onSelect, onAssign, onRemove, onShift, busy, canEdit, error }: {
@@ -17,6 +18,7 @@ export function PmTargetPlans({ targets, orders, blueprints, requests, selected,
 }) {
   const [locations, setLocations] = useState(() => pmTargetType(targets.find((target) => target.id === selected) ?? { targetType: "equipment" }) !== "equipment"), [query, setQuery] = useState("");
   const [shift, setShift] = useState<PM_Schedule>();
+  const [tagging, setTagging] = useState<PM_Schedule>();
   const list = targets.filter((target) => (pmTargetType(target) !== "equipment") === locations && target.label.toLowerCase().includes(query.trim().toLowerCase()));
   const target = list.find((item) => item.id === selected) ?? list[0];
   const assigned = orders.filter((order) => target && pmTargetKey(order) === target.id);
@@ -43,11 +45,11 @@ export function PmTargetPlans({ targets, orders, blueprints, requests, selected,
         return <section key={id} className="space-y-3 rounded-xl border bg-white p-4"><h3 className="font-bold">{group[0].suppressionGroupName}</h3>
           <div className="flex flex-wrap items-center gap-2 text-sm"><span>Cycle Start Date (Visit #1): {formatDateDDMMYYYY(preview.cycleDate)}</span><span className="rounded-full bg-amber-50 px-2 py-1">{highest.frequencyCode} at Visit #{preview.peakSlotIndex} of {preview.visits}</span><button className={button} disabled={!canEdit || busy} onClick={() => startShift(group[0])}>Change Schedule Date / Day</button></div>
           <p className="text-xs text-slate-500">The family shares one phase on this target only. Started and completed work is never rewritten.</p>
-          <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr>{["PMS #", "Blueprint Name", "Locked Freq", "Next Occurrence", "Compiled Steps", "Remove"].map((text) => <th key={text} className="p-2">{text}</th>)}</tr></thead><tbody>{group.map((order) => {
+          <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr>{["PMS #", "Blueprint Name", "Locked Freq", "Next Occurrence", "Alignment & Notices", "Compiled Steps", "Remove"].map((text) => <th key={text} className="p-2">{text}</th>)}</tr></thead><tbody>{group.map((order) => {
             const steps = compileBlueprintChecklist(order.ChecklistCode, blueprints);
             const next = getNextUnsuppressedOccurrence(order, group, new Date().toISOString().slice(0, 10));
             return <tr className="border-t" key={order.ScheduleId}><td className="p-2 font-mono">{order.ScheduleId}</td><td>{blueprints.find((bp) => bp.ChecklistCode === order.ChecklistCode)?.Title}</td><td><FrequencyPill code={order.frequencyCode} /></td>
-              <td className="whitespace-nowrap font-semibold text-blue-800">{next ? formatDateDDMMYYYY(next.date) : "No winning visits"}</td><td><details><summary className="cursor-pointer text-blue-700">{steps.length} steps · preview</summary>{steps.map((step) => <p key={step.StepId} className="max-w-sm text-xs"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title} {step.replacesStepLabel}</p>)}</details></td>
+              <td className="whitespace-nowrap font-semibold text-blue-800">{next ? formatDateDDMMYYYY(next.date) : "No winning visits"}</td><td className="p-2"><div className="space-y-1"><ScheduleBadges order={order} /><button type="button" className="text-xs text-blue-700 underline" onClick={() => setTagging(order)}>Teams &amp; Notices…</button></div></td><td><details><summary className="cursor-pointer text-blue-700">{steps.length} steps · preview</summary>{steps.map((step) => <p key={step.StepId} className="max-w-sm text-xs"><FrequencyPill code={step.originFrequency} inherited={step.isInherited} /> {step.Title} {step.replacesStepLabel}</p>)}</details></td>
               <td><button className={button} disabled={!canEdit || busy} onClick={() => onRemove(order)}>Remove</button></td></tr>;
           })}</tbody></table></div>
           <p className="rounded bg-emerald-50 p-2 text-sm font-semibold">Result: {preview.annualAverage.toFixed(1)} WRs/year · {preview.visits} visits per full cycle — {preview.prevented} duplicates prevented</p>
@@ -57,6 +59,7 @@ export function PmTargetPlans({ targets, orders, blueprints, requests, selected,
       })}
       {!assigned.length && <p>No blueprints assigned to this target.</p>}
     </>}</section>
+    {tagging && <StakeholderTagEditor order={tagging} canEdit={canEdit} onClose={() => setTagging(undefined)} />}
     {shift && <PmCycleCalculator order={shift} group={orders.filter((item) => pmTargetKey(item) === pmTargetKey(shift) && groupKey(item) === groupKey(shift))}
       openCount={requests.filter((wr) => isUnstarted(wr) && orders.some((item) => item.ScheduleId === wr.ScheduleId && item.SiteId === wr.SiteId && pmTargetKey(item) === pmTargetKey(shift) && groupKey(item) === groupKey(shift))).length}
       busy={busy} error={error} onClose={() => setShift(undefined)} onApply={(date, peak, action) => onShift(shift, shift.cycleDate ?? shift.anchorDate!, date, action, peak)} />}
