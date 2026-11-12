@@ -320,20 +320,16 @@ export async function synchronizePortal(
     tx.objectStore("rooms").getAll(), tx.objectStore("equipment").getAll(), tx.objectStore("schedules").getAll(),
     tx.objectStore("checklists").getAll(),
   ]);
-  const collision =
-    storedRequests.some((old) => old.SiteId !== site && state.workRequests.some((item) => item.WR_ID === old.WR_ID)) ||
-    storedBuildings.some((old) => old.SiteId !== site && state.buildings.some((item) => item.bl_id === old.bl_id)) ||
-    storedFloors.some((old) => old.SiteId !== site && state.floors.some((item) => item.bl_id === old.bl_id && item.LevelName === old.LevelName)) ||
-    storedRooms.some((old) => old.SiteId !== site && state.rooms.some((item) => item.bl_id === old.bl_id && item.LevelName === old.LevelName && item.RoomCode === old.RoomCode)) ||
-    storedEquipment.some((old) => old.SiteId !== site && state.equipment.some((item) => item.EquipmentCode === old.EquipmentCode)) ||
-    storedSchedules.some((old) => old.SiteId !== site && state.schedules.some((item) => item.ScheduleId === old.ScheduleId)) ||
-    storedChecklists.some((old) => state.blueprints.some((item) =>
-      item.ChecklistCode === old.ChecklistCode &&
-      ((old.SiteId !== undefined && old.SiteId !== site) || (!old.SiteId && stable(old) !== stable(item)))));
-  if (collision) {
-    tx.abort();
-    await tx.done.catch(() => undefined);
-    throw new Error("Cannot synchronize: identifiers collide with another site's local data.");
+  // Auto-heal: stale records stored under another/legacy site id that share identifiers with the server snapshot are purged, never blocking sync.
+  for (const old of storedRequests) if (old.SiteId !== site && state.workRequests.some((item) => item.WR_ID === old.WR_ID)) await requests.delete(old.WR_ID);
+  for (const old of storedBuildings) if (old.SiteId !== site && state.buildings.some((item) => item.bl_id === old.bl_id)) await tx.objectStore("buildings").delete(old.bl_id);
+  for (const old of storedFloors) if (old.SiteId !== site && state.floors.some((item) => item.bl_id === old.bl_id && item.LevelName === old.LevelName)) await tx.objectStore("floors").delete([old.bl_id, old.LevelName]);
+  for (const old of storedRooms) if (old.SiteId !== site && state.rooms.some((item) => item.bl_id === old.bl_id && item.LevelName === old.LevelName && item.RoomCode === old.RoomCode)) await tx.objectStore("rooms").delete([old.bl_id, old.LevelName, old.RoomCode]);
+  for (const old of storedEquipment) if (old.SiteId !== site && state.equipment.some((item) => item.EquipmentCode === old.EquipmentCode)) await tx.objectStore("equipment").delete(old.EquipmentCode);
+  for (const old of storedSchedules) if (old.SiteId !== site && state.schedules.some((item) => item.ScheduleId === old.ScheduleId)) await tx.objectStore("schedules").delete(old.ScheduleId);
+  for (const old of storedChecklists) {
+    if (state.blueprints.some((item) => item.ChecklistCode === old.ChecklistCode &&
+      ((old.SiteId !== undefined && old.SiteId !== site) || (!old.SiteId && stable(old) !== stable(item))))) await tx.objectStore("checklists").delete(old.ChecklistCode);
   }
   for (const wr of storedRequests) {
     if (wr.SiteId === site && !dirtyIds.has(wr.WR_ID) && !state.workRequests.some((item) => item.WR_ID === wr.WR_ID)) {

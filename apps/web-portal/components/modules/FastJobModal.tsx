@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { X, Camera } from "lucide-react";
 import type { CifmPerson, UrgencyCode } from "@cafm/shared-schema";
-import { SITE_LABELS, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
+import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { computeFjSla } from "@/lib/fj-sla";
@@ -32,8 +32,6 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
   const [selectedLevelName, setSelectedLevelName] = useState("");
   const [selectedRoomCode, setSelectedRoomCode] = useState("");
   const [description, setDescription] = useState("");
-  const [completedOnSpot, setCompletedOnSpot] = useState(false);
-  const [timeSpent, setTimeSpent] = useState(30);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>();
   const { activeSiteId, activePerson } = useSiteContext();
@@ -43,16 +41,13 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
   const [onBehalf, setOnBehalf] = useState(isHelpdesk);
   const [intakeChannel, setIntakeChannel] = useState<(typeof INTAKE_CHANNELS)[number]>(isHelpdesk ? "Phone Call" : "Self-Service");
   const [requestorId, setRequestorId] = useState("");
-  const [query, setQuery] = useState("");
-  const [comboOpen, setComboOpen] = useState(false);
-  const [showAllSites, setShowAllSites] = useState(false);
   const [tradeName, setTradeName] = useState("Electrical");
   const [urgencyCode, setUrgencyCode] = useState<UrgencyCode>("NORMAL");
   const [deferChoice, setDeferChoice] = useState(true);
   const slaConfig = useMemo(() => getSiteSlaConfig(data, activeSiteId), [data, activeSiteId]);
   const [now, setNow] = useState(() => new Date().toISOString());
   useEffect(() => { if (isOpen) setNow(new Date().toISOString()); }, [isOpen, step]);
-  useEffect(() => { setOnBehalf(isHelpdesk); setIntakeChannel(isHelpdesk ? "Phone Call" : "Self-Service"); setRequestorId(""); setQuery(""); }, [isHelpdesk, activePerson]);
+  useEffect(() => { setOnBehalf(isHelpdesk); setIntakeChannel(isHelpdesk ? "Phone Call" : "Self-Service"); setRequestorId(""); }, [isHelpdesk, activePerson]);
   const sla = useMemo(() => computeFjSla(slaConfig, tradeName, urgencyCode, now, { deferToNextBusinessDay: deferChoice }), [slaConfig, tradeName, urgencyCode, now, deferChoice]);
   const tradeOptions = Object.keys(slaConfig.matrix);
   const buildings = data.buildings.filter((item) => item.SiteId === activeSiteId);
@@ -74,14 +69,8 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
       stationedSiteId: activeSiteId, stationedBuildingId: "", stationedFloorId: "", stationedRoomId: "", isFmStaff: true };
   }, [directory, profile, activePerson, activeSiteId]);
   const requestor = onBehalf ? directory.find((item) => item.id === requestorId) ?? null : myself;
-  const matches = useMemo(() => {
-    const text = query.trim().toLowerCase();
-    return directory
-      .filter((item) => (showAllSites || item.stationedSiteId === activeSiteId) &&
-        (!text || [item.displayName, item.departmentTeam, item.stationedRoomId, item.stationedBuildingId, item.email].some((value) => value.toLowerCase().includes(text))))
-      .sort((a, b) => Number(b.stationedSiteId === activeSiteId) - Number(a.stationedSiteId === activeSiteId) || a.displayName.localeCompare(b.displayName))
-      .slice(0, 40);
-  }, [directory, query, showAllSites, activeSiteId]);
+  const options = useMemo(() => [...directory]
+    .sort((a, b) => Number(b.stationedSiteId === activeSiteId) - Number(a.stationedSiteId === activeSiteId) || a.displayName.localeCompare(b.displayName)), [directory, activeSiteId]);
 
   useEffect(() => {
     if (!isOpen || !initialLocation) return;
@@ -98,11 +87,9 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
     setSelectedLevelName(person.stationedFloorId);
     setSelectedRoomCode(person.stationedRoomId);
   };
-  const pickRequestor = (person: CifmPerson) => {
-    setRequestorId(person.id);
-    setQuery(person.displayName);
-    setComboOpen(false);
-    if (!selectedBuildingId && person.stationedSiteId === activeSiteId) {
+  const pickRequestor = (person: CifmPerson | undefined) => {
+    setRequestorId(person?.id ?? "");
+    if (person && !selectedBuildingId && person.stationedSiteId === activeSiteId) {
       setSelectedBuildingId(person.stationedBuildingId);
       setSelectedLevelName(person.stationedFloorId);
     }
@@ -137,13 +124,9 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
     setSelectedLevelName("");
     setSelectedRoomCode("");
     setDescription("");
-    setCompletedOnSpot(false);
-    setTimeSpent(30);
     setPhotoFile(null);
     setPhotoPreview(undefined);
     setRequestorId("");
-    setQuery("");
-    setShowAllSites(false);
     setUrgencyCode("NORMAL");
     setDeferChoice(true);
   };
@@ -159,7 +142,6 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
     }
     if (!description || selectedEquipmentCodes.length > 1 || !selectedBuildingId || !selectedLevelName || !selectedRoomCode) return;
     if (onBehalf && !requestor) { alert("Select the CIFM employee who reported the problem."); return; }
-    const spot = completedOnSpot && !isHelpdesk;
     onSubmit?.({
       equipmentCode: selectedEquipment,
       bl_id: selectedBuildingId,
@@ -169,8 +151,7 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
       photoUrl: photoPreview,
       photoName: photoFile?.name,
       photoType: photoFile?.type,
-      timeSpentMinutes: spot ? Math.max(1, timeSpent) : 0,
-      completedOnSpot: spot,
+      timeSpentMinutes: 0,
       createdAt: now,
       tradeName,
       urgencyCode,
@@ -189,17 +170,15 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
   const submitDisabled = step === "select-location"
     ? selectedEquipmentCodes.length > 1 || !selectedBuildingId || !selectedLevelName || !selectedRoomCode
     : !description || selectedEquipmentCodes.length > 1 || (onBehalf && !requestor);
-  const spotMode = completedOnSpot && !isHelpdesk;
-
   return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white shadow-xl max-w-2xl w-full max-h-[86vh] flex flex-col overflow-hidden rounded-xl">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-          <h2 className="text-lg font-bold text-gray-900">Create Fast Job</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/50">
+      <div className="w-full max-w-xl max-h-[84vh] flex flex-col bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-gray-200">
+          <h2 className="text-base font-bold text-gray-900">Create Fast Job</h2>
           <button onClick={close} aria-label="Close" className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
 
-        <div className="px-5 py-3.5 overflow-y-auto space-y-3 flex-1">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2.5">
           {step === "select-location" ? (
             <div className="space-y-3">
               <LocationEquipmentPickerGroup
@@ -249,29 +228,15 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
                 </div>
               </div>
 
-              {onBehalf && <div className="relative">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="cifm-requestor" className="text-xs font-medium">CIFM Employee (requestor) *</label>
-                  <label className="inline-flex items-center gap-1 text-[11px] text-slate-600"><input type="checkbox" checked={showAllSites} onChange={(e) => setShowAllSites(e.target.checked)} /> Show all ESA sites</label>
-                </div>
-                <input id="cifm-requestor" value={query} autoComplete="off" onFocus={() => setComboOpen(true)}
-                  onChange={(e) => { setQuery(e.target.value); setComboOpen(true); if (requestorId) setRequestorId(""); }}
-                  placeholder="Search & select CIFM employee by name, team, room, or email…" className={inputClass} role="combobox" aria-expanded={comboOpen} aria-controls="cifm-requestor-list" />
-                {comboOpen && <ul id="cifm-requestor-list" role="listbox" className="absolute z-10 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border bg-white text-xs shadow-lg">
-                  {matches.map((person) => <li key={person.id} role="option" aria-selected={person.id === requestorId}>
-                    <button type="button" onClick={() => pickRequestor(person)} className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-blue-50">
-                      <span className="truncate"><strong>{person.displayName}</strong> · {person.departmentTeam} · 📍 {person.stationedBuildingId} / {person.stationedRoomId}</span>
-                      <span className={`shrink-0 rounded px-1.5 text-[10px] ${person.isFmStaff ? "bg-blue-100 text-blue-800" : "bg-slate-100 text-slate-600"}`}>{person.isFmStaff ? "FM" : "Non-FM"}</span>
-                    </button></li>)}
-                  {!matches.length && <li className="px-2.5 py-2 text-slate-500">No matching employees{showAllSites ? "" : " on this site — try “Show all ESA sites”"}.</li>}
-                </ul>}
-              </div>}
+              {onBehalf && <label className="block text-xs font-medium">Requestor *
+                <select value={requestorId} onChange={(e) => pickRequestor(options.find((item) => item.id === e.target.value))} className={inputClass}>
+                  <option value="">Select requestor from CIFM directory…</option>
+                  {options.map((person) => <option key={person.id} value={person.id}>{person.displayName} · {person.departmentTeam} · {person.stationedRoomId || "no room"}{person.stationedSiteId === activeSiteId ? "" : ` · ${person.stationedSiteId}`}</option>)}
+                </select></label>}
 
-              {requestor && <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700" aria-label="CIFM employee details">
-                <p>🏢 Stationed: <strong>{SITE_LABELS[requestor.stationedSiteId as keyof typeof SITE_LABELS] ?? requestor.stationedSiteId} · {requestor.stationedBuildingId} / {requestor.stationedFloorId} / Room {requestor.stationedRoomId}</strong> | 👥 Team: {requestor.departmentTeam || "—"}</p>
-                <p className="mt-0.5">✉ {requestor.email || "—"} | 📞 {requestor.phone || "—"}</p>
-                {stationedHere(requestor) && <button type="button" onClick={() => applyStationedRoom(requestor)} className="mt-1.5 rounded border border-blue-300 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50">
-                  📍 Use {firstName(requestor.displayName)}&apos;s Room ({requestor.stationedRoomId})</button>}
+              {requestor && <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-700 truncate" aria-label="CIFM employee details">
+                📍 {requestor.stationedRoomId || "—"} · 👥 {requestor.departmentTeam || "—"} · ✉ {requestor.email || "—"} · 📞 {requestor.phone || "—"}
+                {stationedHere(requestor) && <button type="button" onClick={() => applyStationedRoom(requestor)} className="ml-2 font-semibold text-blue-700 hover:underline">Use room</button>}
               </div>}
 
               <div className="grid gap-2 sm:grid-cols-2">
@@ -302,7 +267,7 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
               <div className="flex flex-wrap items-center gap-3">
                 {!photoPreview ? (
                   <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-blue-500 hover:bg-blue-50">
-                    <Camera size={16} className="text-gray-400" /> Attach photo
+                    <Camera size={16} className="text-gray-400" /> 📷 Attach Photo (Optional)
                     <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
                   </label>
                 ) : (
@@ -311,24 +276,18 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
                     <button type="button" onClick={() => { setPhotoFile(null); setPhotoPreview(undefined); }} className="text-xs text-red-600 hover:text-red-800">Remove</button>
                   </div>
                 )}
-                {!isHelpdesk && <label className="inline-flex items-center gap-1.5 text-xs">
-                  <input type="checkbox" checked={completedOnSpot} onChange={(e) => setCompletedOnSpot(e.target.checked)} /> Work already completed on the spot (log time &amp; mark 78%)
-                </label>}
-                {spotMode && <label className="inline-flex items-center gap-1.5 text-xs">Minutes spent
-                  <input type="number" min={1} max={480} value={timeSpent} onChange={(e) => setTimeSpent(Math.max(1, Math.min(480, Number(e.target.value) || 1)))} className="w-20 rounded border border-gray-300 px-2 py-1 text-sm" />
-                </label>}
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-700">{selectedEquipment || selectedRoomCode || "Location"} · Status: 50% Issued</span>
               </div>
-              <p className="text-xs text-slate-600">{spotMode ? `Will be logged as completed: ${timeSpent} min · 78% Technically Completed.` : "Will be dispatched as an open Fast Job at 50% Issued."}</p>
             </div>
           )}
         </div>
 
-        <div className="px-5 py-3 border-t bg-slate-50 flex justify-between items-center">
+        <div className="shrink-0 px-4 py-2.5 border-t bg-slate-50 flex justify-between items-center">
           <button onClick={() => { if (step === "create-job") setStep("select-location"); else close(); }} className="px-4 py-1.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 text-sm">
             {step === "create-job" ? "Back" : "Cancel"}
           </button>
           <button onClick={handleSubmit} disabled={submitDisabled} className="px-5 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm transition-colors">
-            {step === "select-location" ? "Next →" : spotMode ? "Submit & Mark Complete (78%)" : "Submit FJ (50% Issued)"}
+            {step === "select-location" ? "Next →" : "Create Fast Job (50%)"}
           </button>
         </div>
       </div>

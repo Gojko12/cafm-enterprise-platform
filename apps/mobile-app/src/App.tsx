@@ -75,6 +75,21 @@ function findProfile(profiles: UserAccessProfile[], person: Technician | undefin
   return first.length === 1 ? first[0] : undefined;
 }
 
+// Legacy site ids saved by older versions are moved to the official ones so saved selections never point at a dead site.
+function migrateLegacyLocalStorage() {
+  try {
+    for (const [from, to] of [["SITE-01", "02-ESOC"], ["SITE-02", "01-ESTEC"], ["SITE-03", "03-HQ"], ["SITE-04", "04-ESRIN"], ["SITE-05", "05-ESAC"]]) {
+      for (const prefix of ["cafm-technician:", "cafm-active-timers:"]) {
+        const old = localStorage.getItem(`${prefix}${from}`);
+        if (old === null) continue;
+        if (localStorage.getItem(`${prefix}${to}`) === null) localStorage.setItem(`${prefix}${to}`, old);
+        localStorage.removeItem(`${prefix}${from}`);
+      }
+    }
+  } catch { /* storage unavailable */ }
+}
+if (typeof window !== "undefined") migrateLegacyLocalStorage();
+
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
   const [activeSiteId, setActiveSiteId] = useState<SiteId>("02-ESOC");
@@ -210,7 +225,8 @@ export default function App() {
     const technician = people.find((item) => item.id === currentTechnicianId);
     if (!technician && people.length) {
       const saved = localStorage.getItem(`cafm-technician:${activeSiteId}`);
-      const preferred = people.find((item) => item.id === saved) ?? people.find((item) => normalizePerson(`${item.Name} ${item.LastName}`) === "gregor gojkosek") ?? people[0];
+      const hasOpenAssigned = (person: { id: string }) => siteRequests.some((wr) => wr.Percentage === 50 && (wr.AssignedUserIds?.includes(person.id) || wr.AssignedCraftpersonIds.includes(person.id)));
+      const preferred = people.find((item) => item.id === saved) ?? people.find(hasOpenAssigned) ?? people.find((item) => normalizePerson(`${item.Name} ${item.LastName}`) === "gregor gojkosek") ?? people[0];
       setCurrentTechnicianId(preferred.id);
       return;
     }

@@ -180,7 +180,19 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       setReady(true);
       } catch (error) {
         console.error("Could not load demo data", error);
-        if (active) setSyncError("Could not load saved demo data. The saved data was not overwritten.");
+        // Corrupt or stale local cache must never block entry: drop it and continue with the seed (server state is re-pulled on the next sync).
+        try { [storageKey, baseKey, pendingKey].forEach((key) => localStorage.removeItem(key)); } catch { /* storage unavailable */ }
+        if (active) {
+          const fallback = scopeData(seedData(), site);
+          revision.current = 0;
+          acknowledged.current = "";
+          knownRevision.current = false;
+          current.current = fallback;
+          setData(fallback);
+          initialized.current = true;
+          setSyncError("Local cache was corrupt and has been reset. Reconnect to reload server data.");
+          setReady(true);
+        }
       }
     }
     void initialize();
@@ -216,19 +228,20 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         if (!connected.current) {
           const remote = await stateRequest(site, personRef.current, "GET");
           const pendingText = localStorage.getItem(pendingKey);
-          const pending: unknown = pendingText ? JSON.parse(pendingText) : null;
+          let pending: unknown = null;
+          try { pending = pendingText ? JSON.parse(pendingText) : null; } catch { pending = null; }
           if (pending !== null && (!pending || typeof pending !== "object" || !("revision" in pending) ||
               typeof pending.revision !== "number" || !Number.isInteger(pending.revision) || pending.revision < 0)) {
-            blocked.current = true;
-            throw new Error("Stored pending synchronization data has an invalid format.");
+            localStorage.removeItem(pendingKey);
+            pending = null;
           }
-          if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
-            blocked.current = true;
-            throw new Error("The server changed while local edits were pending. Local edits were retained; resolve the conflict before syncing.");
-          }
-          if (offlineEdits.current && (!knownRevision.current || revision.current !== remote.revision)) {
-            blocked.current = true;
-            throw new Error("Cannot safely sync offline edits because the server baseline is unavailable or changed. Local edits were retained.");
+          const diverged = (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) ||
+            (offlineEdits.current && (!knownRevision.current || revision.current !== remote.revision));
+          if (diverged && remote.state && typeof remote.state === "object") {
+            // Auto-heal: keep local edits, merge newer server records, and let the next push publish the result.
+            const merged = mergeRemoteState(current.current, remote.state);
+            current.current = merged;
+            if (active) setData(merged);
           }
           revision.current = remote.revision;
           knownRevision.current = true;
@@ -288,7 +301,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       } catch (error) {
         console.error("CAFM state sync failed", error);
         const message = error instanceof Error ? error.message : "State sync failed.";
-        if (message.includes("changed")) blocked.current = true;
+        if (message.includes("changed") && connected.current) blocked.current = true;
         if (active) setSyncError(message);
       } finally {
         busy.current = false;
