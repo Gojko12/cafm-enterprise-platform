@@ -123,6 +123,32 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
   return parsed.data;
 }
 
+function withoutSteps(wr: unknown): string {
+  if (!wr || typeof wr !== "object") return stable(wr);
+  const { ChecklistSteps, ChecklistInstances, UpdatedAt, updatedAt, StepAuditLogs, ...rest } = wr as Record<string, unknown>;
+  void ChecklistSteps; void ChecklistInstances; void UpdatedAt; void updatedAt; void StepAuditLogs;
+  return stable(rest);
+}
+
+// The server only appended checklist steps (e.g. an enriched blueprint); nothing else (status, assignee…) changed.
+function onlyAddedSteps(server: BaseWorkRequest | undefined, base: BaseWorkRequest | undefined) {
+  if (!server || !base) return false;
+  const serverSteps = server.ChecklistSteps ?? [], baseSteps = base.ChecklistSteps ?? [];
+  if (serverSteps.length <= baseSteps.length) return false;
+  if (!baseSteps.every((step) => serverSteps.some((item) => item.StepId === step.StepId))) return false;
+  const stripResults = (wr: BaseWorkRequest) => withoutSteps(wr);
+  return stripResults(server) === stripResults(base);
+}
+
+function mergeAddedSteps(local: BaseWorkRequest, server: BaseWorkRequest): BaseWorkRequest {
+  const localSteps = local.ChecklistSteps ?? [];
+  const known = new Set(localSteps.map((step) => step.StepId));
+  const addedSteps = (server.ChecklistSteps ?? []).filter((step) => !known.has(step.StepId));
+  const knownInstances = new Set((local.ChecklistInstances ?? []).map((item) => item.StepInstanceId));
+  const addedInstances = (server.ChecklistInstances ?? []).filter((item) => !knownInstances.has(item.StepInstanceId));
+  return { ...local, ChecklistSteps: [...localSteps, ...addedSteps], ChecklistInstances: [...(local.ChecklistInstances ?? []), ...addedInstances] };
+}
+
 function replaceRequest(state: State, wr: BaseWorkRequest) {
   const index = state.workRequests.findIndex((item) => item.WR_ID === wr.WR_ID);
   if (index < 0) state.workRequests.push(wr);
@@ -188,14 +214,15 @@ export async function synchronizePortal(
     const index = updates.findIndex((entry) => {
       if (applied.has(entry.QueueId)) return true;
       const current = state.workRequests.find((wr) => wr.WR_ID === entry.Payload.WR_ID);
-      return entry.BaseWorkRequest !== undefined && stable(current ?? null) === stable(entry.BaseWorkRequest);
+      return entry.BaseWorkRequest !== undefined && (stable(current ?? null) === stable(entry.BaseWorkRequest) || onlyAddedSteps(current, entry.BaseWorkRequest as BaseWorkRequest));
     });
     if (index < 0) throw new Error(`Work request ${String(updates[0].Payload.WR_ID)} changed on the portal; its local changes were retained.`);
     const [item] = updates.splice(index, 1);
     if (applied.has(item.QueueId)) continue;
     const parsed = workRequestSchema.safeParse(item.Payload);
     if (!parsed.success || parsed.data.SiteId !== site) throw new Error(`Invalid queued work request ${item.QueueId}.`);
-    replaceRequest(state, parsed.data);
+    const serverCurrent = state.workRequests.find((wr) => wr.WR_ID === parsed.data.WR_ID);
+    replaceRequest(state, serverCurrent && onlyAddedSteps(serverCurrent, item.BaseWorkRequest as BaseWorkRequest) ? mergeAddedSteps(parsed.data, serverCurrent) : parsed.data);
     applied.add(item.QueueId);
   }
 

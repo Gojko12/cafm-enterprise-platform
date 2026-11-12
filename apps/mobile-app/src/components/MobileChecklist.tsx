@@ -28,6 +28,27 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
   const [reading, setReading] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
+  const [highlight, setHighlight] = useState(false);
+  const wrId = wr.WR_ID;
+  const stepTop = useRef<HTMLDivElement>(null);
+  const completeRef = useRef<HTMLDivElement>(null);
+  const firstRender = useRef(true);
+  // Reset only when the active work request changes; saves and background syncs never move the step.
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    setIndex(Math.max(0, Math.min(startStep, Math.max(0, steps.length - 1))));
+  }, [wrId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setIndex((i) => Math.max(0, Math.min(i, Math.max(0, steps.length - 1)))); }, [steps.length]);
+  const goTo = (i: number) => {
+    setIndex(Math.max(0, Math.min(i, Math.max(0, steps.length - 1))));
+    setAll(false);
+    window.setTimeout(() => stepTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
+  };
+  const finishSteps = () => {
+    completeRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlight(true);
+    window.setTimeout(() => setHighlight(false), 1800);
+  };
   const review = wr.Percentage >= 78;
   const readOnly = review && !(wr.Percentage === 78 && canAmend && unlocked);
   const editable = !readOnly && (review || timerRunning);
@@ -94,19 +115,20 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
       <div className="space-y-2 rounded bg-slate-50 p-3">{result && !result.passed && !todoMode && <p className="text-rose-700">{step.RequiresCommentOnFailure !== false ? "Comment required" : "Comment optional"} · {step.RequiresPhotoOnFailure !== false ? "Photo required" : "Photo optional"}</p>}<label className="block text-sm">Technician Step Comment<textarea aria-label="Technician comment" className="block w-full rounded border p-2" value={result?.comment ?? ""} onChange={(e) => change(step, { comment: e.target.value })} /></label>{todoMode && <p className="text-xs text-slate-600">Add before and after photos as needed.</p>}<div className="flex flex-wrap items-center gap-2"><PhotoCapture className="w-full max-w-sm" disabled={reading} onPhotos={(urls) => change(step, { photoPaths: [...(latest.current.find((item) => item.stepId === step.StepId)?.photoPaths ?? []), ...urls] })} />{followUp && <button type="button" className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50" onClick={() => leaveSafely(() => followUp({ id: step.StepId, label: step.StepTitle }), true)}>+ Follow-up FJ</button>}</div><PhotoThumbs photos={result?.photoPaths ?? []} alt="Step photo" onRemove={(i) => change(step, { photoPaths: (latest.current.find((item) => item.stepId === step.StepId)?.photoPaths ?? []).filter((_, n) => n !== i) })} /></div>
     </fieldset></article>;
   };
-  return <div className="space-y-3 p-4 pb-24"><div className="sticky top-0 z-30 space-y-2 rounded border bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><button disabled={leaving} className="text-blue-700" onClick={() => leaveSafely(exit)}>← Exit to WR Overview (Progress Auto-Saved)</button><button disabled={leaving} className="rounded-full bg-emerald-100 px-2 py-1 text-sm text-emerald-800" onClick={() => leaveSafely(exit)}>⏱ {timerLabel}</button></div><div className="flex gap-2"><button aria-pressed={!all} onClick={() => setAll(false)}>Step-by-Step Mode</button><button aria-pressed={all} onClick={() => setAll(true)}>All Steps List Mode</button></div><div className="flex flex-wrap gap-1">{steps.map((step, i) => <button key={step.StepId} className={`rounded-full border px-2 py-1 text-xs ${!all && i === index ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => { setIndex(i); setAll(false); }}>Step {i + 1}{values.some((item) => item.stepId === step.StepId && item.value !== "") ? " ✓" : ""}</button>)}</div><p className="text-xs">{reading ? "Loading photo…" : saving ? "Saving…" : error ? "Progress not saved" : JSON.stringify(values) !== saved.current ? "Changes pending…" : "Progress saved locally"}</p></div>
+  return <div className="space-y-3 p-4 pb-24"><div className="sticky top-0 z-30 space-y-2 rounded border bg-white p-3"><div className="flex flex-wrap items-center justify-between gap-2"><button disabled={leaving} className="text-blue-700" onClick={() => leaveSafely(exit)}>← Exit to WR Overview (Progress Auto-Saved)</button><button disabled={leaving} className="rounded-full bg-emerald-100 px-2 py-1 text-sm text-emerald-800" onClick={() => leaveSafely(exit)}>⏱ {timerLabel}</button></div><div className="grid grid-cols-2 overflow-hidden rounded-lg border border-blue-600"><button type="button" aria-pressed={!all} className={`px-3 py-2 text-sm font-semibold ${!all ? "bg-blue-600 text-white" : "bg-white text-blue-700"}`} onClick={() => setAll(false)}>Step-by-Step Mode</button><button type="button" aria-pressed={all} className={`border-l border-blue-600 px-3 py-2 text-sm font-semibold ${all ? "bg-blue-600 text-white" : "bg-white text-blue-700"}`} onClick={() => setAll(true)}>All Steps List Mode</button></div><div className="flex flex-wrap gap-1">{steps.map((step, i) => <button type="button" key={step.StepId} className={`rounded-full border px-3 py-1 text-xs font-medium ${!all && i === index ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"}`} onClick={() => goTo(i)}>Step {i + 1}{values.some((item) => item.stepId === step.StepId && item.value !== "") ? " ✓" : ""}</button>)}</div><p className="text-xs">{reading ? "Loading photo…" : saving ? "Saving…" : error ? "Progress not saved" : JSON.stringify(values) !== saved.current ? "Changes pending…" : "Progress saved locally"}</p></div>
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}
     {review && <div className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900"><span>{readOnly ? "Completed checklist · read-only review" : "Amending completed answers · changes are audited"}</span>{wr.Percentage === 78 && canAmend && readOnly && <button type="button" className="text-xs underline" onClick={() => setUnlocked(true)}>Unlock to amend answers</button>}</div>}
     {!timerRunning && !review && <p role="alert" className="rounded bg-amber-50 p-2 text-amber-900">Your timer is no longer running. Return to the work request and start timing to continue.</p>}
     {!steps.length && todoMode && <div className="rounded border bg-white p-4"><p>No checklist steps have been defined by the Team Leader for this Work Request.</p><button disabled={leaving} className="mt-2 text-blue-700 underline" onClick={() => leaveSafely(exit)}>← Exit to WR Overview</button></div>}
     <fieldset disabled={leaving} className="space-y-3">
+      <div ref={stepTop} className="scroll-mt-40" />
       <PmScope wr={wr} />
       {all ? [...new Set(steps.map((step) => step.originFrequency))].map((code) => {
         const group = steps.filter((step) => step.originFrequency === code);
         return <section key={code ?? "other"} className="space-y-2">{code && <h2 className="rounded bg-slate-100 p-2 font-semibold"><FrequencyPill code={code} /> {group[0].isInherited ? "Included routine checks (inherited)" : "Additional maintenance checks"} · {group.length} steps</h2>}{group.map(renderStep)}</section>;
       }) : steps[index] ? renderStep(steps[index]) : !todoMode && <p>No checklist steps available.</p>}
-      {!all && steps.length > 0 && <div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex(index - 1)}>← Previous</button><button disabled={index >= steps.length - 1} onClick={() => setIndex(index + 1)}>Next →</button></div>}
-      {complete && !review && timerRunning && steps.length > 0 && (all || index === steps.length - 1) && <button className="rounded bg-blue-800 px-3 py-2 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}
+      {!all && steps.length > 0 && <div className="flex items-center gap-2 rounded-xl border bg-white p-2"><button type="button" disabled={index === 0} className={`rounded-lg px-4 py-2 text-sm font-semibold ${index === 0 ? "bg-slate-100 text-slate-400" : "border border-slate-300 bg-white text-slate-800"}`} onClick={() => goTo(index - 1)}>← Previous</button><div className="flex-1 text-center text-xs text-slate-600"><p className="font-semibold text-slate-800">Step {index + 1} of {steps.length}</p><p>{steps.filter((s) => values.some((v) => v.stepId === s.StepId && v.value !== "")).length}/{steps.length} answered</p></div>{index < steps.length - 1 ? <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white" onClick={() => goTo(index + 1)}>Next Step →</button> : <button type="button" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" onClick={finishSteps}>✓ Finish Steps ↓</button>}</div>}
+      <div ref={completeRef} className={`rounded-xl transition-shadow ${highlight ? "ring-4 ring-emerald-400" : ""}`}>{complete && !review && timerRunning && steps.length > 0 && (all || index === steps.length - 1) && <button type="button" className="w-full rounded-lg bg-blue-800 px-3 py-3 text-white" onClick={() => leaveSafely(complete)}>✓ Set Technically Completed (78%)</button>}</div>
     </fieldset>
   </div>;
 }
