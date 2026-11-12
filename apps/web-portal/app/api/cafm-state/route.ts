@@ -168,6 +168,8 @@ const stateSchema = z.object({
   stakeholderTeams: z.array(SiteStakeholderTeamSchema).optional(),
   coordinationRequirements: z.array(SiteCoordinationRequirementSchema).optional(),
   pmCoordination: z.array(PmCoordinationRecordSchema).optional(),
+  ljStageMatrix: z.record(z.string().regex(/^\d{1,3}:[A-Z_]+$/), z.enum(["act", "notify", "none", "P", "O"])).optional(),
+  featurePermissionOverrides: z.record(z.string().regex(/^[A-Za-z_]+\|[A-Za-z]+\.[A-Za-z]+$/), z.boolean()).optional(),
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),

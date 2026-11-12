@@ -19,7 +19,9 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { useCafmStore, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS } from "@/lib/cafm-store";
+import { useSearchParams } from "next/navigation";
+import { useCafmStore, useActiveUserPermissions, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS } from "@/lib/cafm-store";
+import { FeaturePermissionMatrix, LJRoleActionMatrix } from "./RBACMatrices";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { StakeholderCatalogSection } from "@/components/modules/StakeholderCatalog";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
@@ -62,28 +64,30 @@ const LJ_ROLE_ACTIONS: Record<LJRole, string[]> = {
   ],
 };
 
-const LJ_STATUSES = [
-  { percentage: 0, name: "RFQ - New Request" },
-  { percentage: 10, name: "RFQ - From Fast Job" },
-  { percentage: 20, name: "RFQ - Quotation Prep" },
-  { percentage: 25, name: "RFQ - Pending Acceptance" },
-  { percentage: 30, name: "RFW - Pending Approval" },
-  { percentage: 32, name: "RFW - Issued" },
-  { percentage: 40, name: "RFW - Commitment" },
-  { percentage: 50, name: "RFW - Execution" },
-  { percentage: 78, name: "78% - Work Ready" },
-  { percentage: 79, name: "79% - Pre-SAT" },
-  { percentage: 80, name: "80% - SAT Invite" },
-  { percentage: 94, name: "94% - All Acceptances" },
+type ConsoleTab =  "users" | "features" | "stages" | "trade-managers" | "teams";
+const CONSOLE_TABS: { id: ConsoleTab; label: string }[] = [
+  { id: "users", label: "1. Users & Site Access" },
+  { id: "features", label: "2. Feature Permissions" },
+  { id: "stages", label: "3. Long Job Stage Matrix (0%–100%)" },
+  { id: "trade-managers", label: "4. Trade Managers" },
+  { id: "teams", label: "5. Teams & Notices (Newsflash)" },
 ];
 
 export function RBACDashboard() {
   const { data, setData } = useCafmStore();
   const { activeSiteId } = useSiteContext();
-  const [activeTab, setActiveTab] = useState<
-    "users" | "roleMatrix" | "moduleRbac"
-  >("users");
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTabState] = useState<ConsoleTab>(
+    CONSOLE_TABS.some((tab) => tab.id === requestedTab) ? (requestedTab as ConsoleTab) : "users",
+  );
+  const setActiveTab = (tab: ConsoleTab) => {
+    setActiveTabState(tab);
+    window.history.replaceState(null, "", `?tab=${tab}`);
+  };
   const users = data.users;
+  const { profile } = useActiveUserPermissions();
+  const canEditMatrices = !!(profile?.isSuperAdmin || profile?.isSiteAdmin);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<UserAccess | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
@@ -109,116 +113,101 @@ export function RBACDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab("users")}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === "users"
-              ? "text-blue-600 border-b-2 border-blue-600"
-              : "text-gray-600 hover:text-gray-900"
-          }`}
-        >
-          <Users className="inline w-5 h-5 mr-2" />
-          User & Site Access Monitor
-        </button>
-        <button
-          onClick={() => setActiveTab("roleMatrix")}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === "roleMatrix"
-              ? "text-blue-600 border-b-2 border-blue-600"
-              : "text-gray-600 hover:text-gray-900"
-          }`}
-        >
-          <Grid3x3 className="inline w-5 h-5 mr-2" />
-          LJ 0%-100% Role Action Matrix
-        </button>
-        <button
-          onClick={() => setActiveTab("moduleRbac")}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === "moduleRbac"
-              ? "text-blue-600 border-b-2 border-blue-600"
-              : "text-gray-600 hover:text-gray-900"
-          }`}
-        >
-          <Lock className="inline w-5 h-5 mr-2" />
-          Module & Field RBAC Matrix
-        </button>
+      <div className="flex flex-wrap gap-2 border-b border-gray-200">
+        {CONSOLE_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === tab.id
+                ? "text-blue-600 border-b-2 border-blue-600"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Tab Content */}
-      <section className="bg-white border rounded-lg p-4 space-y-4">
-        <h2 className="text-lg font-semibold">Trade-Role Assignments — {activeSiteId}</h2>
-        <p className="text-sm text-gray-600">Select the default personnel for each trade and role. Changes are saved automatically.</p>
-        <div className="border rounded p-3">
-          <h3 className="font-semibold mb-2">Site-wide roles</h3>
-          <div className="grid md:grid-cols-2 gap-3">
-            {SITE_ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm">
-              {ROLE_LABELS[role]} ({role})
-              <select className="block w-full border rounded p-2"
-                value={data.siteRoleMappings.find((item) => item.SiteId === activeSiteId)?.assignments[role] ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setData((current) => {
-                    const existing = current.siteRoleMappings.find((item) => item.SiteId === activeSiteId);
-                    return { ...current, siteRoleMappings: [...current.siteRoleMappings.filter((item) => item.SiteId !== activeSiteId),
-                      { SiteId: activeSiteId, assignments: { ...existing?.assignments, [role]: value } }] };
-                  });
-                }}>
-                <option value="">Unassigned</option>
-                {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
-                  (user.LJRoles.includes(role) || user.SystemRole === role)).map((user) =>
-                  <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
-              </select>
-            </label>)}
-          </div>
+      {activeTab === "users" && <>
+      <UserAccessMonitor
+        users={users}
+        onAddUser={handleAddUser}
+        onDeleteUser={handleDeleteUser}
+        expandedUser={expandedUser}
+        setExpandedUser={setExpandedUser}
+      />
+      <section className="bg-white border rounded-lg p-4 space-y-3">
+        <h2 className="text-lg font-semibold">Site Administrator & Site-wide Role Assignments — {activeSiteId}</h2>
+        <p className="text-sm text-gray-600">Choose who holds each site-wide role. Changes are saved automatically.</p>
+        <div className="grid md:grid-cols-2 gap-3">
+          {SITE_ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm border rounded p-3 bg-gray-50">
+            {ROLE_LABELS[role]} ({role})
+            <select className="block w-full border rounded p-2 bg-white"
+              value={data.siteRoleMappings.find((item) => item.SiteId === activeSiteId)?.assignments[role] ?? ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                setData((current) => {
+                  const existing = current.siteRoleMappings.find((item) => item.SiteId === activeSiteId);
+                  return { ...current, siteRoleMappings: [...current.siteRoleMappings.filter((item) => item.SiteId !== activeSiteId),
+                    { SiteId: activeSiteId, assignments: { ...existing?.assignments, [role]: value } }] };
+                });
+              }}>
+              <option value="">Unassigned</option>
+              {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
+                (user.LJRoles.includes(role) || user.SystemRole === role)).map((user) =>
+                <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+            </select>
+          </label>)}
         </div>
-        {CLASSICAL_TRADES.map((trade) => {
-          const mapping = data.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
-          return <div key={trade} className="border rounded p-3">
-            <h3 className="font-semibold mb-2">{trade}</h3>
-            <div className="grid md:grid-cols-2 gap-3">
-              {TRADE_ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm">
-                {ROLE_LABELS[role]} ({role})
-                <select className="block w-full border rounded p-2" value={mapping?.assignments[role] ?? ""}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setData((current) => {
-                      const existing = current.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
-                      return { ...current, tradeRoleMappings: [...current.tradeRoleMappings.filter((item) => !(item.SiteId === activeSiteId && item.Trade === trade)),
-                        { SiteId: activeSiteId, Trade: trade, assignments: { ...existing?.assignments, [role]: value } }] };
-                    });
-                  }}>
-                  <option value="">Unassigned</option>
-                  {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
-                    (user.LJRoles.includes(role) || user.SystemRole === role) &&
-                    (user.Trades.length === 0 || user.Trades.includes(trade))).map((user) =>
-                    <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
-                </select>
-              </label>)}
-            </div>
-          </div>;
-        })}
       </section>
-      {activeTab === "users" && (
-        <UserAccessMonitor
-          users={users}
-          onAddUser={handleAddUser}
-          onDeleteUser={handleDeleteUser}
-          expandedUser={expandedUser}
-          setExpandedUser={setExpandedUser}
-        />
+      </>}
+
+      {activeTab === "features" && <FeaturePermissionMatrix canEdit={canEditMatrices} />}
+
+      {activeTab === "stages" && <LJRoleActionMatrix canEdit={canEditMatrices} />}
+
+      {activeTab === "trade-managers" && (
+      <section className="bg-white border rounded-lg p-4 space-y-3">
+        <h2 className="text-lg font-semibold">Trade Managers — {activeSiteId}</h2>
+        <p className="text-sm text-gray-600">Main / Deputy manager and notification contacts for each trade. Changes are saved automatically.</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border">
+            <thead className="bg-gray-50"><tr>
+              <th className="text-left px-3 py-2">Trade</th>
+              {TRADE_ASSIGNMENT_ROLES.map((role) => <th key={role} className="text-left px-3 py-2">{ROLE_LABELS[role]} <span className="text-xs text-gray-500">({role})</span></th>)}
+            </tr></thead>
+            <tbody>
+              {CLASSICAL_TRADES.map((trade) => {
+                const mapping = data.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
+                return <tr key={trade} className="border-t">
+                  <td className="px-3 py-2 font-semibold">{trade}</td>
+                  {TRADE_ASSIGNMENT_ROLES.map((role) => <td key={role} className="px-3 py-2">
+                    <select className="block w-full border rounded p-1.5 text-sm" value={mapping?.assignments[role] ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setData((current) => {
+                          const existing = current.tradeRoleMappings.find((item) => item.SiteId === activeSiteId && item.Trade === trade);
+                          return { ...current, tradeRoleMappings: [...current.tradeRoleMappings.filter((item) => !(item.SiteId === activeSiteId && item.Trade === trade)),
+                            { SiteId: activeSiteId, Trade: trade, assignments: { ...existing?.assignments, [role]: value } }] };
+                        });
+                      }}>
+                      <option value="">Unassigned</option>
+                      {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
+                        (user.LJRoles.includes(role) || user.SystemRole === role) &&
+                        (user.Trades.length === 0 || user.Trades.includes(trade))).map((user) =>
+                        <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
+                    </select>
+                  </td>)}
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
       )}
 
-      {activeTab === "roleMatrix" && (
-        <LJRoleActionMatrix />
-      )}
-
-      {activeTab === "moduleRbac" && (
-        <ModuleRBACMatrix />
-      )}
-
-      <StakeholderCatalogSection />
+      {activeTab === "teams" && <StakeholderCatalogSection />}
     </div>
   );
 }
@@ -444,143 +433,6 @@ function UserAccessMonitor({
                   </tr>
                 )}
               </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// Tab 2: LJ Role Action Matrix
-function LJRoleActionMatrix() {
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="p-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold">
-          LJ 0%-100% Role Action Matrix
-        </h3>
-        <p className="text-sm text-gray-600 mt-1">
-          Interactive matrix showing allowed actions per role at each substatus.
-          <strong className="ml-1">P</strong> = Primary (full control),{" "}
-          <strong>O</strong> = Optional (read/notify)
-        </p>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="text-left px-3 py-2 font-semibold text-gray-700 w-40">
-                Substatus
-              </th>
-              {LJ_ROLES.map((role) => (
-                <th
-                  key={role}
-                  className="text-center px-2 py-2 font-semibold text-gray-700 w-12"
-                >
-                  {role.substring(0, 5)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {LJ_STATUSES.map((status) => (
-              <tr
-                key={status.percentage}
-                className={`border-b border-gray-200 hover:bg-gray-50 ${
-                  status.percentage === 0 ? "bg-blue-50" : ""
-                } ${status.percentage === 94 ? "bg-yellow-50" : ""} ${
-                  status.percentage >= 78 && status.percentage < 94
-                    ? "bg-green-50"
-                    : ""
-                }`}
-              >
-                <td className="text-left px-3 py-2 font-medium text-gray-900">
-                  {status.percentage}% - {status.name}
-                </td>
-                {LJ_ROLES.map((role) => (
-                  <td key={role} className="text-center px-2 py-2">
-                    <span className="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium cursor-pointer hover:bg-blue-200">
-                      P
-                    </span>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="p-4 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
-        <p className="mb-2">
-          <strong>Color coding:</strong> Blue = RFQ track, Green = RFW track,
-          Yellow = Acceptance gates (78%-94%)
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// Tab 3: Module & Field RBAC Matrix
-function ModuleRBACMatrix() {
-  const longJobPermissions: Permission[] = [
-    "longJobs.manageRFQ",
-    "longJobs.manageRFW",
-    "longJobs.approveAcceptanceGates",
-    "longJobs.manageSiteContext",
-  ];
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="p-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold">Module & Field RBAC Matrix</h3>
-        <p className="text-sm text-gray-600 mt-1">
-          Shows which system roles have access to Long Job specific modules and
-          fields.
-        </p>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">
-                Permission / Field
-              </th>
-              {Object.keys(ROLE_PERMISSIONS).map((role) => (
-                <th
-                  key={role}
-                  className="text-center px-3 py-2 font-semibold text-gray-700"
-                >
-                  {role}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {longJobPermissions.map((permission) => (
-              <tr key={permission} className="border-b border-gray-200 hover:bg-gray-50">
-                <td className="text-left px-4 py-2 font-medium text-gray-900">
-                  {permission}
-                </td>
-                {Object.entries(ROLE_PERMISSIONS).map(([role, perms]) => {
-                  const hasPermission = (perms as readonly string[]).includes(permission);
-                  return (
-                    <td key={role} className="text-center px-3 py-2">
-                      {hasPermission ? (
-                        <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
-                          ✓
-                        </span>
-                      ) : (
-                        <span className="inline-block px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs">
-                          ✗
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
             ))}
           </tbody>
         </table>

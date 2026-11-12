@@ -126,7 +126,7 @@ export default function SiteRoleAssignmentsPage() {
 
   return <div className="space-y-5 p-6">
     <details open><summary className="cursor-pointer font-bold">👑 Global Super Admin Governance</summary><SiteAdminGovernance /></details>
-    <nav className="flex flex-wrap gap-2">{([["users", "👥 Users, Roles & VPA Matrix"], ["roles", "🛡️ Role Definitions & Capability Builder"], ["assignments", "📋 Long Job Trade Managers (01–07)"]] as const).map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded px-4 py-2 ${tab === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>)}</nav>
+    <nav className="flex flex-wrap gap-2">{([["users", "👥 Users & Trade Access"], ["roles", "🛡️ Role Definitions & Capability Builder"], ["assignments", "📋 Long Job Trade Managers (01–07)"]] as const).map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded px-4 py-2 ${tab === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>)}</nav>
     {tab !== "assignments" && <UserAccessMatrix key={`${activeSiteId}-${tab}`} mode={tab} />}
     {tab === "assignments" && <>
     <header className="flex flex-wrap items-center justify-between gap-3">

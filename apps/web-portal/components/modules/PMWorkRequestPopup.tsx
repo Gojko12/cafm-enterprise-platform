@@ -28,6 +28,9 @@ import { hasOpenQARework } from "@/lib/qa-settings";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { PmCoordinationWorkspace } from "@/components/modules/PmCoordinationWorkspace";
 import { buildCoordinationItems } from "@/lib/pm-coordination";
+import { PmClosureRequirements } from "@/components/modules/PmClosureRequirements";
+import { applyClosureRequirements, emptyClosureDraft, hasClosureSelection, type ClosureDraft } from "@/lib/pm-closure-requirements";
+import { canUpdatePmsRequirementsFromWr } from "@/lib/pm-requirements-guard";
 
 const TABS = [
   "Work request details",
@@ -70,7 +73,7 @@ export function PMWorkRequestPopup({
   initialTab = TABS[0],
 }: PMWorkRequestPopupProps) {
   const { data, setData } = useCafmStore();
-  const { permissions } = useActiveUserPermissions();
+  const { permissions, profile } = useActiveUserPermissions();
   const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const { currentRole } = useApp();
   const coordinationItem = useMemo(() => buildCoordinationItems(data, 0).find((entry) => entry.wrId === workRequest.WR_ID), [data, workRequest.WR_ID]);
@@ -202,6 +205,24 @@ export function PMWorkRequestPopup({
     details,
   });
 
+  const canUpdatePms = canUpdatePmsRequirementsFromWr(profile, data.siteRoleAssignments, currentRole, activePerson, workRequest.SiteId);
+  const [closureDraft, setClosureDraft] = useState<ClosureDraft>(emptyClosureDraft);
+  const [closureMessage, setClosureMessage] = useState("");
+  const commitClosureDraft = () => {
+    if (!canUpdatePms || !hasClosureSelection(closureDraft)) return false;
+    setData((current) => applyClosureRequirements(current, workRequest, closureDraft, actorName, true));
+    setClosureDraft(emptyClosureDraft());
+    return true;
+  };
+  const saveClosureDraft = () => {
+    if (commitClosureDraft()) setClosureMessage(closureDraft.updateLinkedPms && workRequest.ScheduleId ? `Saved. PMS ${workRequest.ScheduleId} updated.` : "Saved on this work request.");
+  };
+  const closureBox = workRequest.WR_Type === "PM" && workRequest.Percentage !== 27 ? (
+    <PmClosureRequirements workRequest={workRequest} draft={closureDraft} setDraft={setClosureDraft} canEdit={canUpdatePms}
+      onSave={saveClosureDraft} message={closureMessage}
+      onClose={canUpdatePms && permissions?.canCloseWR100 && workRequest.Percentage === 78 ? () => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!) : undefined} />
+  ) : null;
+
   const applyStatus = (choice: StatusChoice, skipFreezeGate = false) => {
     if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (choice.percentage === 78 && !skipFreezeGate && wrFreezes.length > 0 && !workRequest.freezeAcknowledged) {
@@ -236,6 +257,7 @@ export function PMWorkRequestPopup({
           WorkRequestStatus: configured!.WorkRequestStatus,
           WorkRequestSubstatus: configured!.WorkRequestSubstatus,
         };
+    if (choice.percentage === 100) commitClosureDraft();
     updateWorkRequest((current) => ({
       ...current,
       ...status,
@@ -724,6 +746,7 @@ export function PMWorkRequestPopup({
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Complete (100%)</button>
               </div>
             </div>
+            {closureBox}
             <div className="rounded border bg-white p-4">
               <label className="block text-sm font-medium">Message text
                 <textarea value={message} onChange={(event) => setMessage(event.target.value)}
@@ -823,6 +846,7 @@ export function PMWorkRequestPopup({
 
           {activeTab === "Team Alignment & Notices" && <section className="space-y-3 rounded border bg-slate-50 p-4" aria-label="Team Alignment and Notices">
             {coordinationItem ? <PmCoordinationWorkspace item={coordinationItem} /> : <p className="text-sm text-slate-600">No stakeholder teams or notices are tagged on this PM schedule. Tag them in SmartPM → Stakeholder Alignment &amp; Notices.</p>}
+            {closureBox}
           </section>}
           {activeTab === "PM Follow-up" && <section className="space-y-4 rounded border bg-white p-4">
             <h3 className="font-semibold">Create FastJob</h3>

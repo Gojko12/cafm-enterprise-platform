@@ -52,6 +52,7 @@ export const UserAccessSchema = z.object({
 export type UserAccess = z.infer<typeof UserAccessSchema>;
 
 export const Permission = z.enum([
+  "pmSchedules.updateRequirementsFromWr",
   "system.configure",
   "users.manageRoles",
   "data.importExport",
@@ -89,6 +90,7 @@ export type Permission = z.infer<typeof Permission>;
 
 export const ROLE_PERMISSIONS = {
   SiteAdministrator: [
+    "pmSchedules.updateRequirementsFromWr",
     "system.configure",
     "users.manageRoles",
     "data.importExport",
@@ -120,6 +122,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageSiteContext",
   ],
   ESA_TO: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -135,6 +138,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   ESA_TM: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -151,6 +155,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   ESA_LJM: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -166,6 +171,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageRFW",
   ],
   ESA_CCM: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -190,6 +196,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   TRADE_CM: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAssigned",
@@ -199,6 +206,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageRFW",
   ],
   TRADE_TM: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAssigned",
@@ -253,6 +261,7 @@ export const ROLE_PERMISSIONS = {
     "analytics.read",
   ],
   PM_Planner: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -266,6 +275,7 @@ export const ROLE_PERMISSIONS = {
     "analytics.read",
   ],
   QA_Inspector: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -273,6 +283,7 @@ export const ROLE_PERMISSIONS = {
     "technicalAudits.write",
   ],
   TeamLeader: [
+    "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",

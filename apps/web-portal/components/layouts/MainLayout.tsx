@@ -36,7 +36,7 @@ const NAV_ITEMS = [
   { section: "Administration", items: [
     { href: "/import-export", label: "Import/Export", icon: Upload },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
-    { href: "/admin/rbac", label: "RBAC Settings", icon: Lock },
+    { href: "/admin/rbac", label: "Users & Permissions", icon: Lock },
   ]},
 ];
 

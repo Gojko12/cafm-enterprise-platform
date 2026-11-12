@@ -59,6 +59,8 @@ export interface DemoData {
   stakeholderTeams?: SiteStakeholderTeam[];
   coordinationRequirements?: SiteCoordinationRequirement[];
   pmCoordination?: PmCoordinationRecord[];
+  ljStageMatrix?: Record<string, "act" | "notify" | "none" | "P" | "O">;
+  featurePermissionOverrides?: Record<string, boolean>;
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
   siteRoleAssignments: SiteRoleAssignment[];
