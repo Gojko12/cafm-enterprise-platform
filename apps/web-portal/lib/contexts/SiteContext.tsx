@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, ReactNode, useState, useCallback, useEffect } from "react";
-import { SiteId, LJRole, UserAccess } from "@cafm/shared-schema";
+import { SiteId, LJRole, UserAccess, PLATFORM_SITE_IDS, normalizeSiteId } from "@cafm/shared-schema";
 
 export interface SiteContextType {
   // Active site
@@ -30,8 +30,8 @@ export interface SiteContextType {
 export const SiteContext = createContext<SiteContextType | undefined>(undefined);
 
 export function SiteContextProvider({ children }: { children: ReactNode }) {
-  const [activeSiteId, setActiveSiteId] = useState<SiteId>("SITE-01");
-  const [availableSites, setAvailableSites] = useState<SiteId[]>(["SITE-01", "SITE-02", "SITE-03"]);
+  const [activeSiteId, setActiveSiteId] = useState<SiteId>("02-ESOC");
+  const [availableSites, setAvailableSites] = useState<SiteId[]>([...PLATFORM_SITE_IDS]);
   const [currentUser, setCurrentUser] = useState<UserAccess | null>(null);
   const [activeLJRole, setActiveLJRole] = useState<LJRole | null>(null);
   const [activePerson, setActivePerson] = useState("Mark");
@@ -46,7 +46,7 @@ export function SiteContextProvider({ children }: { children: ReactNode }) {
   // Initialize from localStorage
   useEffect(() => {
     try {
-      const savedSiteId = localStorage.getItem("activeSiteId") as SiteId | null;
+      const savedSiteId = normalizeSiteId(localStorage.getItem("activeSiteId"));
       if (savedSiteId && availableSites.includes(savedSiteId)) {
         setActiveSiteId(savedSiteId);
       }

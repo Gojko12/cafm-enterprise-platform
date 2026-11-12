@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SiteIdSchema } from "@cafm/shared-schema";
 import type { Equipment } from "@cafm/shared-schema";
 import { calculateDeadline, type AuditCampaign, type AuditFinding, type AuditInspection, type AuditSettings } from "./audit-assurance-types";
 
@@ -20,7 +21,7 @@ export const CheckpointResultSchema = z.object({ checkpointId: z.string().min(1)
 export type CheckpointResult = z.infer<typeof CheckpointResultSchema>;
 const summarySchema = z.object({ N0: z.number().nonnegative(), N1: z.number().nonnegative(), N2: z.number().nonnegative(), N3: z.number().nonnegative(), N4: z.number().nonnegative(), NV: z.number().int().nonnegative(), ST: z.number().int().nonnegative(), NA: z.number().int().nonnegative() });
 export const EquipmentInspectionSheetSchema = z.object({
-  id: z.string().min(1), campaignId: z.string().min(1), siteId: z.enum(["SITE-01", "SITE-02", "SITE-03"]), buildingId: z.string().min(1), roomId: z.string().min(1), systemName: z.string().min(1),
+  id: z.string().min(1), campaignId: z.string().min(1), siteId: SiteIdSchema, buildingId: z.string().min(1), roomId: z.string().min(1), systemName: z.string().min(1),
   equipmentId: z.string().min(1), equipmentName: z.string().min(1), equipmentCategory: z.string().min(1), inspectorName: z.string().min(1), inspectedAt: z.iso.datetime(), status: z.enum(["Scheduled", "InProgress", "Completed"]), operationalStatus: z.enum(["Operational", "Degraded", "Non-Operational", "ST_NotTested", "NV_Inaccessible"]),
   routeId: z.string().optional(), checkpointResults: z.array(CheckpointResultSchema).min(1), weightedSummary: summarySchema, calculatedConditionRatingPercent: z.number().min(0).max(100), scoringConfig: KmisConfigSchema,
   previousInspections: z.array(z.object({ inspectorName: z.string(), inspectedAt: z.string(), operationalStatus: z.string(), checkpointResults: z.array(CheckpointResultSchema), weightedSummary: summarySchema, calculatedConditionRatingPercent: z.number(), scoringConfig: KmisConfigSchema })).optional(),

@@ -193,7 +193,7 @@ export function useQAActions() {
       const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
       if (!issued) throw new Error("The 50% corrective maintenance status is not configured.");
       const year = now.slice(0, 4);
-      const start = activeSiteId === "SITE-01" ? 300000 : activeSiteId === "SITE-02" ? 600000 : 900000;
+      const start = activeSiteId === "02-ESOC" ? 300000 : activeSiteId === "01-ESTEC" ? 600000 : 900000;
       const limit = start + 99999;
       let sequence = start;
       while (sequence <= limit && used.has(`${year}${String(sequence).padStart(6, "0")}`)) sequence++;

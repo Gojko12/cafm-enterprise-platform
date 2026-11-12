@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { upsertMarkInStepText } from "@/lib/ifc-step-mark";
+import { LEGACY_SITE_ALIAS, normalizeSiteId } from "@cafm/shared-schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,14 +12,20 @@ export const dynamic = "force-dynamic";
 /** Direct in-app uploads may be raw `.ifc` or client-gzipped `.ifc.gz` up to 200MB. */
 const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 const idSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "Identifiers may only contain letters, digits, dashes, and underscores.");
+// Legacy SITE-0x identifiers resolve to the official platform site IDs.
+const siteIdSchema = idSchema.transform((value) => normalizeSiteId(value) ?? value);
+function siteAliases(siteId: string): string[] {
+  const legacy = LEGACY_SITE_ALIAS[siteId];
+  return legacy ? [siteId, legacy] : [siteId];
+}
 const uploadSchema = z.object({
-  siteId: idSchema,
+  siteId: siteIdSchema,
   buildingId: idSchema,
   fileName: z.string().trim().min(1).max(260).optional(),
   content: z.string().min(1).max(MAX_UPLOAD_BYTES),
 });
 const patchSchema = z.object({
-  siteId: idSchema,
+  siteId: siteIdSchema,
   buildingId: idSchema,
   ifcGlobalId: z.string().trim().min(1).max(64),
   expressId: z.number().int().nonnegative().optional(),
@@ -107,7 +114,8 @@ async function listModels(siteId: string): Promise<BimModelMetadata[]> {
       siteId, buildingId: parsed.baseName, fileName: entry, compressed: parsed.compressed, source: "bundled",
     }));
   }
-  const prefix = `${siteId}__`;
+  for (const alias of siteAliases(siteId)) {
+  const prefix = `${alias}__`;
   for (const entry of await safeReadDir(storageDirectory())) {
     if (!entry.startsWith(prefix)) continue;
     const parsed = parseModelFileName(entry.slice(prefix.length));
@@ -117,6 +125,7 @@ async function listModels(siteId: string): Promise<BimModelMetadata[]> {
     models.set(parsed.baseName, await describe(path.join(storageDirectory(), entry), {
       siteId, buildingId: parsed.baseName, fileName: entry, compressed: parsed.compressed, source: "uploaded",
     }));
+  }
   }
   return [...models.values()].sort((a, b) => a.buildingId.localeCompare(b.buildingId));
 }
@@ -133,8 +142,10 @@ async function exists(filePath: string): Promise<boolean> {
 
 async function resolveModelFile(siteId: string, buildingId: string): Promise<ResolvedModelFile | null> {
   const candidates: ResolvedModelFile[] = [
-    { filePath: storedModelPath(siteId, buildingId, true), compressed: true, source: "uploaded" },
-    { filePath: storedModelPath(siteId, buildingId, false), compressed: false, source: "uploaded" },
+    ...siteAliases(siteId).flatMap((alias) => [
+      { filePath: storedModelPath(alias, buildingId, true), compressed: true, source: "uploaded" as const },
+      { filePath: storedModelPath(alias, buildingId, false), compressed: false, source: "uploaded" as const },
+    ]),
     { filePath: path.join(bundledDirectory(), `${buildingId}.ifc`), compressed: false, source: "bundled" },
     { filePath: path.join(bundledDirectory(), `${buildingId}.ifc.gz`), compressed: true, source: "bundled" },
   ];
@@ -159,7 +170,7 @@ async function saveCompressedModel(siteId: string, buildingId: string, gzBytes: 
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const siteId = idSchema.safeParse(url.searchParams.get("siteId") ?? "SITE-01");
+  const siteId = siteIdSchema.safeParse(url.searchParams.get("siteId") ?? "02-ESOC");
   if (!siteId.success) return reply({ error: "Invalid siteId." }, 400);
   const buildingParam = url.searchParams.get("buildingId");
   try {
@@ -213,7 +224,7 @@ async function parseUpload(request: Request): Promise<NormalizedUpload | { error
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("multipart/form-data")) {
     const form = await request.formData();
-    const siteId = idSchema.safeParse(form.get("siteId"));
+    const siteId = siteIdSchema.safeParse(form.get("siteId"));
     const buildingId = idSchema.safeParse(form.get("buildingId"));
     const file = form.get("file");
     if (!siteId.success || !buildingId.success) return { error: "Provide valid siteId and buildingId fields.", status: 400 };

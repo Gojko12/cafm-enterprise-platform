@@ -86,7 +86,7 @@ function makeWr(
     ESAWorkType: type === "PM" ? "Preventive Maintenance" : "Corrective Maintenance",
     Description: options.description,
     ProblemLocation: asset ? `${asset.bl_id} / ${asset.LevelName} / ${asset.RoomCode}` : "S01-BL-1",
-    SiteId: "SITE-01",
+    SiteId: "02-ESOC",
     bl_id: asset?.bl_id ?? "S01-BL-1",
     LevelName: asset?.LevelName ?? "Level 0",
     RoomCode: asset?.RoomCode ?? "S01-B1-L0-R1",
@@ -201,7 +201,7 @@ function makeLj(
     ESAWorkType: "Corrective Maintenance",
     Description: `Long Job: ${asset?.EquipmentName ?? options.equipmentCode} refurbishment & upgrade (${id})`,
     ProblemLocation: asset ? `${asset.bl_id} / ${asset.LevelName} / ${asset.RoomCode}` : "S01-BL-1",
-    SiteId: "SITE-01",
+        SiteId: "02-ESOC",
     bl_id: asset?.bl_id ?? "S01-BL-1",
     LevelName: asset?.LevelName ?? "Level 0",
     RoomCode: asset?.RoomCode ?? "S01-B1-L0-R1",
@@ -264,7 +264,7 @@ function makeFinding(
   const id = `SITE-01-HF-${String(sequence).padStart(2, "0")}`;
   const addressed = Boolean(options.addressedAt);
   return {
-    id, campaignId: campaign.id, campaignName: campaign.name, siteId: "SITE-01",
+    id, campaignId: campaign.id, campaignName: campaign.name, siteId: "02-ESOC",
     buildingId: "S01-BL-1", roomId: "S01-B1-L0-R1",
     systemName: "HVAC & Cooling", equipmentId: options.equipmentCode, equipmentName: options.equipmentName,
     componentName: "Main assembly", checkpointName: options.title,
@@ -302,15 +302,15 @@ function makeFinding(
 
 export function ensureAnalyticsHistorySeeded(data: DemoData): DemoData {
   try {
-    if (!data.sites.includes("SITE-01")) return data;
-    if (data.workRequests.some((wr) => wr.SiteId === "SITE-01" && wr.WR_ID.startsWith(SEED_PREFIX))) return data;
+    if (!data.sites.includes("02-ESOC")) return data;
+    if (data.workRequests.some((wr) => wr.SiteId === "02-ESOC" && wr.WR_ID.startsWith(SEED_PREFIX))) return data;
 
     const today = calendarDate(new Date());
     const ago = (days: number) => addDays(today, -days);
     const context: SeedContext = {
       today,
-      equipmentByCode: new Map(data.equipment.filter((asset) => asset.SiteId === "SITE-01").map((asset) => [asset.EquipmentCode, asset])),
-      people: data.craftspeople.filter((person) => person.SiteId === "SITE-01").slice(0, 8)
+      equipmentByCode: new Map(data.equipment.filter((asset) =>       asset.SiteId === "02-ESOC").map((asset) => [asset.EquipmentCode, asset])),
+            people: data.craftspeople.filter((person) => person.SiteId === "02-ESOC").slice(0, 8)
         .map((person) => ({ id: person.id, name: `${person.Name} ${person.LastName}` })),
     };
     if (!context.equipmentByCode.size) return data;
@@ -488,7 +488,7 @@ export function ensureAnalyticsHistorySeeded(data: DemoData): DemoData {
     });
 
     // --- Technical audit findings across severities and remediation states ---
-    const campaign = (data.auditCampaigns ?? []).find((entry) => entry.siteId === "SITE-01");
+    const campaign = (data.auditCampaigns ?? []).find((entry) => entry.siteId === "02-ESOC");
     const auditFindings = [...(data.auditFindings ?? [])];
     if (campaign && !auditFindings.some((finding) => finding.id.startsWith("SITE-01-HF-"))) {
       const equipmentName = (code: string) => context.equipmentByCode.get(code)?.EquipmentName ?? code;

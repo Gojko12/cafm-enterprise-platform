@@ -97,7 +97,7 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
       const root = codeFor(base + 1), child = codeFor(base + 2);
       for (const [level, code, parent] of [["Installation", root, undefined], ["SubEquipment", child, root], ["Component", codeFor(base + 3), child]] as const) {
         equipment.push({ SiteId: site, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, EquipmentCode: code,
-          EquipmentName: `${system[0]} ${level}`, EquipmentNameLocal: `${localNames[Number(tag) - 1][i]} · ${level}`, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation",
+          EquipmentName: `${system[0]} ${level}`, EquipmentNameLocal: `${localNames[(Number(tag) - 1) % localNames.length][i]} · ${level}`, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation",
           Status: level === "Installation" || i >= 7 ? "In Service" : EQUIPMENT_STATUSES[i + 1],
           Activity: [{ id: `${code}-log`, kind: "log", actorId: "Mark", actorName: "Mark", actorRole: "ESA_TM", createdAt: "2026-10-10T09:00:00Z", text: "Equipment registered for maintenance." },
             { id: `${code}-comment`, kind: "comment", actorId: "Thomas", actorName: "Thomas", actorRole: "ESA_TO", createdAt: "2026-10-11T09:00:00Z", text: "Inspection access confirmed.", editedAt: "2026-10-12T09:00:00Z", editHistory: [{ text: "Confirm inspection access.", timestamp: "2026-10-11T09:00:00Z" }] }],

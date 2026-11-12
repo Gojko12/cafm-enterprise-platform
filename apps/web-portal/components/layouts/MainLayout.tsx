@@ -9,7 +9,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { SiteId } from "@cafm/shared-schema";
+import { SiteId, PLATFORM_SITE_IDS, SITE_LABELS } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import type { SiteRoleAssignment } from "@cafm/shared-schema";
 import { PhoneShare } from "@/components/common/PhoneShare";
@@ -37,10 +37,11 @@ const NAV_ITEMS = [
     { href: "/import-export", label: "Import/Export", icon: Upload },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/admin/rbac", label: "Users & Permissions", icon: Lock },
+    { href: "/sla-settings", label: "SLA Settings", icon: Calendar },
   ]},
 ];
 
-const SITE_IDS: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
+const SITE_IDS: SiteId[] = [...PLATFORM_SITE_IDS];
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -133,14 +134,7 @@ export function TopBar() {
   const { activeSiteId, setActiveSiteId, activePerson, setActivePerson } = useSiteContext();
   const { data: storeData, reset } = useCafmStore();
   const { governance } = useActiveUserPermissions();
-  const getSiteName = (siteId: SiteId): string => {
-    const siteNames: Record<SiteId, string> = {
-      "SITE-01": "ESOC Darmstadt",
-      "SITE-02": "ESTEC Noordwijk",
-      "SITE-03": "ESRIN Frascati",
-    };
-    return siteNames[siteId];
-  };
+  const getSiteName = (siteId: SiteId): string => SITE_LABELS[siteId];
   const activeAssignments: SiteRoleAssignment[] = storeData.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === activeSiteId && assignment.PersonName === activePerson);
   const people = [...new Set(["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "TeamLeader", ...storeData.siteRoleAssignments.map((item) => item.PersonName), ...storeData.userAccessProfiles.map((item) => item.personName), "SiteAdmin"])];

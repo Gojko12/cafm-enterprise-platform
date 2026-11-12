@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
+import { formatDateTimeDDMMYYYY, normalizeSiteId, PLATFORM_SITE_IDS, SITE_LABELS } from "@cafm/shared-schema";
 import type { SiteId, UserAccessProfile } from "@cafm/shared-schema";
 import type { SyncStatus } from "../lib/offline-engine";
 import { notify } from "../lib/toast";
@@ -82,9 +82,9 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
           </div>
           <label className="block text-xs text-slate-500">Site
             <select aria-label="Active site" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900" value={activeSiteId} onChange={(event) => {
-              const site = event.target.value;
-              if (site === "SITE-01" || site === "SITE-02" || site === "SITE-03") onSiteChange(site);
-            }}><option>SITE-01</option><option>SITE-02</option><option>SITE-03</option></select>
+              const site = normalizeSiteId(event.target.value);
+              if ((PLATFORM_SITE_IDS as readonly string[]).includes(site)) onSiteChange(site);
+            }}>{PLATFORM_SITE_IDS.map((id) => <option key={id} value={id}>{SITE_LABELS[id]}</option>)}</select>
           </label>
           <label className="block text-xs text-slate-500">Technician
             <select aria-label="Technician" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900" value={technicianId} onChange={(event) => onTechnicianChange(event.target.value)}>

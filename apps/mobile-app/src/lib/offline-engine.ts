@@ -65,7 +65,7 @@ export class OfflineEngine {
   private isOnline: boolean = navigator.onLine;
   private syncInProgress: boolean = false;
   private syncFinished: Promise<void> | null = null;
-  private site: SiteId = "SITE-01";
+  private site: SiteId = "02-ESOC";
   private person = "TECH-001";
   private simulatedOffline = false;
   private syncAbort: AbortController | null = null;

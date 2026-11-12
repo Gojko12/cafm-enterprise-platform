@@ -10,7 +10,7 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { SiteStakeholderTeamSchema, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
+import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 
@@ -38,7 +38,7 @@ function cors(request: Request) {
     Vary: "Origin",
   };
 }
-const siteSchema = z.enum(["SITE-01", "SITE-02", "SITE-03"]);
+const siteSchema = z.enum(PLATFORM_SITE_IDS);
 const tradeSchema = z.enum(["Mechanical", "Electrical", "Civil", "MultiTechnic", "Cleaning", "HeavyGang", "Catering"]);
 const permissionsSchema = z.object({
   canGeneratePM_WR: z.boolean(), canOpenFollowUpFJ: z.boolean(), canCreateFJ: z.boolean(), canCreateLJ: z.boolean(),
@@ -170,6 +170,11 @@ const stateSchema = z.object({
   pmCoordination: z.array(PmCoordinationRecordSchema).optional(),
   ljStageMatrix: z.record(z.string().regex(/^\d{1,3}:[A-Z_]+$/), z.enum(["act", "notify", "none", "P", "O"])).optional(),
   featurePermissionOverrides: z.record(z.string().regex(/^[A-Za-z_]+\|[A-Za-z]+\.[A-Za-z]+$/), z.boolean()).optional(),
+  siteSlaConfig: SiteSlaConfigSchema.optional(),
+  fjNotifications: z.array(z.object({
+    id: z.string().min(1), wrId: z.string().min(1), recipient: z.string().min(1), createdAt: z.string().min(1),
+    kind: z.literal("FJ_DISSATISFACTION"), message: z.string(), read: z.boolean().optional(),
+  })).optional(),
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),
@@ -194,11 +199,11 @@ const stateSchema = z.object({
   try { return migratePmState(state); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
 });
-const payloadSchema = z.object({ revision: z.number().int().nonnegative(), state: stateSchema });
+const payloadSchema = z.preprocess(migrateLegacySiteIds, z.object({ revision: z.number().int().nonnegative(), state: stateSchema }));
 const envelopeSchema = z.object({ revision: z.number().int().positive(), state: stateSchema });
-const databaseSchema = z.object({
+const databaseSchema = z.preprocess(migrateLegacySiteIds, z.object({
   sites: z.partialRecord(siteSchema, envelopeSchema),
-}).transform((database) => {
+})).transform((database) => {
   const entries = Object.entries(database.sites).sort(([a], [b]) => a.localeCompare(b));
   const states = uniquePmsOrdersAcrossSites(entries.map(([, entry]) => entry.state));
   return { sites: Object.fromEntries(entries.map(([site, entry], index) => [site, { ...entry, state: states[index] }])) };
@@ -233,8 +238,8 @@ function mergeNewerWorkRequests(existing: z.infer<typeof stateSchema>, incoming:
 function scope(request: Request) {
   const header = request.headers.get("x-cafm-site-id");
   const query = new URL(request.url).searchParams.get("siteId");
-  const site = siteSchema.safeParse(query ?? header);
-  return site.success ? site.data : siteSchema.parse("SITE-01");
+  const site = siteSchema.safeParse(normalizeSiteId(query ?? header));
+  return site.success ? site.data : siteSchema.parse("02-ESOC");
 }
 
 function validateSite(state: z.infer<typeof stateSchema>, site: string) {

@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { SiteIdSchema } from "@cafm/shared-schema";
 import type { CraftpersonAbsence } from "@cafm/shared-schema";
 
 const localAbsenceSchema = z.object({
   id: z.string().min(1),
-  siteId: z.enum(["SITE-01", "SITE-02", "SITE-03"]),
+  siteId: SiteIdSchema,
   craftpersonId: z.string().min(1),
   absenceType: z.enum(["Vacation", "SickLeave", "Training", "PublicHoliday", "OtherAbsence"]),
   startDate: z.iso.date(),

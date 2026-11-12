@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
+import { formatDateTimeDDMMYYYY, normalizeSiteId, PLATFORM_SITE_IDS, SITE_LABELS } from "@cafm/shared-schema";
 import type { SiteId } from "@cafm/shared-schema";
 import { clearEquipmentDetailCache, EQ_DETAIL_MAX_ITEMS, getEquipmentCacheCount } from "../lib/equipment-details";
 
@@ -69,7 +69,7 @@ export function ProfileSettings(props: ProfileSettingsProps) {
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <label className="text-xs text-slate-500">Site
-          <select aria-label="Site" className={select} value={props.siteId} onChange={(event) => props.onSiteChange(event.target.value as SiteId)}><option>SITE-01</option><option>SITE-02</option><option>SITE-03</option></select>
+          <select aria-label="Site" className={select} value={props.siteId} onChange={(event) => props.onSiteChange(normalizeSiteId(event.target.value))}>{PLATFORM_SITE_IDS.map((id) => <option key={id} value={id}>{SITE_LABELS[id]}</option>)}</select>
         </label>
         <label className="text-xs text-slate-500">Technician
           <select aria-label="Technician" className={select} value={props.technicianId} onChange={(event) => props.onTechnicianChange(event.target.value)}>

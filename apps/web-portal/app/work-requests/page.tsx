@@ -19,8 +19,10 @@ import { useApp } from "@/lib/hooks/useApp";
 import Link from "next/link";
 import { WRSignals } from "@/components/modules/WRSignals";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
-import { formatDateDDMMYYYY } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { buildFastJobWR } from "@/lib/fj-factory";
+import { isDissatisfied } from "@/lib/fj-satisfaction";
 import type { SignalTab } from "@/lib/wr-signals";
 
 const mockWorkRequests: BaseWorkRequest[] = [
@@ -112,7 +114,7 @@ const mockWorkRequests: BaseWorkRequest[] = [
 ];
 
 export default function WorkRequestsPage() {
-  const { activeSiteId, currentUser } = useSiteContext();
+  const { activeSiteId, currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const { data, setData } = useCafmStore();
   const { profile, permissions } = useActiveUserPermissions();
@@ -128,6 +130,7 @@ export default function WorkRequestsPage() {
   const [bucket, setBucket] = useState<"issued" | "inspection" | "passed" | "corrected" | "completed" | "cancelled">("issued");
   const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
   const [teamQueue, setTeamQueue] = useState(false);
+  const [fjView, setFjView] = useState<"all" | "dissatisfied">("all");
   useEffect(() => {
     const updateType = () => {
       const type = window.location.hash.slice(1);
@@ -199,6 +202,7 @@ export default function WorkRequestsPage() {
   };
   const scopedRequests = siteRequests.filter((wr) => {
     if (requestType === "FJ" && teamQueue && wr.Percentage !== 78) return false;
+    if (requestType === "FJ" && fjView === "dissatisfied" && !isDissatisfied(wr)) return false;
     if (
       requestType === "PM" &&
       !isInPmQueue(wr, bucket)
@@ -239,52 +243,7 @@ export default function WorkRequestsPage() {
 
   const handleSubmitFJ = (job: FastJobData) => {
     if (!permissions?.canCreateFJ) { alert("Permission required to create a Fast Job."); return; }
-    const createdAt = new Date().toISOString();
-    const issuedStatus = WR_Statuses.find(
-      (status) =>
-        status.Percentage === 50 &&
-        status.ESAWorkType === "Corrective Maintenance",
-    );
-    if (!issuedStatus) {
-      throw new Error("Issued status configuration is missing.");
-    }
-    const newWR: BaseWorkRequest = {
-      WR_ID: `FJ-${Date.now()}`,
-      JobID: `JOB-${Date.now()}`,
-      WR_Type: "FJ",
-      ESAWorkType: "Corrective Maintenance",
-      Description: job.description,
-      ProblemLocation: `${job.bl_id} / ${job.levelName} / ${job.roomCode}`,
-      CreatedDate: createdAt.slice(0, 10),
-      WorkRequestStatus: issuedStatus.WorkRequestStatus,
-      WorkRequestSubstatus: issuedStatus.WorkRequestSubstatus,
-      Percentage: issuedStatus.Percentage,
-      SiteId: activeSiteId,
-      bl_id: job.bl_id,
-      LevelName: job.levelName,
-      RoomCode: job.roomCode,
-      AssignedCraftpersonIds: [],
-      AssignedUserIds: [],
-      CreatedBy: "current-user",
-      IsFrozen: false,
-      EquipmentCodes: [job.equipmentCode],
-      TotalTimeMinutes: job.timeSpentMinutes,
-      StartDateTBD: false,
-      RequiresSAT: false,
-      RequiresDrawingUpdate: false,
-      RequiresInventoryUpdate: false,
-      AcceptanceGates: [],
-      UpdatedAt: createdAt,
-      Attachments: job.photoUrl ? [{ id: crypto.randomUUID(), name: job.photoName ?? "fast-job-photo", type: job.photoType || "image/unknown", dataUrl: job.photoUrl }] : [],
-      Activity: [
-        { id: crypto.randomUUID(), kind: "log", actorId: currentUser?.UserId ?? "current-user",
-          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt,
-          text: `Fast Job created at 50% by ${currentUser?.DisplayName ?? "Current user"}` },
-        ...(job.photoUrl ? [{ id: crypto.randomUUID(), kind: "log" as const, actorId: currentUser?.UserId ?? "current-user",
-          actorName: currentUser?.DisplayName ?? "Current user", actorRole: currentRole, createdAt,
-          text: `Image '${job.photoName ?? "fast-job-photo"}' was added by ${currentUser?.DisplayName ?? "Current user"}` }] : []),
-      ],
-    };
+    const newWR = buildFastJobWR(job, { siteId: activeSiteId, data, actor: { userId: currentUser?.UserId, displayName: profile?.fullName ?? currentUser?.DisplayName ?? activePerson, role: currentRole, personId: profile?.id } });
     setData((current) => ({ ...current, workRequests: [...current.workRequests, newWR] }));
     setFastJobOpen(false);
   };
@@ -495,6 +454,10 @@ export default function WorkRequestsPage() {
           {item.label} ({siteRequests.filter((wr) => isInPmQueue(wr, item.id)).length})
         </button>)}
       </div>}
+      {requestType === "FJ" && <div className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={fjView === "all"} onClick={() => setFjView("all")} className={`px-3 py-2 rounded text-sm ${fjView === "all" ? "bg-blue-100 text-blue-900" : "bg-white border"}`}>All FJs</button>
+        <button type="button" aria-pressed={fjView === "dissatisfied"} onClick={() => setFjView("dissatisfied")} className={`px-3 py-2 rounded text-sm ${fjView === "dissatisfied" ? "bg-red-100 text-red-900" : "bg-white border"}`}>Dissatisfaction Feedback ({siteRequests.filter((wr) => isDissatisfied(wr)).length})</button>
+      </div>}
       {requestType === "LJ" && <div className="flex gap-2 text-xs"><button aria-pressed={groupLJ} onClick={() => setGroupLJ(true)} className="rounded border px-2 py-1">Group by Substatus</button><button aria-pressed={!groupLJ} onClick={() => setGroupLJ(false)} className="rounded border px-2 py-1">Flat List</button></div>}
       {view === "card" && signalFilters}
       {view === "grid" ? <WRDataGrid key={`${activeSiteId}-${requestType}-${filterVersion}`} requestType={requestType} requests={filteredRequests} onOpen={handleViewWR} grouped={requestType === "LJ" && groupLJ} onFilterCount={setColumnFilterCount} signalFilters={signalFilters} /> :
@@ -540,6 +503,13 @@ export default function WorkRequestsPage() {
                   </div>
                   <p className="text-gray-700">{wr.Description}</p>
                   <p className="text-sm text-gray-600 mt-1">{wr.ProblemLocation} · {pmTargetLabel(wr)}</p>
+                  {wr.WR_Type === "FJ" && (wr.Urgency || wr.OpenedByName || wr.RequestorName || wr.SlaDueAt) && <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-700">
+                    {wr.Urgency && <span className="rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-900">{wr.Urgency}</span>}
+                    {wr.OpenedByName && <span>Opened by: {wr.OpenedByName}{wr.IntakeChannel ? ` (${wr.IntakeChannel})` : ""}</span>}
+                    {wr.RequestorName && <span>Requestor: {wr.RequestorName}</span>}
+                    {wr.SlaDueAt && <span>SLA: {wr.SlaTargetLabel} → {formatDateTimeDDMMYYYY(wr.SlaDueAt)}</span>}
+                    {isDissatisfied(wr) && <span className="rounded bg-red-100 px-2 py-0.5 font-medium text-red-900">Dissatisfied · {wr.Satisfaction?.followUpStatus?.replace(/_/g, " ")}</span>}
+                  </p>}
                   <div className="mt-2"><WRSignals wr={wr} onOpen={handleViewWR} /></div>
                 </div>
                 <div className="flex items-center gap-2">

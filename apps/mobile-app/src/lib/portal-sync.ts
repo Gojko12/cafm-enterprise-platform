@@ -88,7 +88,7 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "X-CAFM-Site-Id": site || "SITE-01",
+      "X-CAFM-Site-Id": site || "02-ESOC",
       "X-CAFM-Person": person,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },

@@ -9,6 +9,7 @@ import {
   LJRoleEnum,
   SiteId,
   SiteIdSchema,
+  PLATFORM_SITE_IDS,
   SiteRoleAssignment,
   SiteRoleAssignmentSchema,
   SiteRoleAssignmentTrade,
@@ -34,7 +35,7 @@ const ROLE_NAMES: Record<LJRole, string> = {
   TRADE_LONG_JOB: "Trade Long Job",
 };
 const TRADES: SiteRoleAssignmentTrade[] = [...CLASSICAL_TRADES, "All"];
-const SITES: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
+const SITES: SiteId[] = [...PLATFORM_SITE_IDS];
 const blankAssignment = (siteId: SiteId): Omit<SiteRoleAssignment, "AssignmentId"> => ({
   SiteId: siteId,
   PersonName: "",

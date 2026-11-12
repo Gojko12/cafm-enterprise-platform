@@ -1,4 +1,4 @@
-import { CLASSICAL_TRADES, EquipmentStatusSchema, LocationFreezeSchema, normalizeEquipmentStatus } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, EquipmentStatusSchema, LocationFreezeSchema, migrateLegacySiteIds, normalizeEquipmentStatus, normalizeSiteId } from "@cafm/shared-schema";
 import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
@@ -13,6 +13,8 @@ import { seedAssurance, seedAuditTemplates } from "./audit-assurance-seed";
 import { withSnowdonShowcase } from "./snowdon-seed";
 import { ensureAnalyticsHistorySeeded } from "./analytics-history-seed";
 import { withCoordinationShowcase } from "./pm-coordination-seed";
+import { withPeopleDirectory } from "./people-seed";
+import { usernameForRole } from "./people-directory";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
 export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
@@ -24,12 +26,15 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
   TRADE_CM: "Trade Contract Manager", ESA_TO: "ESA Technical Officer", ESA_LJM: "ESA Long Job Manager",
   ESA_DO: "Draftsman", ESA_IM: "CIFM Inventory Admin",
 };
-export function scopeData(data: DemoData, site: SiteId): DemoData {
+export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
+  const site = normalizeSiteId(requestedSite) ?? requestedSite;
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
-  data = withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(data))));
+  data = withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(migrateLegacySiteIds(data))))));
   return {
     ...data,
+    siteSlaConfig: data.siteSlaConfig?.siteId === site ? data.siteSlaConfig : undefined,
+    fjNotifications: (data.fjNotifications ?? []).filter((item) => data.workRequests.some((wr) => wr.WR_ID === item.wrId && wr.SiteId === site)),
     stakeholderTeams: (data.stakeholderTeams ?? []).filter((item) => item.siteId === site),
     coordinationRequirements: (data.coordinationRequirements ?? []).filter((item) => item.siteId === site),
     pmCoordination: (data.pmCoordination ?? []).filter((item) => item.siteId === site),
@@ -77,7 +82,7 @@ export function scopeData(data: DemoData, site: SiteId): DemoData {
 }
 
 export function withAccessProfileDefaults(data: DemoData, site: SiteId): DemoData {
-  const { roles, profiles } = migrateRoles(data.userAccessProfiles ?? seedAccessProfiles([site], data.craftspeople, data.users), data.roleDefinitions);
+  const { roles, profiles } = migrateRoles(data.userAccessProfiles ?? seedAccessProfiles([normalizeSiteId(site) ?? site], data.craftspeople, data.users), data.roleDefinitions);
   return {
     ...data,
     roleDefinitions: roles,
@@ -86,7 +91,7 @@ export function withAccessProfileDefaults(data: DemoData, site: SiteId): DemoDat
 }
 
 export function seedData(): DemoData {
-  const sites: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
+  const sites: SiteId[] = ["SITE-01", "SITE-02", "SITE-03", "SITE-04", "SITE-05"];
   const trades: SiteRoleAssignmentTrade[] = [...CLASSICAL_TRADES, "All"];
   const stageRoles: LJRole[] = ["ESA_TM", "TRADE_TM", "ESA_CCM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM", "ESA_LONG_JOB", "TRADE_LONG_JOB"];
   const peopleByRole: Record<LJRole, { main: string; deputy: string }> = {
@@ -96,8 +101,8 @@ export function seedData(): DemoData {
     TRADE_CM: { main: "Stefan", deputy: "Gregor" },
     ESA_TO: { main: "Thomas", deputy: "Lidija" },
     ESA_LJM: { main: "Gregor", deputy: "Stefan" },
-    ESA_DO: { main: "Draftsman", deputy: "Stefan" },
-    ESA_IM: { main: "Inventory Admin", deputy: "Lidija" },
+    ESA_DO: { main: "Petra Lang", deputy: "Stefan" },
+    ESA_IM: { main: "Ivan Horvat", deputy: "Lidija" },
     ESA_LONG_JOB: { main: "Thomas", deputy: "Yvonne" },
     TRADE_LONG_JOB: { main: "Claudia", deputy: "Bastian" },
   };
@@ -136,10 +141,7 @@ export function seedData(): DemoData {
   setSeed("Yvonne", "ESA_TM", "Electrical", "Main", true);
   setSeed("Claudia", "TRADE_TM", "Mechanical", "Main", true);
   setSeed("Bastian", "TRADE_TM", "Mechanical", "Deputy", false);
-  const users: UserAccess[] = sites.flatMap((site) => ASSIGNMENT_ROLES.map((role) => ({
-    UserId: `${site}-${role}`, DisplayName: `${ROLE_LABELS[role]} (${site})`,
-    SystemRole: role, AssignedSiteIds: [site], LJRoles: [role], Trades: [...CLASSICAL_TRADES], CanAccessAll: false,
-  })));
+  const users: UserAccess[] = [];
   const seeded = seedNestedPM(expandSeededWorkRequests(section20Seed(sites), sites), sites);
   const freezeToday = calendarDate(new Date());
   const result: DemoData = {
@@ -172,10 +174,10 @@ export function seedData(): DemoData {
     roleDefinitions: defaultRoleDefinitions(),
     tradeRoleMappings: sites.flatMap((site) => CLASSICAL_TRADES.map((trade) => ({
       SiteId: site, Trade: trade,
-      assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
+      assignments: Object.fromEntries(TRADE_ASSIGNMENT_ROLES.map((role) => [role, usernameForRole(role)])),
     }))),
     siteRoleMappings: sites.map((site) => ({
-      SiteId: site, assignments: Object.fromEntries(SITE_ASSIGNMENT_ROLES.map((role) => [role, `${site}-${role}`])),
+      SiteId: site, assignments: Object.fromEntries(SITE_ASSIGNMENT_ROLES.map((role) => [role, usernameForRole(role)])),
     })),
     siteRoleAssignments,
     qaInspectorAssignments: sites.flatMap((siteId) => ["Mark", "Thomas", "Yvonne"].map((personName) => ({ id: `${siteId}-qa-${personName}`, siteId, personName, trades: [...CLASSICAL_TRADES], wrTypes: ["PM", "FJ"] }))),
@@ -195,7 +197,7 @@ export function seedData(): DemoData {
     return { checkpointId: c.id, checkpointName: c.name, weight: 1, classification: na ? "NA" : minor ? "N1" : c.name === "Steam humidifier" ? "N2" : "N0", comment: minor ? "Minor deterioration" : c.name === "Steam humidifier" ? "Corrective action required" : "", photoUrls: [] };
   });
   const sheet: EquipmentInspectionSheet = { id: "rosetta-2026-sheet", campaignId: campaign.id, siteId: asset.SiteId, buildingId: asset.bl_id, roomId: asset.RoomCode, systemName: "HVAC & Cooling", equipmentId: asset.EquipmentCode, equipmentName: asset.EquipmentName, equipmentCategory: ahuTemplate.equipmentCategory, inspectorName: "Thomas", inspectedAt: "2026-03-15T12:00:00Z", status: "Completed", operationalStatus: "Operational", routeId, checkpointResults: results, scoringConfig: defaultKmisConfig, ...calculateEquipmentInspectionSummary(results, defaultKmisConfig) };
-  return completeEquipmentInspection(result, sheet);
+  return migrateLegacySiteIds(completeEquipmentInspection(result, sheet));
 }
 
 export function seedSiteData(site: SiteId): DemoData {

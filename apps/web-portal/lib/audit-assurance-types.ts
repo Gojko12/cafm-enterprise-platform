@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SiteIdSchema } from "@cafm/shared-schema";
 
 export const urgencyLevels = ["N4", "N3", "N2", "N1", "N0"] as const;
 export const findingTypes = ["Condition", "Operation", "Documentation", "Safety", "Data Quality"] as const;
@@ -7,7 +8,7 @@ export const assuranceStates = ["FindingLogged", "AwaitingValidation", "Validate
 export const workflowStages = ["Planning", "Scope confirmed", "Inspection in progress", "Findings received", "Technical validation", "Corrective actions", "Evidence", "Verification", "Closed"] as const;
 export const intelligenceFlags = ["PotentialDuplicate", "ExistingOpenWR", "RecentlyCompletedWR", "AssetReplacedOrDecommissioned", "OutdatedPhoto", "InconsistentEquipmentCode", "RecurringDefect"] as const;
 const nonempty = z.string().trim().min(1);
-const site = z.enum(["SITE-01", "SITE-02", "SITE-03"]);
+const site = SiteIdSchema;
 export const AuditCampaignSchema = z.object({
   id: nonempty, name: nonempty, provider: nonempty, siteId: site, buildingIds: z.array(nonempty), systems: z.array(nonempty),
   startDate: z.iso.date(), endDate: z.iso.date(), inspectors: z.array(nonempty), methodology: nonempty,

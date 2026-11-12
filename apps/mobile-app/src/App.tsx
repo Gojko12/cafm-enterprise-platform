@@ -77,7 +77,7 @@ function findProfile(profiles: UserAccessProfile[], person: Technician | undefin
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>("home");
-  const [activeSiteId, setActiveSiteId] = useState<SiteId>("SITE-01");
+  const [activeSiteId, setActiveSiteId] = useState<SiteId>("02-ESOC");
   const [currentTechnicianId, setCurrentTechnicianId] = useState<string>("");
   const [technicians, setTechnicians] = useState<z.infer<typeof siteContextSchema>["craftspeople"]>([]);
   const [freezes, setFreezes] = useState<LocationFreeze[]>([]);

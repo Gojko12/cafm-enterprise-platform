@@ -21,6 +21,8 @@ import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { DissatisfactionPanel, RatingEmailModal } from "@/components/modules/FJSatisfactionPanels";
+import { isCompletedFj } from "@/lib/fj-satisfaction";
 
 type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA" | "Checklist - Smart PM";
 
@@ -32,10 +34,12 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
   initialTab?: Tab;
 }) {
   const { data, setData } = useCafmStore();
-  const { permissions } = useActiveUserPermissions();
+  const { permissions, profile } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [ratingMailOpen, setRatingMailOpen] = useState(false);
+  const canFollowUp = !!(profile?.isSuperAdmin || profile?.isSiteAdmin || profile?.isHelpdesk || ["SuperAdmin", "SiteAdministrator", "TeamLeader", "ESA_TM", "TRADE_TM", "HELPDESK"].includes(String(currentRole)));
   useEffect(() => { setTab(initialTab); }, [initialTab, workRequest.WR_ID]);
   const parentPM = getParentPM(workRequest, data.workRequests);
   const unfavourableCount = getUnfavourableStepCount(workRequest, data);
@@ -138,10 +142,20 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
         {parentPM && <div className="mb-3 rounded-xl border border-indigo-300 bg-indigo-50 p-3 text-indigo-900"><strong>🔗 Follow-up of PM #{parentPM.WR_ID}</strong><p>{parentPM.Description}</p>{workRequest.originatingChecklistStepLabel && <p>Checklist step: {workRequest.originatingChecklistStepLabel}</p>}<button type="button" className="mt-1 font-semibold underline" onClick={() => onNavigate(parentPM.WR_ID)}>Open parent PM →</button></div>}
         {(() => { const frozen = getWorkRequestFreezes(workRequest, data.locationFreezes ?? [], localNowIso()); return frozen.length > 0 ? <div className="mb-3"><FreezeBadge freezes={frozen} /></div> : null; })()}        {tab === "Work request details" && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
+          {isCompletedFj(workRequest) && <div className="flex items-center gap-2 text-xs">
+            <button type="button" onClick={() => setRatingMailOpen(true)} className="rounded border bg-white px-3 py-1">✉ Simulate / Open Requestor Rating Email</button>
+            <span className="text-slate-500">{workRequest.Satisfaction ? `Survey ${workRequest.Satisfaction.status === "Answered" ? "answered" : "pending"}` : ""}</span>
+          </div>}
+          <DissatisfactionPanel wr={workRequest} canEdit={canFollowUp} actorName={actorName} onReopen={() => { update((wr) => ({ ...wr, Percentage: 50, WorkRequestStatus: "Issued", WorkRequestSubstatus: "Issued", Satisfaction: wr.Satisfaction ? { ...wr.Satisfaction, followUpStatus: "In_Progress" } : wr.Satisfaction }), `FJ reopened for rework after dissatisfaction feedback by ${actorName}`); }} />
+          {ratingMailOpen && <RatingEmailModal wr={workRequest} onClose={() => setRatingMailOpen(false)} />}
           {group("Fast Job Details", <>
             {field("WR ID", workRequest.WR_ID)}{field("Job ID", workRequest.JobID)}
             {field("Work request status", workRequest.WorkRequestStatus)}{field("Work request substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}
             {field("Urgency", workRequest.Urgency)}{field("Trade name", workRequest.TradeName)}
+            {field("SLA target", workRequest.SlaTargetLabel)}{field("SLA start", workRequest.SlaStartAt ? formatDateTimeDDMMYYYY(workRequest.SlaStartAt) : "")}
+            {field("SLA due", workRequest.SlaDueAt ? formatDateTimeDDMMYYYY(workRequest.SlaDueAt) : "")}{field("SLA margin", workRequest.SlaMarginAt ? formatDateTimeDDMMYYYY(workRequest.SlaMarginAt) : "")}
+            {field("Opened by", workRequest.OpenedByName ? `${workRequest.OpenedByName}${workRequest.OpenedByRole ? ` (${workRequest.OpenedByRole})` : ""}` : "")}{field("Intake channel", workRequest.IntakeChannel)}
+            {field("Requestor", workRequest.RequestorName)}{field("Requestor email / phone", [workRequest.RequestorEmail, workRequest.RequestorPhone].filter(Boolean).join(" · "))}{field("Requestor department", workRequest.RequestorDepartment)}
             {field("Estimated Cost (< 750 EUR)", <label className="flex items-center gap-2"><input aria-label="Estimated Cost (< 750 EUR)" type="number" min="0" max="749.99" step="0.01"
               value={workRequest.EstimatedCostEur ?? 0} onChange={(e) => {
                 const value = Number(e.target.value);

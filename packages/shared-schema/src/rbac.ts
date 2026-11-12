@@ -21,6 +21,7 @@ export const UserRole = z.enum([
   "MobileTechnician",
   "TeamLeader",
   "StandardEmployee",
+  "HELPDESK",
 ]);
 
 export type UserRole = z.infer<typeof UserRole>;
@@ -306,6 +307,14 @@ export const ROLE_PERMISSIONS = {
     "locations.read",
     "deskReservations.manageOwn",
     "workRequests.create",
+  ],
+  HELPDESK: [
+    "locations.read",
+    "equipment.read",
+    "workRequests.readAll",
+    "workRequests.create",
+    "pmSchedules.read",
+    "deskReservations.manageOwn",
   ],
 } as const satisfies Record<UserRole, readonly Permission[]>;
 

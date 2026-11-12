@@ -29,8 +29,39 @@ export const GPSCoordinatesSchema = z.object({
   elevationMeters: z.number().optional(),
 });
 
-export const SiteIdSchema = z.enum(["SITE-01", "SITE-02", "SITE-03"]);
+export const PLATFORM_SITE_IDS = ["01-ESTEC", "02-ESOC", "03-HQ", "04-ESRIN", "05-ESAC"] as const;
+// Internal seed keys and pre-migration persisted IDs; always rewritten to platform IDs by migrateLegacySiteIds.
+export const LEGACY_SITE_IDS = ["SITE-01", "SITE-02", "SITE-03", "SITE-04", "SITE-05"] as const;
+export const SiteIdSchema = z.enum([...PLATFORM_SITE_IDS, ...LEGACY_SITE_IDS]);
 export type SiteId = z.infer<typeof SiteIdSchema>;
+
+export const LEGACY_SITE_MAP: Record<string, SiteId> = {
+  "SITE-01": "02-ESOC", "SITE-02": "01-ESTEC", "SITE-03": "04-ESRIN", "SITE-04": "03-HQ", "SITE-05": "05-ESAC",
+};
+export const LEGACY_SITE_ALIAS: Record<string, string> = Object.fromEntries(Object.entries(LEGACY_SITE_MAP).map(([legacy, id]) => [id, legacy]));
+export const SITE_LABELS: Record<SiteId, string> = {
+  "01-ESTEC": "01-ESTEC · Noordwijk", "02-ESOC": "02-ESOC · Darmstadt", "03-HQ": "03-HQ · Paris", "04-ESRIN": "04-ESRIN · Frascati", "05-ESAC": "05-ESAC · Madrid",
+  "SITE-01": "02-ESOC · Darmstadt", "SITE-02": "01-ESTEC · Noordwijk", "SITE-03": "04-ESRIN · Frascati", "SITE-04": "03-HQ · Paris", "SITE-05": "05-ESAC · Madrid",
+};
+export const SITE_CITIES: Record<string, string> = {
+  "01-ESTEC": "Noordwijk, Netherlands", "02-ESOC": "Darmstadt, Germany", "03-HQ": "Paris, France", "04-ESRIN": "Frascati, Italy", "05-ESAC": "Madrid, Spain",
+};
+
+export function normalizeSiteId(value: string | null | undefined): SiteId | undefined {
+  if (!value) return undefined;
+  const mapped = LEGACY_SITE_MAP[value] ?? value;
+  return (PLATFORM_SITE_IDS as readonly string[]).includes(mapped) ? mapped as SiteId : undefined;
+}
+
+// Deep-rewrites any string value that is exactly a legacy site ID (opaque IDs that merely start with it are left untouched).
+export function migrateLegacySiteIds<T>(value: T): T {
+  if (typeof value === "string") return (LEGACY_SITE_MAP[value] ?? value) as T;
+  if (Array.isArray(value)) return value.map((item) => migrateLegacySiteIds(item)) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [LEGACY_SITE_MAP[key] ?? key, migrateLegacySiteIds(item)])) as T;
+  }
+  return value;
+}
 
 export const BuildingSchema = z.object({
   bl_id: z.string().min(1),

@@ -71,7 +71,7 @@ const SNOWDON_ASSETS: SnowdonAsset[] = [
  * (and their WRs/schedules) are never overwritten.
  */
 function pickShowcaseCodes(equipment: Equipment[]): string[] {
-  const used = new Set(equipment.filter((asset) => asset.SiteId === "SITE-01" && /^\d{10}$/.test(asset.EquipmentCode))
+  const used = new Set(equipment.filter((asset) => asset.SiteId === "02-ESOC" && /^\d{10}$/.test(asset.EquipmentCode))
     .map((asset) => Number(asset.EquipmentCode)));
   let start = 21;
   while (start < 9_999_999_000) {
@@ -91,7 +91,7 @@ function buildWorkRequest(asset: Equipment, id: string, percentage: 50 | 55, due
     ESAWorkType: "Corrective Maintenance",
     Description: description,
     ProblemLocation: `${asset.bl_id} / ${asset.LevelName} / ${asset.RoomCode}`,
-    SiteId: "SITE-01",
+    SiteId: "02-ESOC",
     bl_id: asset.bl_id,
     LevelName: asset.LevelName,
     RoomCode: asset.RoomCode,
@@ -133,32 +133,32 @@ function buildWorkRequest(asset: Equipment, id: string, percentage: 50 | 55, due
  */
 export function withSnowdonShowcase(data: DemoData): DemoData {
   try {
-    if (!data.sites.includes("SITE-01")) return data;
-    if (data.equipment.some((asset) => asset.SiteId === "SITE-01" && asset.bimGlobalId === SNOWDON_ASSETS[0].globalId)) return data;
+    if (!data.sites.includes("02-ESOC")) return data;
+    if (data.equipment.some((asset) => asset.SiteId === "02-ESOC" && asset.bimGlobalId === SNOWDON_ASSETS[0].globalId)) return data;
 
     const today = calendarDate(new Date());
     const codes = pickShowcaseCodes(data.equipment);
 
     // Building: rebrand the existing S01-BL-2 (or create it) as the Snowdon showcase.
     let buildings = data.buildings;
-    const existingBuilding = buildings.find((entry) => entry.SiteId === "SITE-01" && entry.bl_id === SNOWDON_BUILDING_ID);
+    const existingBuilding = buildings.find((entry) => entry.SiteId === "02-ESOC" && entry.bl_id === SNOWDON_BUILDING_ID);
     if (!existingBuilding) {
-      buildings = [...buildings, { bl_id: SNOWDON_BUILDING_ID, SiteId: "SITE-01", Name: SNOWDON_BUILDING_NAME, Address: "Snowdon Towers Sample Project (Autodesk HVAC showcase)", IsActive: true } satisfies Building];
+      buildings = [...buildings, { bl_id: SNOWDON_BUILDING_ID, SiteId: "02-ESOC", Name: SNOWDON_BUILDING_NAME, Address: "Snowdon Towers Sample Project (Autodesk HVAC showcase)", IsActive: true } satisfies Building];
     } else if (existingBuilding.Name !== SNOWDON_BUILDING_NAME) {
       buildings = buildings.map((entry) => entry === existingBuilding ? { ...entry, Name: SNOWDON_BUILDING_NAME } : entry);
     }
 
     const floors = [...data.floors];
     for (const [levelName, floorNumber] of SNOWDON_FLOORS) {
-      if (!floors.some((floor) => floor.SiteId === "SITE-01" && floor.bl_id === SNOWDON_BUILDING_ID && floor.LevelName === levelName)) {
-        floors.push({ SiteId: "SITE-01", bl_id: SNOWDON_BUILDING_ID, LevelName: levelName, FloorNumber: floorNumber, IsActive: true } satisfies Floor);
+      if (!floors.some((floor) => floor.SiteId === "02-ESOC" && floor.bl_id === SNOWDON_BUILDING_ID && floor.LevelName === levelName)) {
+        floors.push({ SiteId: "02-ESOC", bl_id: SNOWDON_BUILDING_ID, LevelName: levelName, FloorNumber: floorNumber, IsActive: true } satisfies Floor);
       }
     }
 
     const rooms = [...data.rooms];
     for (const [code, name, levelName] of SNOWDON_ROOMS) {
-      if (!rooms.some((room) => room.SiteId === "SITE-01" && room.bl_id === SNOWDON_BUILDING_ID && room.RoomCode === code)) {
-        rooms.push({ SiteId: "SITE-01", bl_id: SNOWDON_BUILDING_ID, LevelName: levelName, RoomCode: code, Name: name, IsDeskReservable: false, IsActive: true } satisfies Room);
+      if (!rooms.some((room) => room.SiteId === "02-ESOC" && room.bl_id === SNOWDON_BUILDING_ID && room.RoomCode === code)) {
+        rooms.push({ SiteId: "02-ESOC", bl_id: SNOWDON_BUILDING_ID, LevelName: levelName, RoomCode: code, Name: name, IsDeskReservable: false, IsActive: true } satisfies Room);
       }
     }
 
@@ -167,7 +167,7 @@ export function withSnowdonShowcase(data: DemoData): DemoData {
     const bimElementLinks: Record<string, BimElementLink> = { ...(data.bimElementLinks ?? {}) };
     SNOWDON_ASSETS.forEach((asset, index) => {
       const code = codes[index];
-      if (equipment.some((entry) => entry.SiteId === "SITE-01" && entry.EquipmentCode === code)) return;
+      if (equipment.some((entry) => entry.SiteId === "02-ESOC" && entry.EquipmentCode === code)) return;
       const record: Equipment = {
         EquipmentCode: code,
         EquipmentName: asset.name,
@@ -177,7 +177,7 @@ export function withSnowdonShowcase(data: DemoData): DemoData {
         Status: "In Service",
         TechnicalSpecifications: { source: "Snowdon Towers Sample HVAC", ifcType: asset.typeName },
         bl_id: SNOWDON_BUILDING_ID,
-        SiteId: "SITE-01",
+        SiteId: "02-ESOC",
         LevelName: asset.level,
         RoomCode: asset.room,
         PrimaryTradeId: asset.trade,
@@ -213,14 +213,14 @@ export function withSnowdonShowcase(data: DemoData): DemoData {
     ];
     for (const seed of wrSeeds) {
       const record = byGlobalId.get(seed.globalId);
-      if (!record || workRequests.some((wr) => wr.WR_ID === seed.id && wr.SiteId === "SITE-01")) continue;
+      if (!record || workRequests.some((wr) => wr.WR_ID === seed.id && wr.SiteId === "02-ESOC")) continue;
       workRequests.push(buildWorkRequest(record, seed.id, seed.percentage, seed.due, seed.text));
     }
 
     const locationFreezes = [...(data.locationFreezes ?? [])];
     if (!locationFreezes.some((freeze) => freeze.id === "SITE-01-snowdon-freeze")) {
       locationFreezes.push({
-        id: "SITE-01-snowdon-freeze", siteId: "SITE-01", buildingId: SNOWDON_BUILDING_ID, floorId: "L2", roomId: "203",
+        id: "SITE-01-snowdon-freeze", siteId: "02-ESOC", buildingId: SNOWDON_BUILDING_ID, floorId: "L2", roomId: "203",
         title: "Snowdon L2 Mechanical Zone Shutdown",
         description: "Studio unit 203 mechanical zone is isolated for refrigerant line recertification.",
         responsiblePerson: "Yvonne",
@@ -232,7 +232,7 @@ export function withSnowdonShowcase(data: DemoData): DemoData {
     // SmartPM orders for every showcase asset (viewer shows Next Occurrence in DD-MM-YYYY).
     const schedules = [...data.schedules];
     const blueprint = data.blueprints
-      .filter((entry) => (!entry.SiteId || entry.SiteId === "SITE-01") && entry.IsActive && entry.blueprintMode !== "family_ladder" && entry.TradeId === "Mechanical")
+      .filter((entry) => (!entry.SiteId || entry.SiteId === "02-ESOC") && entry.IsActive && entry.blueprintMode !== "family_ladder" && entry.TradeId === "Mechanical")
       .sort((a, b) => a.ChecklistCode.localeCompare(b.ChecklistCode))[0];
     if (blueprint) {
       const highWatermark = Math.max(data.pmsOrderHighWatermark ?? 0, 0, ...schedules.map((order) => Number(order.ScheduleId) || 0));

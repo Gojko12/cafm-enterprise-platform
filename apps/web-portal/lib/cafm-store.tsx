@@ -2,8 +2,9 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
-import { logChecklistCorrections } from "@cafm/shared-schema";
+import { logChecklistCorrections, LEGACY_SITE_ALIAS } from "@cafm/shared-schema";
 import type { SiteId } from "@cafm/shared-schema";
+import { ensureFjSurveys } from "./fj-satisfaction";
 import type { DemoData } from "./cafm-data";
 import { seedAccessProfiles, resolveEffectivePermissions } from "./access-profiles";
 import { ahuTemplate } from "./equipment-inspection";
@@ -15,8 +16,8 @@ export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from 
 
 export { ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES, SITE_ASSIGNMENT_ROLES, ROLE_LABELS, seedSiteData } from "./demo-seed";
 import { scopeData, withAccessProfileDefaults, seedData, SITE_ASSIGNMENT_ROLES, TRADE_ASSIGNMENT_ROLES } from "./demo-seed";
-const STORAGE_KEY = "cafm-demo-data-v23";
-const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v22", "cafm-demo-data-v21", "cafm-demo-data-v20", "cafm-demo-data-v19", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
+const STORAGE_KEY = "cafm-demo-data-v24";
+const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v23", "cafm-demo-data-v22", "cafm-demo-data-v21", "cafm-demo-data-v20", "cafm-demo-data-v19", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
 function safeStorageSet(key: string, value: string): boolean {
@@ -95,7 +96,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     let active = true;
     async function initialize() {
       try {
-      const saved = localStorage.getItem(storageKey) ?? LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(`${key}:${site}`) ?? localStorage.getItem(key)).find(Boolean);
+      const legacySite = LEGACY_SITE_ALIAS[site];
+      const saved = localStorage.getItem(storageKey) ?? LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(`${key}:${site}`) ?? (legacySite ? localStorage.getItem(`${key}:${legacySite}`) : null) ?? localStorage.getItem(key)).find(Boolean);
       let initial = scopeData(seedData(), site);
       const baseText = localStorage.getItem(baseKey);
       if (baseText) {
@@ -184,6 +186,12 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     void initialize();
     return () => { active = false; };
   }, [site, storageKey, pendingKey, baseKey]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const next = ensureFjSurveys(data);
+    if (next !== data) setData(next);
+  }, [data, ready]);
 
   useEffect(() => {
     if (!ready) return;

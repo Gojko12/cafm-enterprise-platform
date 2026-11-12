@@ -1,7 +1,12 @@
 // Seed data for 3 ESA sites with complete location hierarchies and equipment
 import { Building, Floor, Room, Equipment, BaseWorkRequest, SiteId } from "@cafm/shared-schema";
 
-export const SITES: Record<SiteId, { name: string; location: string }> = {
+export const SITES: Record<string, { name: string; location: string }> = {
+  "02-ESOC": { name: "ESOC Darmstadt", location: "Darmstadt, Germany" },
+  "01-ESTEC": { name: "ESTEC Noordwijk", location: "Noordwijk, Netherlands" },
+  "04-ESRIN": { name: "ESRIN Frascati", location: "Frascati, Italy" },
+  "03-HQ": { name: "ESA HQ Paris", location: "Paris, France" },
+  "05-ESAC": { name: "ESAC Madrid", location: "Madrid, Spain" },
   "SITE-01": { name: "ESOC Darmstadt", location: "Darmstadt, Germany" },
   "SITE-02": { name: "ESTEC Noordwijk", location: "Noordwijk, Netherlands" },
   "SITE-03": { name: "ESRIN Frascati", location: "Frascati, Italy" },

@@ -4,7 +4,7 @@ import type { DemoData } from "./cafm-data";
 
 const SEED_STAMP = "2026-01-05T08:00:00.000Z";
 const SEED_AUTHOR = "Demo Seed";
-const SITE = "SITE-01" as const;
+const SITE = "02-ESOC" as const;
 
 export const SEED_TEAMS: SiteStakeholderTeam[] = [
   { id: "TEAM-S01-ESAIT", siteId: SITE, code: "ESA IT", name: "ESA IT", color: "#2563eb", contactInfo: "IT Service Desk · it-desk@esa.example", defaultLeadDays: 7, requiresApproval: true, active: true, description: "Network, server room and IT-dependent systems", updatedAt: SEED_STAMP },

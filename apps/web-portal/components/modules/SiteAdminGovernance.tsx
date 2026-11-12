@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import type { SiteId, UserAccessProfile } from "@cafm/shared-schema";
+import { SITE_LABELS } from "@cafm/shared-schema";
 import { ALL_SITES, DEFAULT_SITE_ADMIN_GOVERNANCE, assignRoles, isPersonProfile, migrateRoles, seedAccessProfiles } from "@/lib/access-profiles";
 import { seedSiteData, stateRequest, useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import type { DemoData } from "@/lib/cafm-data";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 
-const sites: Record<SiteId, string> = { "SITE-01": "ESOC Darmstadt", "SITE-02": "ESTEC Noordwijk", "SITE-03": "ESRIN Frascati" };
+const sites: Record<SiteId, string> = SITE_LABELS;
 const controls = [
   ["canManageUsersAndVPA", "Manage Site Users & VPA"],
   ["canManageRoleAssignments", "Manage LJ Trade Managers"],

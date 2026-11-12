@@ -17,9 +17,9 @@ import { WRSignals } from "./WRSignals";
 import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import type { SignalTab } from "@/lib/wr-signals";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
-import { formatDateDDMMYYYY } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 
-type Column = "id" | "description" | "status" | "percentage" | "signals" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes" | "qa";
+type Column = "id" | "description" | "status" | "percentage" | "signals" | "trade" | "building" | "floor" | "room" | "equipment" | "cost" | "costType" | "craftperson" | "due" | "margin" | "created" | "disputes" | "qa" | "urgency" | "openedBy" | "requestor" | "sla" | "rating";
 const columns: { key: Column; label: string }[] = [
   { key: "id", label: "WR ID" }, { key: "description", label: "Title / Description" },
   { key: "status", label: "Status" }, { key: "percentage", label: "Substatus %" },
@@ -29,7 +29,8 @@ const columns: { key: Column; label: string }[] = [
   { key: "cost", label: "Estimated Cost (EUR)" }, { key: "costType", label: "Cost Type" },
   { key: "craftperson", label: "Assigned Craftperson" }, { key: "due", label: "Due Date" },
   { key: "margin", label: "Margin Date" }, { key: "created", label: "Created" }, { key: "disputes", label: "Disputes" }, { key: "qa", label: "QA Audit Status" },
-];
+    { key: "urgency", label: "Urgency" }, { key: "openedBy", label: "Opened By" }, { key: "requestor", label: "Requestor" }, { key: "sla", label: "SLA Target" }, { key: "rating", label: "Rating" },
+  ];
 
 export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, requestType, signalFilters }: { requests: BaseWorkRequest[]; onOpen: (wr: BaseWorkRequest, tab?: SignalTab) => void; grouped?: boolean; onFilterCount?: (count: number) => void; requestType: "PM" | "FJ" | "LJ"; signalFilters?: React.ReactNode }) {
   const { data, setData } = useCafmStore();
@@ -73,6 +74,11 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "margin": return wr.MarginDate ?? "";
       case "created": return wr.CreatedDate;
       case "disputes": return (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.label).join(", ");
+      case "urgency": return wr.Urgency ?? "";
+      case "openedBy": return wr.OpenedByName ? `${wr.OpenedByName}${wr.IntakeChannel ? ` · ${wr.IntakeChannel}` : ""}` : "";
+      case "requestor": return wr.RequestorName ?? "";
+      case "sla": return wr.SlaDueAt ? `${wr.SlaTargetLabel ?? ""} → ${formatDateTimeDDMMYYYY(wr.SlaDueAt)}`.trim() : "";
+      case "rating": return wr.Satisfaction?.satisfactionStatus ? `${wr.Satisfaction.satisfactionStatus === "Satisfied" ? "OK" : "Not OK"} ${"★".repeat(wr.Satisfaction.ratingStars ?? 0)}` : wr.Satisfaction ? "Pending" : "";
       case "qa": return wr.WR_Type === "LJ" ? "—" : wr.QA_AuditStatus === "QA_Failed_ActionRequired" ? "⚠ QA REWORK REQUIRED" : wr.QA_AuditStatus ?? "None";
     }
   };

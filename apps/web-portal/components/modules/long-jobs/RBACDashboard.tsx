@@ -3,6 +3,9 @@
 import React, { useState, useMemo } from "react";
 import {
   UserAccess,
+  UserAccessProfile,
+  SiteRoleAssignment,
+  SITE_LABELS,
   LJRole,
   Permission,
   SiteId,
@@ -24,7 +27,7 @@ import { useCafmStore, useActiveUserPermissions, TRADE_ASSIGNMENT_ROLES, SITE_AS
 import { FeaturePermissionMatrix, LJRoleActionMatrix } from "./RBACMatrices";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { StakeholderCatalogSection } from "@/components/modules/StakeholderCatalog";
-import { CLASSICAL_TRADES } from "@cafm/shared-schema";
+import { CLASSICAL_TRADES, PLATFORM_SITE_IDS } from "@cafm/shared-schema";
 
 const LJ_ROLES: LJRole[] = [
   "ESA_TO",
@@ -39,7 +42,7 @@ const LJ_ROLES: LJRole[] = [
   "TRADE_LONG_JOB",
 ];
 
-const SITE_IDS: SiteId[] = ["SITE-01", "SITE-02", "SITE-03"];
+const SITE_IDS: SiteId[] = [...PLATFORM_SITE_IDS];
 
 const LJ_ROLE_ACTIONS: Record<LJRole, string[]> = {
   ESA_TO: ["Approve & Order", "Approve SAT", "Final Approval", "Approve Costs"],
@@ -132,35 +135,16 @@ export function RBACDashboard() {
       {activeTab === "users" && <>
       <UserAccessMonitor
         users={users}
+        profiles={data.userAccessProfiles.filter((item) => item.siteId === activeSiteId)}
+        assignments={data.siteRoleAssignments.filter((item) => item.SiteId === activeSiteId)}
+        canEdit={canEditMatrices}
+        onToggleSiteAdmin={(personName, value) => setData((current) => ({ ...current, userAccessProfiles: current.userAccessProfiles.map((item) =>
+          item.siteId === activeSiteId && item.personName === personName ? { ...item, isSiteAdmin: value } : item) }))}
         onAddUser={handleAddUser}
         onDeleteUser={handleDeleteUser}
         expandedUser={expandedUser}
         setExpandedUser={setExpandedUser}
       />
-      <section className="bg-white border rounded-lg p-4 space-y-3">
-        <h2 className="text-lg font-semibold">Site Administrator & Site-wide Role Assignments — {activeSiteId}</h2>
-        <p className="text-sm text-gray-600">Choose who holds each site-wide role. Changes are saved automatically.</p>
-        <div className="grid md:grid-cols-2 gap-3">
-          {SITE_ASSIGNMENT_ROLES.map((role) => <label key={role} className="text-sm border rounded p-3 bg-gray-50">
-            {ROLE_LABELS[role]} ({role})
-            <select className="block w-full border rounded p-2 bg-white"
-              value={data.siteRoleMappings.find((item) => item.SiteId === activeSiteId)?.assignments[role] ?? ""}
-              onChange={(event) => {
-                const value = event.target.value;
-                setData((current) => {
-                  const existing = current.siteRoleMappings.find((item) => item.SiteId === activeSiteId);
-                  return { ...current, siteRoleMappings: [...current.siteRoleMappings.filter((item) => item.SiteId !== activeSiteId),
-                    { SiteId: activeSiteId, assignments: { ...existing?.assignments, [role]: value } }] };
-                });
-              }}>
-              <option value="">Unassigned</option>
-              {users.filter((user) => (user.CanAccessAll || user.AssignedSiteIds.includes(activeSiteId)) &&
-                (user.LJRoles.includes(role) || user.SystemRole === role)).map((user) =>
-                <option key={user.UserId} value={user.UserId}>{user.DisplayName}</option>)}
-            </select>
-          </label>)}
-        </div>
-      </section>
       </>}
 
       {activeTab === "features" && <FeaturePermissionMatrix canEdit={canEditMatrices} />}
@@ -215,12 +199,20 @@ export function RBACDashboard() {
 // Tab 1: User & Site Access Monitor
 function UserAccessMonitor({
   users,
+  profiles,
+  assignments,
+  canEdit,
+  onToggleSiteAdmin,
   onAddUser,
   onDeleteUser,
   expandedUser,
   setExpandedUser,
 }: {
   users: UserAccess[];
+  profiles: UserAccessProfile[];
+  assignments: SiteRoleAssignment[];
+  canEdit: boolean;
+  onToggleSiteAdmin: (personName: string, value: boolean) => void;
   onAddUser: (user: UserAccess) => void;
   onDeleteUser: (userId: string) => void;
   expandedUser: string | null;
@@ -317,54 +309,58 @@ function UserAccessMonitor({
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">User ID</th>
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">Display Name</th>
+              <th className="text-left px-4 py-2 font-semibold text-gray-700">Person</th>
+              <th className="text-left px-4 py-2 font-semibold text-gray-700">Contact</th>
               <th className="text-left px-4 py-2 font-semibold text-gray-700">System Role</th>
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">Assigned Sites</th>
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">LJ Roles</th>
+              <th className="text-left px-4 py-2 font-semibold text-gray-700">Site Access</th>
+              <th className="text-left px-4 py-2 font-semibold text-gray-700">Site Admin</th>
+              <th className="text-left px-4 py-2 font-semibold text-gray-700">Main / Deputy Roles</th>
               <th className="text-center px-4 py-2 font-semibold text-gray-700">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
+            {users.map((user) => {
+              const profile = profiles.find((item) => item.personName === user.DisplayName || item.username === user.UserId);
+              const mine = assignments.filter((item) => item.PersonName === user.DisplayName);
+              const mainRoles = [...new Set(mine.filter((item) => item.AssignmentLevel === "Main").map((item) => item.RoleCode))];
+              const deputyRoles = [...new Set(mine.filter((item) => item.AssignmentLevel === "Deputy").map((item) => item.RoleCode))];
+              const sites = profile?.siteAccess ?? user.AssignedSiteIds;
+              return (
               <React.Fragment key={user.UserId}>
-                <tr className="border-b border-gray-200 hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium text-gray-900">
-                    {user.UserId}
+                <tr className="border-b border-gray-200 hover:bg-gray-50 align-top">
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-gray-900">{profile?.fullName ?? user.DisplayName}</div>
+                    <div className="text-xs text-gray-500">@{profile?.username ?? user.UserId}</div>
                   </td>
-                  <td className="px-4 py-2">{user.DisplayName}</td>
+                  <td className="px-4 py-2 text-xs text-gray-700">
+                    <div>{profile?.email ?? "—"}</div>
+                    <div>{profile?.phone ?? ""}</div>
+                  </td>
                   <td className="px-4 py-2">
                     <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                      {user.SystemRole}
+                      {user.SystemRole === "HELPDESK" ? "Helpdesk" : user.SystemRole}
                     </span>
+                    {profile?.isSuperAdmin && <span className="ml-1 px-2 py-1 bg-amber-100 text-amber-800 rounded text-xs">Super Admin</span>}
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex flex-wrap gap-1">
-                      {user.AssignedSiteIds.map((site) => (
-                        <span
-                          key={site}
-                          className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs"
-                        >
-                          {site}
-                        </span>
+                      {sites.map((site) => (
+                        <span key={site} className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">{SITE_LABELS[site] ?? site}</span>
                       ))}
                     </div>
                   </td>
                   <td className="px-4 py-2">
+                    <label className="inline-flex items-center gap-1 text-xs">
+                      <input type="checkbox" disabled={!canEdit || !profile || !!profile.isSuperAdmin} checked={!!(profile?.isSiteAdmin || profile?.isSuperAdmin)}
+                        onChange={(e) => profile && onToggleSiteAdmin(profile.personName, e.target.checked)} />
+                      Site Admin
+                    </label>
+                  </td>
+                  <td className="px-4 py-2 text-xs">
                     <div className="flex flex-wrap gap-1">
-                      {user.LJRoles.slice(0, 2).map((role) => (
-                        <span
-                          key={role}
-                          className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs"
-                        >
-                          {role}
-                        </span>
-                      ))}
-                      {user.LJRoles.length > 2 && (
-                        <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">
-                          +{user.LJRoles.length - 2}
-                        </span>
-                      )}
+                      {mainRoles.map((role) => <span key={`m-${role}`} className="px-2 py-1 bg-purple-100 text-purple-800 rounded">Main · {role}</span>)}
+                      {deputyRoles.map((role) => <span key={`d-${role}`} className="px-2 py-1 bg-slate-100 text-slate-700 rounded">Deputy · {role}</span>)}
+                      {!mainRoles.length && !deputyRoles.length && <span className="text-gray-400">—</span>}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-center">
@@ -398,7 +394,7 @@ function UserAccessMonitor({
 
                 {expandedUser === user.UserId && (
                   <tr className="bg-blue-50">
-                    <td colSpan={6} className="px-4 py-3">
+                    <td colSpan={7} className="px-4 py-3">
                       <div className="space-y-2">
                         <div>
                           <h4 className="font-semibold text-sm mb-1">
@@ -408,9 +404,9 @@ function UserAccessMonitor({
                             This user can access:
                           </p>
                           <ul className="text-xs text-gray-700 mt-1 ml-2 space-y-1">
-                            {user.AssignedSiteIds.map((site) => (
+                            {sites.map((site) => (
                               <li key={site}>
-                                • {site} (all WRs, Equipment, and Locations)
+                                • {SITE_LABELS[site] ?? site} (all WRs, Equipment, and Locations)
                               </li>
                             ))}
                           </ul>
@@ -433,7 +429,8 @@ function UserAccessMonitor({
                   </tr>
                 )}
               </React.Fragment>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

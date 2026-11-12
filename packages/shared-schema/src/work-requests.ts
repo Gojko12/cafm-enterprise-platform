@@ -2,6 +2,7 @@ import { z } from "zod";
 import { LocationHierarchySchema, SiteIdSchema } from "./locations.js";
 import { PM_ScheduleStepSchema, PM_StepAuditLogSchema, PM_WorkRequestStepSchema, PMTargetFields } from "./smart-pm.js";
 import { CalendarDateSchema, LocalDateTimeSchema } from "./dispatch.js";
+import { SatisfactionSurveyRecordSchema, UrgencyCodeSchema } from "./sla.js";
 
 export const WR_Type = z.enum(["PM", "LJ", "FJ"]);
 export type WR_Type = z.infer<typeof WR_Type>;
@@ -370,6 +371,20 @@ export const BaseWorkRequestSchema = z.object({
   QA_IssueDescription: z.string().optional(),
   QA_CorrectionComment: z.string().optional(),
   Urgency: z.string().optional(),
+  UrgencyCode: UrgencyCodeSchema.optional(),
+  SlaTargetLabel: z.string().optional(),
+  SlaStartAt: z.string().optional(),
+  SlaDueAt: z.string().optional(),
+  SlaMarginAt: z.string().optional(),
+  IntakeChannel: z.enum(["Phone Call", "Email", "Walk-in", "Self-Service"]).optional(),
+  OpenedByPersonId: z.string().optional(),
+  OpenedByName: z.string().optional(),
+  OpenedByRole: z.string().optional(),
+  RequestorName: z.string().optional(),
+  RequestorEmail: z.string().optional(),
+  RequestorPhone: z.string().optional(),
+  RequestorDepartment: z.string().optional(),
+  Satisfaction: SatisfactionSurveyRecordSchema.optional(),
   PreSATApproved: z.boolean().optional(),
   Activity: z.array(z.object({
     id: z.string(),

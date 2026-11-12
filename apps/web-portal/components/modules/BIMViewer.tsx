@@ -10,6 +10,7 @@ import {
 import { formatDateDDMMYYYY, WR_Statuses } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Building, Equipment, Floor, LocationFreeze, Room } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
+import { buildFastJobWR } from "@/lib/fj-factory";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { getUnfavourableStepCount } from "@/lib/wr-signals";
 import { formatFreezePeriodWindow, freezeLocations, localNowIso } from "@/lib/location-freezes";
@@ -85,7 +86,7 @@ function displayName(element: BimElement): string {
 
 export function BIMViewer() {
   const { data, setData } = useCafmStore();
-  const { permissions } = useActiveUserPermissions();
+  const { permissions, profile } = useActiveUserPermissions();
   const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1138,42 +1139,7 @@ export function BIMViewer() {
 
   const createFastJob = (job: FastJobData) => {
     if (!permissions?.canCreateFJ) { alert("Permission required to create a Fast Job."); return; }
-    const createdAt = new Date().toISOString();
-    const issuedStatus = WR_Statuses.find((entry) => entry.Percentage === 50 && entry.ESAWorkType === "Corrective Maintenance");
-    if (!issuedStatus) throw new Error("Issued status configuration is missing.");
-    const newWR: BaseWorkRequest = {
-      WR_ID: `FJ-${Date.now()}`,
-      JobID: `JOB-${Date.now()}`,
-      WR_Type: "FJ",
-      ESAWorkType: "Corrective Maintenance",
-      Description: job.description,
-      ProblemLocation: `${job.bl_id} / ${job.levelName} / ${job.roomCode}`,
-      CreatedDate: createdAt.slice(0, 10),
-      WorkRequestStatus: issuedStatus.WorkRequestStatus,
-      WorkRequestSubstatus: issuedStatus.WorkRequestSubstatus,
-      Percentage: issuedStatus.Percentage,
-      SiteId: activeSiteId,
-      bl_id: job.bl_id,
-      LevelName: job.levelName,
-      RoomCode: job.roomCode,
-      AssignedCraftpersonIds: [],
-      AssignedUserIds: [],
-      CreatedBy: currentUser?.UserId ?? "current-user",
-      IsFrozen: false,
-      EquipmentCodes: job.equipmentCode ? [job.equipmentCode] : [],
-      TotalTimeMinutes: job.timeSpentMinutes,
-      StartDateTBD: false,
-      RequiresSAT: false,
-      RequiresDrawingUpdate: false,
-      RequiresInventoryUpdate: false,
-      AcceptanceGates: [],
-      UpdatedAt: createdAt,
-      Attachments: job.photoUrl ? [{ id: crypto.randomUUID(), name: job.photoName ?? "fast-job-photo", type: job.photoType || "image/unknown", dataUrl: job.photoUrl }] : [],
-      Activity: [{
-        id: crypto.randomUUID(), kind: "log", actorId: currentUser?.UserId ?? "current-user",
-        actorName: activePerson, actorRole: "", createdAt, text: "Fast Job created from the 3D BIM viewer.",
-      }],
-    };
+    const newWR = buildFastJobWR(job, { siteId: activeSiteId, data, actor: { userId: currentUser?.UserId, displayName: profile?.fullName ?? activePerson, role: String(profile?.primaryRole ?? ""), personId: profile?.id }, source: "Fast Job created from the 3D BIM viewer" });
     setData((current) => ({ ...current, workRequests: [...current.workRequests, newWR] }));
     setFastJobOpen(false);
     setNotice(`Fast Job ${newWR.WR_ID} was created.`);
