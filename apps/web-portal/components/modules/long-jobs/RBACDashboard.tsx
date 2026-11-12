@@ -31,6 +31,8 @@ import { CLASSICAL_TRADES, PLATFORM_SITE_IDS } from "@cafm/shared-schema";
 import type { CifmPerson } from "@cafm/shared-schema";
 import { CifmDirectoryTab, FmAccessModal, FmStaffTable, SiteAdminCards } from "./PeopleDirectory";
 import { TradeManagerAssignments } from "@/components/modules/TradeManagerAssignments";
+import { OnboardingQueue, OnboardPersonModal } from "./OnboardingQueue";
+import { pendingOnboardingCount } from "@/lib/onboarding";
 import { UserAccessMatrix } from "@/components/modules/UserAccessMatrix";
 
 const LJ_ROLES: LJRole[] = [
@@ -71,13 +73,14 @@ const LJ_ROLE_ACTIONS: Record<LJRole, string[]> = {
   ],
 };
 
-type ConsoleTab = "directory" | "fm-roles" | "capabilities" | "stages" | "teams";
+type ConsoleTab = "directory" | "fm-roles" | "capabilities" | "stages" | "teams" | "onboarding";
 const CONSOLE_TABS: { id: ConsoleTab; label: string }[] = [
   { id: "directory", label: "1. CIFM People Directory (All Employees)" },
   { id: "fm-roles", label: "2. FM Roles, Trades & Site Admins" },
   { id: "capabilities", label: "3. Role Capabilities & Permissions" },
   { id: "stages", label: "4. Long Job Stage Matrix (0%–100%)" },
   { id: "teams", label: "5. Teams & Notices (Newsflash)" },
+  { id: "onboarding", label: "Onboarding Queue" },
 ];
 const LEGACY_TAB_IDS: Record<string, ConsoleTab> = { users: "directory", features: "capabilities", "trade-managers": "fm-roles" };
 
@@ -102,6 +105,8 @@ export function RBACDashboard() {
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<UserAccess | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
+  const [showOnboard, setShowOnboard] = useState(false);
+  const pendingCount = pendingOnboardingCount(data.onboardingRequests);
 
   const handleAddUser = (user: UserAccess) => {
     if (users.some((item) => item.UserId === user.UserId)) {
@@ -124,6 +129,9 @@ export function RBACDashboard() {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <button type="button" onClick={() => setShowOnboard(true)} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-800">+ Onboard New Person</button>
+      </div>
       <div className="flex flex-wrap gap-2 border-b border-gray-200">
         {CONSOLE_TABS.map((tab) => (
           <button
@@ -135,10 +143,14 @@ export function RBACDashboard() {
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            {tab.label}
+            {tab.id === "onboarding" ? `Onboarding Queue (${pendingCount} Pending)` : tab.label}
+            {tab.id === "onboarding" && pendingCount > 0 && <span className="ml-2 rounded-full bg-rose-600 px-1.5 py-0.5 text-xs text-white">{pendingCount}</span>}
           </button>
         ))}
       </div>
+
+      {showOnboard && <OnboardPersonModal onClose={() => setShowOnboard(false)} />}
+      {activeTab === "onboarding" && <OnboardingQueue />}
 
       {activeTab === "directory" && <CifmDirectoryTab onGrantFm={setFmEditing} />}
       {fmEditing && <FmAccessModal person={fmEditing} onClose={() => setFmEditing(null)} />}

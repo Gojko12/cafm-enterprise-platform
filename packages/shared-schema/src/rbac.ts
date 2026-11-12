@@ -22,6 +22,7 @@ export const UserRole = z.enum([
   "TeamLeader",
   "StandardEmployee",
   "HELPDESK",
+  "HR_ADMIN",
 ]);
 
 export type UserRole = z.infer<typeof UserRole>;
@@ -85,6 +86,7 @@ export const Permission = z.enum([
   "longJobs.manageRFW",
   "longJobs.approveAcceptanceGates",
   "longJobs.manageSiteContext",
+  "people.onboardNonFm",
 ]);
 
 export type Permission = z.infer<typeof Permission>;
@@ -121,6 +123,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageRFW",
     "longJobs.approveAcceptanceGates",
     "longJobs.manageSiteContext",
+    "people.onboardNonFm",
   ],
   ESA_TO: [
     "pmSchedules.updateRequirementsFromWr",
@@ -315,6 +318,13 @@ export const ROLE_PERMISSIONS = {
     "workRequests.create",
     "pmSchedules.read",
     "deskReservations.manageOwn",
+  ],
+  HR_ADMIN: [
+    "locations.read",
+    "workRequests.create",
+    "deskReservations.manageOwn",
+    "deskReservations.manageAll",
+    "people.onboardNonFm",
   ],
 } as const satisfies Record<UserRole, readonly Permission[]>;
 

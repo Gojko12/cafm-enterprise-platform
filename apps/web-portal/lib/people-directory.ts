@@ -13,7 +13,7 @@ export interface DirectoryPerson {
   sites: SiteId[];
   siteAdminOf: SiteId[];
   superAdmin?: boolean;
-  preset: "FullAdmin" | "TeamLeader" | "QAInspector" | "PMEngineer" | "Helpdesk";
+  preset: "FullAdmin" | "TeamLeader" | "QAInspector" | "PMEngineer" | "Helpdesk" | "HRAdmin";
 }
 
 const ALL: SiteId[] = [...PLATFORM_SITE_IDS];
@@ -36,6 +36,7 @@ export const PEOPLE_DIRECTORY: DirectoryPerson[] = [
   person("Ivan Horvat", "Ivan Horvat", "ESA_IM", "+49 6151 90 2170", "CIFM Inventory", { ljRoles: ["ESA_IM"] }),
   person("Elena Schmidt", "Elena Schmidt", "HELPDESK", "+49 6151 90 2001", "Helpdesk", { sites: ["02-ESOC", "01-ESTEC"], preset: "Helpdesk" }),
   person("Lukas Weber", "Lukas Weber", "TeamLeader", "+49 6151 90 2180", "Mechanical Team", { sites: ["02-ESOC"], preset: "TeamLeader" }),
+  person("Hannah Weber", "Hannah Weber", "HR_ADMIN", "+49 6151 90 2005", "Corporate HR & Admin", { preset: "HRAdmin" }),
   person("Jan de Vries", "Jan de Vries", "SiteAdministrator", "+31 71 565 2201", "Facility Management", { sites: ["01-ESTEC", "02-ESOC"], siteAdminOf: ["01-ESTEC"], preset: "FullAdmin" }),
   person("Sophie Laurent", "Sophie Laurent", "SiteAdministrator", "+33 1 5369 7201", "Facility Management", { sites: ["03-HQ"], siteAdminOf: ["03-HQ"], preset: "FullAdmin" }),
   person("Marco Rossi", "Marco Rossi", "SiteAdministrator", "+39 06 9418 0201", "Facility Management", { sites: ["04-ESRIN"], siteAdminOf: ["04-ESRIN"], preset: "FullAdmin" }),

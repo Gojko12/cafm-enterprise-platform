@@ -63,6 +63,7 @@ export interface DemoData {
   featurePermissionOverrides?: Record<string, boolean>;
   siteSlaConfig?: SiteSlaConfig;
   cifmPeople?: CifmPerson[];
+  onboardingRequests?: import("@cafm/shared-schema").OnboardingRequest[];
   fjNotifications?: { id: string; wrId: string; recipient: string; createdAt: string; kind: "FJ_DISSATISFACTION"; message: string; read?: boolean }[];
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];

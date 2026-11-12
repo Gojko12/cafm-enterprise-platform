@@ -2,7 +2,7 @@ import { CLASSICAL_TRADES, PLATFORM_SITE_IDS, normalizeSiteId } from "@cafm/shar
 import { PEOPLE_DIRECTORY } from "./people-directory";
 import type { UserAccessProfile, UserGranularPermissions, SiteId, RoleDefinition } from "@cafm/shared-schema";
 
-export type AccessPreset = "Craftperson" | "TeamLeader" | "QAInspector" | "PMEngineer" | "FullAdmin" | "Helpdesk";
+export type AccessPreset = "Craftperson" | "TeamLeader" | "QAInspector" | "PMEngineer" | "FullAdmin" | "Helpdesk" | "HRAdmin";
 export const ALL_SITES: SiteId[] = [...PLATFORM_SITE_IDS];
 export const DEFAULT_SITE_ADMIN_GOVERNANCE = {
   canManageUsersAndVPA: true, canManageRoleAssignments: true, canManageAuditQuotas: true,
@@ -38,6 +38,7 @@ export function defaultRoleDefinitions(): RoleDefinition[] {
     { id: "senior-craft", name: "Senior Craftperson", description: "Experienced field execution.", badgeColor: "rose", baseRoleType: "Craftperson", permissions: permissionsForPreset("Craftperson") },
     { id: "craftperson", name: "Craftperson", description: "Field execution.", badgeColor: "slate", baseRoleType: "Craftperson", permissions: permissionsForPreset("Craftperson") },
     { id: "helpdesk", name: "Helpdesk", description: "Opens Fast Jobs on behalf of requestors; read-only elsewhere.", badgeColor: "cyan", baseRoleType: "Helpdesk", permissions: permissionsForPreset("Helpdesk") },
+    { id: "hr-admin", name: "HR Administrator", description: "Onboards and maintains Non-FM employees, rooms and departments.", badgeColor: "rose", baseRoleType: "HRAdmin", permissions: permissionsForPreset("HRAdmin") },
   ];
   return roles.map(normalizeChecklistRole);
 }
@@ -91,6 +92,7 @@ export function resolveEffectivePermissions(profile: UserAccessProfile, definiti
 
 export function migrateRoles(profiles: UserAccessProfile[], existing?: RoleDefinition[]) {
   const roles = (existing ?? defaultRoleDefinitions()).map(normalizeChecklistRole);
+  if (!roles.some((role) => role.id === "hr-admin")) roles.push(...defaultRoleDefinitions().filter((role) => role.id === "hr-admin"));
   const next = profiles.filter(isPersonProfile).map((original) => {
     const cleanName = (value: string) => value.replace(/\s*\((?:ESTEC|ESRIN) Admin\)$/i, "");
     const profile = { ...original, personName: cleanName(original.personName), fullName: cleanName(original.fullName) };
@@ -105,7 +107,7 @@ export function migrateRoles(profiles: UserAccessProfile[], existing?: RoleDefin
 }
 export function assignRoles(profile: UserAccessProfile, ids: string[], roles: RoleDefinition[]): UserAccessProfile {
   const selected = roles.filter((role) => ids.includes(role.id));
-  const priority: RoleDefinition["baseRoleType"][] = ["SuperAdmin", "SiteAdministrator", "TeamLeader", "QAInspector", "TechnicalOfficer", "Helpdesk", "Craftperson"];
+  const priority: RoleDefinition["baseRoleType"][] = ["SuperAdmin", "SiteAdministrator", "TeamLeader", "QAInspector", "TechnicalOfficer", "Helpdesk", "HRAdmin", "Craftperson"];
   const primaryRole = priority.find((role) => selected.some((item) => item.baseRoleType === role)) ?? "Craftperson";
   const updated: UserAccessProfile = { ...profile, assignedRoleIds: ids, primaryRole,
     isSuperAdmin: primaryRole === "SuperAdmin", isSiteAdmin: primaryRole === "SuperAdmin" || primaryRole === "SiteAdministrator",
@@ -113,6 +115,7 @@ export function assignRoles(profile: UserAccessProfile, ids: string[], roles: Ro
     isQAInspector: selected.some((item) => item.baseRoleType === "QAInspector"),
     isCraftperson: selected.some((item) => item.baseRoleType === "Craftperson"),
     isHelpdesk: selected.some((item) => item.baseRoleType === "Helpdesk"),
+    isHrAdmin: selected.some((item) => item.baseRoleType === "HRAdmin"),
     managedSiteIds: primaryRole === "SuperAdmin" ? [...ALL_SITES] : primaryRole === "SiteAdministrator" ? [profile.siteId] : [],
     siteAdminGovernance: primaryRole === "SiteAdministrator" ? profile.siteAdminGovernance ?? { ...DEFAULT_SITE_ADMIN_GOVERNANCE } : undefined,
   };
@@ -123,19 +126,19 @@ export function directoryProfile(entry: (typeof PEOPLE_DIRECTORY)[number], siteI
   const siteAdmin = entry.siteAdminOf.includes(siteId);
   const superAdmin = !!entry.superAdmin;
   const helpdesk = entry.preset === "Helpdesk";
+  const hrAdmin = entry.preset === "HRAdmin";
   const preset: AccessPreset = superAdmin || siteAdmin ? "FullAdmin" : entry.preset;
   return { id: `${siteId}-profile-${entry.personName}`, siteId, personName: entry.personName, fullName: entry.fullName,
     username: entry.username, email: entry.email, phone: entry.phone, department: entry.department, siteAccess: [...entry.sites],
-    primaryRole: superAdmin ? "SuperAdmin" : siteAdmin ? "SiteAdministrator" : helpdesk ? "Helpdesk" : preset === "QAInspector" ? "QAInspector" : preset === "TeamLeader" ? "TeamLeader" : "TechnicalOfficer",
+    primaryRole: superAdmin ? "SuperAdmin" : siteAdmin ? "SiteAdministrator" : helpdesk ? "Helpdesk" : hrAdmin ? "HRAdmin" : preset === "QAInspector" ? "QAInspector" : preset === "TeamLeader" ? "TeamLeader" : "TechnicalOfficer",
     isSuperAdmin: superAdmin, managedSiteIds: superAdmin ? [...ALL_SITES] : siteAdmin ? [siteId] : [],
     ...(siteAdmin ? { siteAdminGovernance: { ...DEFAULT_SITE_ADMIN_GOVERNANCE } } : {}),
-    isHelpdesk: helpdesk,
-    isTeamLeader: preset === "TeamLeader" || preset === "FullAdmin", isCraftperson: false,
+    isHelpdesk: helpdesk, isHrAdmin: hrAdmin, isTeamLeader: preset === "TeamLeader" || preset === "FullAdmin", isCraftperson: false,
     isQAInspector: preset === "QAInspector", isSiteAdmin: preset === "FullAdmin",
     vpaTrades: [...CLASSICAL_TRADES], vpaBuildingIds: [], permissions: permissionsForPreset(preset) };
 }
 function withRoleIds(item: UserAccessProfile): UserAccessProfile {
-  const assigned = { ...item, assignedRoleIds: [item.isSuperAdmin ? "super-admin" : item.isSiteAdmin ? "site-admin" : item.isHelpdesk ? "helpdesk" : item.isTeamLeader ? "team-leader" : item.isQAInspector ? "qa-inspector" : "craftperson"] };
+  const assigned = { ...item, assignedRoleIds: [item.isSuperAdmin ? "super-admin" : item.isSiteAdmin ? "site-admin" : item.isHelpdesk ? "helpdesk" : item.isHrAdmin ? "hr-admin" : item.isTeamLeader ? "team-leader" : item.isQAInspector ? "qa-inspector" : "craftperson"] };
   return { ...assigned, permissions: resolveEffectivePermissions(assigned, defaultRoleDefinitions()) };
 }
 export function ensureDirectoryProfiles(profiles: UserAccessProfile[], sites: SiteId[]): UserAccessProfile[] {

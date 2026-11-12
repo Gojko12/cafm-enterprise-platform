@@ -15,6 +15,8 @@ import { ensureAnalyticsHistorySeeded } from "./analytics-history-seed";
 import { withCoordinationShowcase } from "./pm-coordination-seed";
 import { withPeopleDirectory } from "./people-seed";
 import { withCifmDirectory } from "./cifm-people";
+import { withOnboardingSeed } from "./onboarding";
+import { withEquipmentRegistryMigration } from "./equipment-migration";
 import { usernameForRole } from "./people-directory";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
@@ -31,9 +33,10 @@ export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
   const site = normalizeSiteId(requestedSite) ?? requestedSite;
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
-  data = withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(migratePmState(migrateLegacySiteIds(data)))))));
+  data = withOnboardingSeed(withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(withEquipmentRegistryMigration(migratePmState(migrateLegacySiteIds(data)))))))));
   return {
     ...data,
+    onboardingRequests: (data.onboardingRequests ?? []).filter((item) => item.stationedSiteId === site),
     siteSlaConfig: data.siteSlaConfig?.siteId === site ? data.siteSlaConfig : undefined,
     fjNotifications: (data.fjNotifications ?? []).filter((item) => data.workRequests.some((wr) => wr.WR_ID === item.wrId && wr.SiteId === site)),
     stakeholderTeams: (data.stakeholderTeams ?? []).filter((item) => item.siteId === site),

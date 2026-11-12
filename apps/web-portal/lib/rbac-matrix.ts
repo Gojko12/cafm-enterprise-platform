@@ -12,7 +12,7 @@ export const LJ_ROLE_DISPLAY: Record<string, string> = {
   ESA_TO: "ESA Tech Officer", ESA_TM: "ESA Trade Mgr", ESA_LJM: "ESA Long Job Mgr", ESA_CCM: "ESA Cost Centre",
   ESA_DO: "Draftsman", ESA_IM: "Inventory Admin", TRADE_CM: "Contractor CM", TRADE_TM: "Contractor TM",
   SiteAdministrator: "Site Administrator", PM_Planner: "PM Planner", QA_Inspector: "QA Inspector",
-  MobileTechnician: "Mobile Technician", TeamLeader: "Team Leader", StandardEmployee: "Standard Employee",
+  MobileTechnician: "Mobile Technician", TeamLeader: "Team Leader", StandardEmployee: "Standard Employee", HR_ADMIN: "HR Administrator",
 };
 
 export const LJ_STAGES = [
@@ -79,6 +79,7 @@ export const FEATURE_GROUPS: Array<{ title: string; items: Array<[Permission, st
     ["system.configure", "Configure Site Settings"], ["users.manageRoles", "Manage Users & Roles"], ["data.importExport", "Import / Export Data"],
     ["locations.read", "View Buildings, Floors & Rooms"], ["locations.write", "Edit Buildings, Floors & Rooms"],
     ["equipment.read", "View Equipment"], ["equipment.write", "Create & Edit Equipment"], ["trades.write", "Manage Trades"],
+    ["people.onboardNonFm", "Onboard & Edit Non-FM Employees (HR)"],
   ] },
   { title: "Work Requests", items: [
     ["workRequests.readAll", "View All Work Requests"], ["workRequests.readAssigned", "View Own Assigned Work Requests"],

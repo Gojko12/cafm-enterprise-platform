@@ -76,7 +76,7 @@ export function seedCifmPeople(data: DemoData): CifmPerson[] {
     const id = `cifm-fm-${person.username}`;
     if (ids.has(id)) return;
     ids.add(id);
-    existing.push({ ...person, id, employeeCode: code(counter++), isFmStaff: true });
+    existing.push({ ...person, id, employeeCode: code(counter++), isFmStaff: person.systemRole !== "HR_ADMIN" });
   };
   for (const entry of PEOPLE_DIRECTORY) {
     const home = entry.sites[0] ?? "02-ESOC";

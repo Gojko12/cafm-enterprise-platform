@@ -10,7 +10,7 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
+import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, OnboardingRequestSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 
@@ -51,7 +51,9 @@ const permissionsSchema = z.object({
 const UserAccessProfileSchema = z.object({
   id: z.string().min(1), siteId: siteSchema, personName: z.string().min(1), fullName: z.string().min(1),
   email: z.string().email().optional(), linkedCraftpersonId: z.string().min(1).optional(),
-  primaryRole: z.enum(["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"]),
+  username: z.string().min(1).optional(), phone: z.string().optional(), department: z.string().optional(),
+  siteAccess: z.array(siteSchema).optional(), isHelpdesk: z.boolean().optional(), isHrAdmin: z.boolean().optional(),
+  primaryRole: z.enum(["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin", "Helpdesk", "HRAdmin"]),
   isTeamLeader: z.boolean(), isCraftperson: z.boolean(), isQAInspector: z.boolean(), isSiteAdmin: z.boolean(),
   isSuperAdmin: z.boolean().optional(), managedSiteIds: z.array(siteSchema).optional(),
   siteAdminGovernance: z.object({ canManageUsersAndVPA: z.boolean(), canManageRoleAssignments: z.boolean(), canManageAuditQuotas: z.boolean(), canManageFreezesAndShifts: z.boolean(), canResetOrExportSiteData: z.boolean() }).optional(),
@@ -61,7 +63,7 @@ const UserAccessProfileSchema = z.object({
 const roleDefinitionSchema = z.object({
   id: z.string().min(1), name: z.string().trim().min(1), description: z.string(),
   badgeColor: z.enum(["amber", "purple", "blue", "emerald", "cyan", "slate", "rose"]),
-  baseRoleType: z.enum(["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"]),
+  baseRoleType: z.enum(["Craftperson", "TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin", "Helpdesk", "HRAdmin"]),
   parentRoleId: z.string().min(1).optional(), isCustomVariant: z.boolean().optional(), permissions: permissionsSchema,
 });
 const localTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -172,6 +174,7 @@ const stateSchema = z.object({
   featurePermissionOverrides: z.record(z.string().regex(/^[A-Za-z_]+\|[A-Za-z]+\.[A-Za-z]+$/), z.boolean()).optional(),
   siteSlaConfig: SiteSlaConfigSchema.optional(),
   cifmPeople: z.array(CifmPersonSchema).optional(),
+  onboardingRequests: z.array(OnboardingRequestSchema).optional(),
   fjNotifications: z.array(z.object({
     id: z.string().min(1), wrId: z.string().min(1), recipient: z.string().min(1), createdAt: z.string().min(1),
     kind: z.literal("FJ_DISSATISFACTION"), message: z.string(), read: z.boolean().optional(),
@@ -259,6 +262,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string) {
       !state.workRequests.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site) &&
       !state.deletedWorkRequests?.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site))) return false;
   if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
+  if (state.onboardingRequests?.some((item) => item.stationedSiteId !== site)) return false;
   if (state.qaAuditReports?.some((item) => item.siteId !== site)) return false;
   if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;
   if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
