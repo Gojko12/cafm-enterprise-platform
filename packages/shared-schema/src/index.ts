@@ -1,6 +1,7 @@
 export * from "./locations.js";
 export * from "./equipment.js";
 export * from "./work-requests.js";
+export * from "./work-request-id.js";
 export * from "./smart-pm.js";
 export * from "./pm-blueprints.js";
 export * from "./pm-targets.js";

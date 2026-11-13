@@ -20,6 +20,7 @@ import { withEquipmentRegistryMigration } from "./equipment-migration";
 import { withManufacturerSeed } from "./manufacturer-seed";
 import { withPmChecklistEnrichment } from "./pm-checklist-enrichment";
 import { usernameForRole } from "./people-directory";
+import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
 export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
@@ -35,7 +36,8 @@ export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
   const site = normalizeSiteId(requestedSite) ?? requestedSite;
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
-  data = withManufacturerSeed(withOnboardingSeed(withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(withEquipmentRegistryMigration(withPmChecklistEnrichment(migratePmState(migrateLegacySiteIds(data)))))))))));
+  data = withManufacturerSeed(withOnboardingSeed(withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(withEquipmentRegistryMigration(withPmChecklistEnrichment(migratePmState(migrateLegacySiteIds(migrateWorkRequestIdsTo10Digits(data))))))))))));
+  const siteEquipmentCodes = new Set(data.equipment.filter((item) => item.SiteId === site).map((item) => item.EquipmentCode));
   return {
     ...data,
     onboardingRequests: (data.onboardingRequests ?? []).filter((item) => item.stationedSiteId === site),
@@ -84,6 +86,7 @@ export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
     auditTemplates: (data.auditTemplates ?? []).filter((item) => item.siteId === site),
     auditImports: (data.auditImports ?? []).filter((item) => item.siteId === site),
     auditAssurance: { ...data.auditAssurance, checkpointTemplates: withStandardCheckpointTemplates(data.auditAssurance?.checkpointTemplates ?? []), equipmentInspections: (data.auditAssurance?.equipmentInspections ?? []).filter((item) => item.siteId === site), kmisConfig: data.auditAssurance?.kmisConfig ?? defaultKmisConfig },
+    bimElementLinks: Object.fromEntries(Object.entries(data.bimElementLinks ?? {}).filter(([, link]) => siteEquipmentCodes.has(link.equipmentCode))),
   };
 }
 

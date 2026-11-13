@@ -9,6 +9,7 @@ import { OverviewTable } from "../common/TableColumns";
 import { assignmentAbsences, intervalFor, unassignPerson, wallMinutes } from "../../lib/dispatch";
 import { getActiveFreezeConflictsForWR } from "../../lib/location-freezes";
 import { tradeColor } from "../../lib/trade-colors";
+import { cannotScheduleMessage, isWrSchedulable, isWrTerminal } from "./scheduler/scheduler-rules";
 
 type Person = DemoData["craftspeople"][number];
 const formatMinutes = (minutes: number) => `${Math.floor(minutes / 60)}h ${String(Math.round(minutes % 60)).padStart(2, "0")}m (${minutes} min)`;
@@ -71,6 +72,8 @@ export function WorkRequestLabor({ wr, people, absences, freezes, update, onClos
 }) {
   const router = useRouter();
   const rows = laborRows(wr, people);
+  const terminal = isWrTerminal(wr);
+  const schedulable = isWrSchedulable(wr);
   const setOverride = (row: typeof rows[number], value: number | undefined) => {
     if (!canOverride) return;
     const effective = value ?? row.opinion ?? row.recorded;
@@ -110,7 +113,10 @@ export function WorkRequestLabor({ wr, people, absences, freezes, update, onClos
     { id: "rate", label: "Hourly Rate EUR/h", value: (row: typeof rows[number]) => row.rate, render: (row: typeof rows[number]) => <RateInput value={row.rate} onSave={(value) => setRate(row, value)} /> },
     { id: "effective", label: "Final Effective Time & Cost", value: (row: typeof rows[number]) => row.effective, render: (row: typeof rows[number]) => <span>{formatMinutes(row.effective)} · €{(row.effective * row.rate / 60).toFixed(2)}<small className="block">€{row.rate.toFixed(2)}/h</small></span> },
     { id: "warnings", label: "Status / Warnings", value: (row: typeof rows[number]) => !wr.AssignedCraftpersonIds.includes(row.id) ? "Unassigned (labor retained)" : !row.interval ? "Unscheduled" : [getActiveFreezeConflictsForWR({ ...wr, AssignedCraftpersonIds: [row.id], CraftpersonAssignments: [row.interval], StartDate_DateToPerform: undefined }, freezes).length ? "❄ Freeze" : "", assignmentAbsences(absences, wr.SiteId, row.interval).length ? "🏖 Leave Conflict" : "", "Scheduled"].filter(Boolean).join(" · ") },
-    { id: "actions", label: "Actions", value: () => "", render: (row: typeof rows[number]) => <span className="flex flex-col items-start whitespace-normal"><button disabled={!row.interval} onClick={() => { if (!row.interval) return; const query = new URLSearchParams({ focusWrId: wr.WR_ID, focusCraftpersonId: row.id, focusStart: row.interval.assignedStartDateTime, isolateWr: "true" }); onClose(); router.push(`/scheduler?${query}`); }}>📍 Show in Calendar</button>{wr.AssignedCraftpersonIds.includes(row.id) && <button onClick={() => { if (window.confirm(`Unassign ${row.name} ${row.lastName}? Labor history will be retained.`)) update((current) => unassignPerson(current, row.id), `${actorRole} ${activePerson} unassigned ${row.name} ${row.lastName}; recorded labor retained.`); }}>✕ Unassign</button>}</span> },
+    { id: "actions", label: "Actions", value: () => "", render: (row: typeof rows[number]) => {
+      const planned = wr.CraftpersonAssignments?.find((assignment) => assignment.craftpersonId === row.id && assignment.assignedStartDateTime && assignment.assignedEndDateTime);
+      return <span className="flex flex-col items-start whitespace-normal">{planned ? <button onClick={() => { const query = new URLSearchParams({ focusWrId: wr.WR_ID, focusCraftpersonId: row.id, focusStart: planned.assignedStartDateTime, isolateWr: "true" }); onClose(); router.push(`/scheduler?${query}`); }}>📍 Show in Calendar</button> : schedulable ? <button onClick={() => { onClose(); router.push("/scheduler"); }}>📅 Schedule in Pool</button> : <span>—</span>}{wr.AssignedCraftpersonIds.includes(row.id) && <button disabled={terminal} title={terminal ? "Closed or cancelled work is read-only; labor history is retained." : undefined} onClick={() => { if (terminal) return; if (window.confirm(`Unassign ${row.name} ${row.lastName}? Labor history will be retained.`)) update((current) => unassignPerson(current, row.id), `${actorRole} ${activePerson} unassigned ${row.name} ${row.lastName}; recorded labor retained.`); }}>✕ Unassign</button>}{!schedulable && !terminal && <small className="text-slate-500">{cannotScheduleMessage(wr)}</small>}</span>;
+    } },
   ];
   return <OverviewTable preferenceKey="wr-labor" columns={columns} rows={rows} rowKey={(row) => row.id} />;
 }

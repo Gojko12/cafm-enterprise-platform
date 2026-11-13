@@ -24,10 +24,11 @@ import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/li
 import { buildFastJobWR } from "@/lib/fj-factory";
 import { isDissatisfied } from "@/lib/fj-satisfaction";
 import type { SignalTab } from "@/lib/wr-signals";
+import { allocateWorkRequestId } from "@/lib/wr-id-migration";
 
 const mockWorkRequests: BaseWorkRequest[] = [
   {
-    WR_ID: "LJ-001-2026",
+    WR_ID: "2026009001",
     JobID: "JOB-001",
     WR_Type: "LJ",
     ESAWorkType: "Corrective Maintenance",
@@ -56,7 +57,7 @@ const mockWorkRequests: BaseWorkRequest[] = [
     StartDateTBD: false,
   },
   {
-    WR_ID: "FJ-002-2026",
+    WR_ID: "2026009002",
     WR_Type: "FJ",
     ESAWorkType: "Corrective Maintenance",
     Description: "Door Repair - Noordwijk Reception",
@@ -84,7 +85,7 @@ const mockWorkRequests: BaseWorkRequest[] = [
     AcceptanceGates: [],
   },
   {
-    WR_ID: "LJ-003-2026",
+    WR_ID: "2026009003",
     WR_Type: "LJ",
     ESAWorkType: "Corrective Maintenance",
     Description: "Electrical Grid Upgrade - Frascati Building C",
@@ -283,7 +284,7 @@ export default function WorkRequestsPage() {
         return;
       }
       const newWR: BaseWorkRequest = {
-        WR_ID: wr.WR_ID || `LJ-${Math.random().toString(36).substring(7).toUpperCase()}-2026`,
+        WR_ID: allocateWorkRequestId(data.workRequests),
         JobID: wr.JobID || `JOB-${Date.now()}`,
         WR_Type: "LJ",
         ESAWorkType: wr.ESAWorkType || "Corrective Maintenance",
@@ -322,7 +323,7 @@ export default function WorkRequestsPage() {
     } else if (drawerMode === "escalate" && selectedWR) {
       const ljWR: BaseWorkRequest = {
         ...selectedWR,
-        WR_ID: `LJ-${Math.random().toString(36).substring(7).toUpperCase()}-2026`,
+        WR_ID: allocateWorkRequestId(data.workRequests),
         WR_Type: "LJ",
         OriginatingFJ_WR_ID: selectedWR.WR_ID,
         ProcessTrack: "RFQ",

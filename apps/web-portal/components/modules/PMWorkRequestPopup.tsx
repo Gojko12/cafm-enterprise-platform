@@ -41,6 +41,8 @@ import { PMStakeholderAlignmentSection } from "./pm/PMStakeholderAlignmentSectio
 import { PMFollowUpPanel } from "./pm/PMFollowUpPanel";
 import { PMAuditLogPanel } from "./pm/PMAuditLogPanel";
 import { PMSmartChecklistPanel } from "./pm/PMSmartChecklistPanel";
+import { allocateWorkRequestId } from "@/lib/wr-id-migration";
+import { isWrTerminal } from "./scheduler/scheduler-rules";
 
 const TABS = [
   "Work request details",
@@ -86,6 +88,7 @@ export function PMWorkRequestPopup({
   const { permissions, profile } = useActiveUserPermissions();
   const { activeSiteId, activePerson, currentUser } = useSiteContext();
   const { currentRole } = useApp();
+  const terminalReadOnly = isWrTerminal(workRequest);
   const coordinationItem = useMemo(() => buildCoordinationItems(data, 0).find((entry) => entry.wrId === workRequest.WR_ID), [data, workRequest.WR_ID]);
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(initialTab);
   useEffect(() => { setActiveTab(initialTab); }, [initialTab, workRequest.WR_ID]);
@@ -234,6 +237,7 @@ export function PMWorkRequestPopup({
   ) : null;
 
   const applyStatus = (choice: StatusChoice, skipFreezeGate = false) => {
+    if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (choice.percentage === 78 && !skipFreezeGate && wrFreezes.length > 0 && !workRequest.freezeAcknowledged) {
       setPendingFreezeStatus(choice);
@@ -460,6 +464,7 @@ export function PMWorkRequestPopup({
   };
 
   const addCraftperson = (userId: string) => {
+    if (terminalReadOnly) { window.alert("Closed or cancelled work requests cannot be assigned."); return; }
     const craftperson = data.craftspeople.find((item) => item.id === userId && item.SiteId === activeSiteId);
     if (craftperson) {
       if ((workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
@@ -500,7 +505,7 @@ export function PMWorkRequestPopup({
       return;
     }
     const now = new Date().toISOString();
-    const jobId = `FJ-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const jobId = allocateWorkRequestId(data.workRequests);
     const job: BaseWorkRequest = {
       WR_ID: jobId,
       JobID: `JOB-${Date.now()}`,
@@ -667,15 +672,16 @@ export function PMWorkRequestPopup({
           {activeTab === "Labor, parts & Completion" && <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="font-semibold">WR ID: {workRequest.WR_ID}</h3>
-              <button type="button" onClick={() => setAssignModalOpen(true)}
-                className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">
+              {terminalReadOnly && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">Read-only · labor history retained</span>}
+              <button type="button" disabled={terminalReadOnly} onClick={() => setAssignModalOpen(true)}
+                className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-40">
                 Assign Craftperson
               </button>
             </div>
             <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
             <div className="grid gap-3 rounded border bg-white p-4 md:grid-cols-[1fr_2fr]">
               <label className="text-sm font-medium">WR Statuses
-                <select aria-label="WR Statuses" value={currentStatusChoice?.key ?? ""}
+                <select aria-label="WR Statuses" disabled={terminalReadOnly} value={currentStatusChoice?.key ?? ""}
                   onChange={(event) => {
                     const choice = STATUS_CHOICES.find((item) => item.key === event.target.value);
                     if (choice) applyStatus(choice);
@@ -686,11 +692,11 @@ export function PMWorkRequestPopup({
                 </select>
               </label>
               <div className="flex flex-wrap items-end gap-2">
-                <button type="button" onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 27)!)}
+                <button type="button" disabled={terminalReadOnly} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 27)!)}
                   className="rounded bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700">Cancel WR (27%)</button>
-                <button type="button" disabled={!permissions?.canCompleteWR78} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!)}
+                <button type="button" disabled={terminalReadOnly || !permissions?.canCompleteWR78} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!)}
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Technically Completed (78%)</button>
-                <button type="button" disabled={!permissions?.canCloseWR100} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
+                <button type="button" disabled={terminalReadOnly || !permissions?.canCloseWR100} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Complete (100%)</button>
               </div>
             </div>
@@ -738,7 +744,7 @@ export function PMWorkRequestPopup({
               `${person.Name} ${person.LastName}`.toLowerCase().includes(craftFilter.toLowerCase()),
             ).map((person) => <div key={person.id} className="flex items-center justify-between border-t py-3">
               <span>{person.Name} {person.LastName} · {person.Trade} · {person.HourlyRate.toFixed(2)} EUR/hour</span>
-              <button type="button" onClick={() => addCraftperson(person.id)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white">Assign</button>
+              <button type="button" disabled={terminalReadOnly} onClick={() => addCraftperson(person.id)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white disabled:opacity-40">Assign</button>
             </div>)}
             {data.users.filter((user) =>
               user.AssignedSiteIds.includes(activeSiteId) &&
@@ -747,7 +753,7 @@ export function PMWorkRequestPopup({
               user.DisplayName.toLowerCase().includes(craftFilter.toLowerCase()),
             ).map((user) => <div key={user.UserId} className="flex items-center justify-between border-t py-3">
               <span>{user.DisplayName}</span>
-              <button type="button" onClick={() => addCraftperson(user.UserId)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white">Assign</button>
+              <button type="button" disabled={terminalReadOnly} onClick={() => addCraftperson(user.UserId)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white disabled:opacity-40">Assign</button>
             </div>)}
           </div>
           <p className="mt-3 text-xs text-slate-500">Assignments are recorded in the craftperson labor table; enter hourly rate and working time there.</p>

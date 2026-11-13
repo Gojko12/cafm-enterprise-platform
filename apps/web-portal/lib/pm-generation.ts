@@ -1,4 +1,4 @@
-import { createPMCycleKey, getInitialIssuedStatus, pmTargetKey } from "@cafm/shared-schema";
+import { allocateWorkRequestId, createPMCycleKey, getInitialIssuedStatus, pmTargetKey } from "@cafm/shared-schema";
 import { applyAllPmsAutoSchedules } from "./pms-auto-schedule";
 import type { Craftsperson } from "./pms-auto-schedule";
 import type { BaseWorkRequest, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId } from "@cafm/shared-schema";
@@ -186,7 +186,7 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
           continue;
         }
         const timestamp = input.now.toISOString();
-        const wrId = `PM-${crypto.randomUUID()}`;
+        const wrId = allocateWorkRequestId(requests);
         const request: BaseWorkRequest = {
           WR_ID: wrId, WR_Type: "PM",
           Description: blueprint.Title, TradeId: blueprint.TradeId, TradeName: blueprint.TradeName,

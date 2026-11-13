@@ -13,6 +13,7 @@ import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
 import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, OnboardingRequestSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
+import { migrateWorkRequestIdsTo10Digits } from "@/lib/wr-id-migration";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -153,7 +154,7 @@ const stateSchema = z.object({
   pmsOrderHighWatermark: z.number().int().min(0).max(99999).optional(),
   blueprintHighWatermark: z.number().int().min(0).max(9999).optional(),
   blueprintAuditLog: z.array(BlueprintAuditEntrySchema).default([]),
-  sites: z.array(z.string().min(1)),
+  sites: z.array(z.enum(PLATFORM_SITE_IDS)).min(1),
   buildings: records,
   floors: records,
   rooms: records,
@@ -200,7 +201,7 @@ const stateSchema = z.object({
     equipmentCode: z.string().min(1), buildingId: z.string().min(1), updatedAt: z.string().min(1), updatedBy: z.string().min(1),
   })).optional(),
 }).strict().transform((state, context) => {
-  try { return migratePmState(state); }
+  try { return migrateWorkRequestIdsTo10Digits(migratePmState(state)); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
 });
 const payloadSchema = z.preprocess(migrateLegacySiteIds, z.object({ revision: z.number().int().nonnegative(), state: stateSchema }));

@@ -19,6 +19,7 @@ import { newestFirst } from "@/lib/history-order";
 import { useApp } from "@/lib/hooks/useApp";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { PhotoCapture } from "@/components/common/PhotoCapture";
+import { isWrTerminal } from "./scheduler/scheduler-rules";
 
 const TABS = [
   "Work request details & Roles",
@@ -92,6 +93,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
   const { permissions } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
+  const terminalReadOnly = isWrTerminal(workRequest);
   const [tab, setTab] = useState<Tab>(initialTab);
   useEffect(() => { setTab(initialTab); }, [initialTab, workRequest.WR_ID]);
   const unfavourableCount = getUnfavourableStepCount(workRequest, data);
@@ -128,6 +130,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
     }) }));
   };
   const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[], allowBackward = false) => {
+    if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     if (((percentage === 78 || (percentage === 94 && workRequest.Percentage < 78)) && !permissions?.canCompleteWR78) || (percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (percentage < 0 || percentage > 100) return;
     if (allowedRoles && !hasPermission(allowedRoles)) {
@@ -448,11 +451,13 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
         </section>}
         {tab === TABS[2] && <section className="space-y-4 rounded border bg-white p-4">
           <h3 className="font-semibold">Execution, Labor &amp; Freeze</h3><div className="flex flex-wrap gap-2">
-            <button disabled={workRequest.Percentage !== 32} onClick={() => stage(40, "Commit", {}, ["ESA_TO", "ESA_TM", "TRADE_TM"])} className="rounded bg-slate-700 px-3 py-2 text-white disabled:opacity-40">40% Commit</button>
-            <button disabled={workRequest.Percentage !== 40 && workRequest.Percentage !== 55} onClick={() => stage(50, "Work Execution / Resume Work", {}, ["TRADE_TM", "TRADE_LONG_JOB"])} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-40">50% Execution / Resume Work</button>
-            {(["Access", "Labor", "Parts"] as const).map((reason) => <button key={reason} disabled={workRequest.Percentage !== 50} onClick={() => stage(55, `On Hold for ${reason}`, { IsFrozen: true, FreezeReason: reason, ActiveFreezeName: `Waiting for ${reason}`, PlannedFreezeText: `On Hold for ${reason}` }, ["TRADE_TM", "TRADE_LONG_JOB"])} className="rounded bg-amber-600 px-3 py-2 text-white disabled:opacity-40">55% On Hold for {reason}</button>)}
+            {terminalReadOnly && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">Read-only · labor history retained</span>}
+            <button disabled={terminalReadOnly || workRequest.Percentage !== 32} onClick={() => stage(40, "Commit", {}, ["ESA_TO", "ESA_TM", "TRADE_TM"])} className="rounded bg-slate-700 px-3 py-2 text-white disabled:opacity-40">40% Commit</button>
+            <button disabled={terminalReadOnly || workRequest.Percentage !== 40 && workRequest.Percentage !== 55} onClick={() => stage(50, "Work Execution / Resume Work", {}, ["TRADE_TM", "TRADE_LONG_JOB"])} className="rounded bg-blue-700 px-3 py-2 text-white disabled:opacity-40">50% Execution / Resume Work</button>
+            {(["Access", "Labor", "Parts"] as const).map((reason) => <button key={reason} disabled={terminalReadOnly || workRequest.Percentage !== 50} onClick={() => stage(55, `On Hold for ${reason}`, { IsFrozen: true, FreezeReason: reason, ActiveFreezeName: `Waiting for ${reason}`, PlannedFreezeText: `On Hold for ${reason}` }, ["TRADE_TM", "TRADE_LONG_JOB"])} className="rounded bg-amber-600 px-3 py-2 text-white disabled:opacity-40">55% On Hold for {reason}</button>)}
           </div>
-          <label className="text-sm font-medium">Assign Craftperson<select aria-label="Assign Craftperson to Long Job" value="" onChange={(e) => {
+          <label className={`text-sm font-medium ${terminalReadOnly ? "opacity-50" : ""}`}>Assign Craftperson<select aria-label="Assign Craftperson to Long Job" disabled={terminalReadOnly} value="" onChange={(e) => {
+            if (terminalReadOnly) { window.alert("Closed or cancelled work requests cannot be assigned."); return; }
             const person = data.craftspeople.find((item) => item.id === e.target.value && item.SiteId === workRequest.SiteId);
             if (!person || workRequest.AssignedCraftpersonIds.includes(person.id)) return;
             update((wr) => assignPerson(wr, {
@@ -460,7 +465,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
             }), `${actorName} assigned craftperson ${person.Name} ${person.LastName} (${person.Trade}).`);
           }} className="ml-3 rounded border px-3 py-2"><option value="">Select craftperson</option>{data.craftspeople.filter((item) => item.SiteId === workRequest.SiteId).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} — {person.Trade}</option>)}</select></label>
           <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={update} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
-          <button disabled={workRequest.Percentage !== 50 && workRequest.Percentage !== 55} onClick={() => stage(required ? 78 : 94, required ? "Technically Completed" : "All acceptance gates waived", {}, ["TRADE_TM", "TRADE_LONG_JOB", "ESA_IM"])} className="rounded bg-green-700 px-4 py-2 font-semibold text-white disabled:opacity-40">Technically Completed ({required ? "78%" : "94%"})</button>
+          <button disabled={terminalReadOnly || workRequest.Percentage !== 50 && workRequest.Percentage !== 55} onClick={() => stage(required ? 78 : 94, required ? "Technically Completed" : "All acceptance gates waived", {}, ["TRADE_TM", "TRADE_LONG_JOB", "ESA_IM"])} className="rounded bg-green-700 px-4 py-2 font-semibold text-white disabled:opacity-40">Technically Completed ({required ? "78%" : "94%"})</button>
           <p className="text-xs text-slate-500">Acceptance configured: {required ? "Yes" : "No"}; SLA margin dates remain available in the core record.</p>
         </section>}
         {tab === TABS[3] && <section className="space-y-4 rounded border bg-white p-4">

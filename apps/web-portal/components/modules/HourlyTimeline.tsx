@@ -1,6 +1,4 @@
 "use client";
-import { FrequencyPill } from "../common/PmFrequency";
-
 import React, { useEffect, useRef, useState } from "react";
 import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { CLASSICAL_TRADES, pmTargetLabel } from "@cafm/shared-schema";
@@ -13,6 +11,8 @@ import { startRequestDrag } from "../../lib/drag-preview";
 import { getEffectiveCraftpersonShift, shiftSegments } from "../../lib/craftperson-shifts";
 import type { DisputeViewMode, WRDispute } from "../../lib/disputes";
 import { fieldReasonLabels, isOverdue, urgencyOrder } from "../../lib/field-updates";
+import { cannotScheduleMessage, isWrSchedulable, isWrTerminal } from "./scheduler/scheduler-rules";
+import { FREQUENCY_LABELS } from "../../lib/pm-suppression";
 
 type Person = DemoData["craftspeople"][number];
 type Preview = { wr: BaseWorkRequest; person: string; start: string; end: string };
@@ -29,7 +29,7 @@ function weekLabel(day: string) {
 
 export type TimelineSpotlight = { id: string; person: string; day: string; trade: string; token: number };
 
-export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit, onRemove, spotlight, disputeMap, disputeMode, gates }: {
+export function HourlyTimeline({ dates, people, requests, absences, freezes, site, firstHour, lastHour, visible, onMove, onOpen, onEdit, onRemove, spotlight, disputeMap, disputeMode, gates, draggingWr, onDropRejected }: {
   gates?: Map<string, { cleared: boolean; label: string }>;
   dates: string[]; people: Person[]; requests: BaseWorkRequest[]; absences: CraftpersonAbsence[]; freezes: LocationFreeze[];
   site: string; firstHour: number; lastHour: number;
@@ -39,6 +39,8 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
   onEdit: (wr: BaseWorkRequest, person: string) => void;
   onRemove: (id: string, person: string) => void;
   spotlight?: TimelineSpotlight | null;
+  draggingWr?: BaseWorkRequest | null;
+  onDropRejected?: (message: string) => void;
   disputeMap: Map<string, WRDispute[]>; disputeMode: DisputeViewMode;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>([]);
@@ -48,6 +50,7 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
   const cleanup = useRef<(() => void) | null>(null);
   const target = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
+  const rejectDrop = (message: string) => onDropRejected ? onDropRejected(message) : window.alert(message);
   useEffect(() => { if (spotlight) setCollapsed((old) => old.filter((trade) => trade !== spotlight.trade)); }, [spotlight]);
   useEffect(() => {
     if (spotlight && target.current && typeof target.current.scrollIntoView === "function") target.current.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
@@ -109,10 +112,12 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
           return <td key={day} className="border-l"><div className="relative h-7" style={{ width }}>{freeze && right > left && <button type="button" title={detail} aria-label={`Location freeze ${freeze.title}: ${detail}`} onMouseEnter={() => setHoverFreeze(freeze.id)} onMouseLeave={() => setHoverFreeze(null)} onFocus={() => setHoverFreeze(freeze.id)} onBlur={() => setHoverFreeze(null)} onClick={() => setSelectedFreeze((current) => current === freeze.id ? null : freeze.id)} className="absolute top-0 h-7 truncate rounded border border-cyan-400 bg-cyan-100/90 px-2 text-left text-[11px] font-medium text-cyan-950" style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH }}>❄ {freeze.title} ({freezeLocationLabel(freeze)}) • Allowed: {allowed}</button>}</div></td>;
         })}
       </tr>)}</thead>
-      <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => <React.Fragment key={trade}>
-        <tr className="bg-slate-100"><th className="sticky left-0 z-20 border-r bg-slate-100 p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade}</button></th>{dates.length > 0 && <td colSpan={dates.length} />}</tr>
+      <tbody>{CLASSICAL_TRADES.filter((trade) => people.some((person) => person.Trade === trade)).map((trade) => {
+        const tradeMatches = !!draggingWr && (draggingWr.TradeName === trade || people.some((person) => person.Trade === trade && (person.secondaryTradeIds ?? []).includes(draggingWr.TradeName ?? "")));
+        return <React.Fragment key={trade}>
+        <tr className={`bg-slate-100 ${draggingWr ? tradeMatches ? "ring-2 ring-inset ring-emerald-500" : "opacity-40" : ""}`}><th className="sticky left-0 z-20 border-r bg-slate-100 p-2 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] dark:bg-slate-900"><button onClick={() => setCollapsed((old) => old.includes(trade) ? old.filter((item) => item !== trade) : [...old, trade])}>{collapsed.includes(trade) ? "▶" : "▼"} 📁 {trade} {tradeMatches && <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800">✓ Match</span>}</button></th>{dates.length > 0 && <td colSpan={dates.length} />}</tr>
         {!collapsed.includes(trade) && people.filter((person) => person.Trade === trade).map((person) => <tr key={person.id}>
-          <th className={`sticky left-0 z-20 border-r border-t p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] ${spotlight?.person === person.id ? "bg-amber-100" : "bg-white dark:bg-slate-900"}`}>{person.Name} {person.LastName}{person.username && ` · ${person.username}`}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · Base {person.baseShiftType ?? "Standard"} {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
+          <th className={`sticky left-0 z-20 border-r border-t p-2 text-left align-top shadow-[2px_0_5px_-2px_rgba(0,0,0,0.12)] ${spotlight?.person === person.id ? "bg-amber-100" : "bg-white dark:bg-slate-900"} ${draggingWr ? person.Trade === draggingWr.TradeName || (person.secondaryTradeIds ?? []).includes(draggingWr.TradeName ?? "") ? "ring-2 ring-inset ring-emerald-500" : "opacity-40" : ""}`}>{person.Name} {person.LastName}{person.username && ` · ${person.username}`} {draggingWr && (person.Trade === draggingWr.TradeName || (person.secondaryTradeIds ?? []).includes(draggingWr.TradeName ?? "")) && <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800">✓ Match</span>}<p className="font-normal"><span className={`rounded border px-1 ${tradeColor(person.Trade)}`}>{person.Trade}</span> · Base {person.baseShiftType ?? "Standard"} {person.shiftStart ?? "07:00"}–{person.shiftEnd ?? "15:30"}</p></th>
           {dates.map((day) => {
             const start = wallMinutes(`${day}T00:00`) + firstHour * 60, end = start + (lastHour - firstHour) * 60;
             const shift = getEffectiveCraftpersonShift(person, day);
@@ -124,10 +129,11 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
               let payload: unknown;
               try {
                 payload = JSON.parse(event.dataTransfer.getData("application/json"));
-              } catch { window.alert("Could not read the dragged work request."); return; }
-              if (!payload || typeof payload !== "object" || !("id" in payload) || typeof payload.id !== "string") { window.alert("Invalid dragged work request."); return; }
+              } catch { rejectDrop("Could not read the dragged work request."); return; }
+              if (!payload || typeof payload !== "object" || !("id" in payload) || typeof payload.id !== "string") { rejectDrop("Invalid dragged work request."); return; }
               const wr = requests.find((item) => item.WR_ID === payload.id);
-              if (!wr) { window.alert("The dragged work request is no longer available."); return; }
+              if (!wr) { rejectDrop("The dragged work request is no longer available."); return; }
+              if (!isWrSchedulable(wr)) { rejectDrop(cannotScheduleMessage(wr)); return; }
               const from = "from" in payload && typeof payload.from === "string" ? payload.from : undefined;
               const previous = intervalFor(wr, person.id) ?? (from ? intervalFor(wr, from) : null);
               const duration = previous ? wallMinutes(previous.assignedEndDateTime) - wallMinutes(previous.assignedStartDateTime) : Math.max(30, (wr.ExpectedHours ?? 1) * 60);
@@ -151,24 +157,25 @@ export function HourlyTimeline({ dates, people, requests, absences, freezes, sit
                 if (!interval) return null;
                 const left = Math.max(start, wallMinutes(interval.assignedStartDateTime)), right = Math.min(end, wallMinutes(interval.assignedEndDateTime));
                 const conflicts = getActiveFreezeConflictsForWR(wr, freezes);
-                const title = `${wr.WR_ID} ${wr.Description}\n${pmTargetLabel(wr)}\n${formatFreezePeriodWindow(interval.assignedStartDateTime, interval.assignedEndDateTime)}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
-                const editable = ![27, 78, 100].includes(wr.Percentage);
+                const title = `${wr.WR_ID} ${wr.Description}\n${pmTargetLabel(wr)}${wr.pmFrequency ? `\nFrequency: ${FREQUENCY_LABELS[wr.pmFrequency as keyof typeof FREQUENCY_LABELS] ?? wr.pmFrequency} (${wr.pmFrequency})` : ""}\n${formatFreezePeriodWindow(interval.assignedStartDateTime, interval.assignedEndDateTime)}\n${wr.bl_id ?? ""} / ${wr.LevelName ?? ""} / ${wr.RoomCode ?? ""}${conflicts.map((item) => `\n❄ Planned in Freeze Period: ${describeLocationFreeze(item)}`).join("")}${(disputeMap.get(wr.WR_ID) ?? []).map((item) => `\n${item.label}: ${item.detail}`).join("")}`;
+                const editable = isWrSchedulable(wr);
                 const highlighted = spotlight?.id === wr.WR_ID && spotlight.person === person.id && spotlight.day === day;
                 const affected = !!focusFreeze && getActiveFreezeConflictsForWR({ ...wr, AssignedCraftpersonIds: [person.id], CraftpersonAssignments: [interval], StartDate_DateToPerform: undefined }, [focusFreeze]).length > 0;
                 const update = (wr.technicianFieldUpdates ?? []).filter((item) => item.status === "Open").sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency])[0];
                 const overdue = isOverdue(wr, new Date(), person.id);
-                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={`${title}${update ? `\n${fieldReasonLabels[update.reasonCategory]}: ${update.message}` : ""}${overdue ? "\nOverdue / Behind Planned Schedule" : ""}`} draggable={editable} onDragStart={(event) => startRequestDrag(event, wr, person.id)} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${highlighted ? "z-20 animate-pulse bg-amber-200 font-bold shadow-lg ring-4 ring-amber-400" : disputeMode === "highlight" ? disputeMap.get(wr.WR_ID)?.length ? "z-10 animate-pulse bg-rose-100 font-bold text-rose-950 shadow-lg ring-4 ring-rose-500" : "opacity-40" : update || overdue ? "z-10 ring-2 ring-rose-500" : affected ? "z-10 ring-2 ring-cyan-500" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
+                return <div key={wr.WR_ID} ref={highlighted ? target : undefined} title={`${title}${!editable ? `\n${cannotScheduleMessage(wr)}` : ""}${update ? `\n${fieldReasonLabels[update.reasonCategory]}: ${update.message}` : ""}${overdue ? "\nOverdue / Behind Planned Schedule" : ""}`} draggable={editable} onDragStart={(event) => startRequestDrag(event, wr, person.id)} className={`absolute flex h-6 items-center overflow-hidden rounded border-l-4 ${tradeColor(wr.TradeName)} ${!editable ? "cursor-not-allowed opacity-50" : ""} ${highlighted ? "z-20 animate-pulse bg-amber-200 font-bold shadow-lg ring-4 ring-amber-400" : disputeMode === "highlight" ? disputeMap.get(wr.WR_ID)?.length ? "z-10 animate-pulse bg-rose-100 font-bold text-rose-950 shadow-lg ring-4 ring-rose-500" : "opacity-40" : update || overdue ? "z-10 ring-2 ring-rose-500" : affected ? "z-10 ring-2 ring-cyan-500" : ""}`} style={{ left: (left - start) / 60 * HOUR_WIDTH, width: (right - left) / 60 * HOUR_WIDTH, top: 28 + index * 28 }}>
                   {editable && left === wallMinutes(interval.assignedStartDateTime) && <span role="separator" aria-label="Resize start" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "start")} />}
-                  <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}><FrequencyPill code={wr.pmFrequency} /> {wr.WR_ID}{interval.autoScheduledFromPmsId ? " 🔁 Auto-PMS" : ""}{update ? ` ${update.urgency === "UrgentBlocked" ? "🔴 BLOCKER" : "🚩"} ${fieldReasonLabels[update.reasonCategory]}` : ""}{overdue ? " ⏰ Overdue" : ""}{gates?.get(wr.WR_ID) ? (gates.get(wr.WR_ID)!.cleared ? " 📢✅" : " 📢⚠ Pending clearance") : ""}{disputeMap.get(wr.WR_ID)?.length ? " ⚠ Dispute" : conflicts.length ? " ❄ Planned in Freeze Period" : ""}</button>
+                  <button className="min-w-0 flex-1 truncate text-left" onClick={() => onOpen(wr.WR_ID)}>{wr.WR_Type === "PM" ? <span title={`${FREQUENCY_LABELS[wr.pmFrequency as keyof typeof FREQUENCY_LABELS] ?? wr.pmFrequency ?? "Preventive maintenance"}${wr.pmFrequency ? ` (${wr.pmFrequency})` : ""}`}>{wr.pmFrequency ?? wr.WR_ID}</span> : <>{wr.WR_ID}{interval.autoScheduledFromPmsId ? " 🔁 Auto-PMS" : ""}{update ? ` ${update.urgency === "UrgentBlocked" ? "🔴 BLOCKER" : "🚩"} ${fieldReasonLabels[update.reasonCategory]}` : ""}{overdue ? " ⏰ Overdue" : ""}{gates?.get(wr.WR_ID) ? (gates.get(wr.WR_ID)!.cleared ? " 📢✅" : " 📢⚠ Pending clearance") : ""}{disputeMap.get(wr.WR_ID)?.length ? " ⚠ Dispute" : conflicts.length ? " ❄ Planned in Freeze Period" : ""}</>}</button>
                   {editable && <button aria-label={`Edit time for ${wr.WR_ID}`} onClick={() => onEdit(wr, person.id)}>✎</button>}
-                  <button title="Remove from calendar (Unschedule)" aria-label={`Unschedule ${wr.WR_ID} for ${person.Name} ${person.LastName}`} onClick={() => onRemove(wr.WR_ID, person.id)}>✕</button>
+                  <button disabled={isWrTerminal(wr)} title={isWrTerminal(wr) ? "Closed or cancelled assignments are read-only." : "Remove from calendar (Unschedule)"} aria-label={`Unschedule ${wr.WR_ID} for ${person.Name} ${person.LastName}`} onClick={() => onRemove(wr.WR_ID, person.id)}>✕</button>
                   {editable && right === wallMinutes(interval.assignedEndDateTime) && <span role="separator" aria-label="Resize end" className="h-full w-2 shrink-0 cursor-ew-resize bg-black/20" onMouseDown={(event) => resize(event, wr, person.id, "end")} />}
                 </div>;
               })}
             </div></td>;
           })}
         </tr>)}
-      </React.Fragment>)}</tbody></table>
+      </React.Fragment>;
+      })}</tbody></table>
     {selectedFreeze && visibleFreezes.filter((freeze) => freeze.id === selectedFreeze).map((freeze) => <div key={freeze.id} role="status" className="sticky bottom-0 left-0 z-30 w-fit max-w-full rounded border border-cyan-400 bg-cyan-50 p-2 text-cyan-950">
       <strong>❄ {freeze.title}</strong> · {freeze.description} · Responsible: {freeze.responsiblePerson} · Locations: {freezeLocationLabel(freeze)} · {formatFreezePeriodWindow(freeze.startDateTime, freeze.endDateTime)} · Allowed: {(["PM", "FJ", "LJ"] as const).filter((type) => freeze[`allow${type}`]).join(", ") || "none"}
       <button type="button" className="ml-2 underline" onClick={() => setSelectedFreeze(null)}>Close</button>

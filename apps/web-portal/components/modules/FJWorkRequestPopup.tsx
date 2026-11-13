@@ -24,6 +24,7 @@ import { LocateInBimButton, OpenRoomInBimButton } from "@/components/common/Loca
 import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { DissatisfactionPanel, RatingEmailModal } from "@/components/modules/FJSatisfactionPanels";
 import { isCompletedFj } from "@/lib/fj-satisfaction";
+import { isWrTerminal } from "./scheduler/scheduler-rules";
 
 type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA" | "Checklist - Smart PM";
 
@@ -38,6 +39,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
   const { permissions, profile } = useActiveUserPermissions();
   const { currentUser, activePerson } = useSiteContext();
   const { currentRole } = useApp();
+  const terminalReadOnly = isWrTerminal(workRequest);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [ratingMailOpen, setRatingMailOpen] = useState(false);
   const canFollowUp = !!(profile?.isSuperAdmin || profile?.isSiteAdmin || profile?.isHelpdesk || ["SuperAdmin", "SiteAdministrator", "TeamLeader", "ESA_TM", "TRADE_TM", "HELPDESK"].includes(String(currentRole)));
@@ -82,6 +84,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
     setEditing(null);
   };
   const transition = (percentage: number, label: string) => {
+    if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     if ((percentage === 78 && !permissions?.canCompleteWR78) || (percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (percentage === 100 && hasOpenQARework(workRequest)) { window.alert("QA rework must be verified before closing."); return; }
     const configured = WR_Statuses.find((status) => status.ESAWorkType === workRequest.ESAWorkType && status.Percentage === percentage);
@@ -178,8 +181,10 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
         </div>}
         {tab === "Labor, parts & Completion" && <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Assign Craftperson</h3>
-            <label className="rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white">Assign Craftperson
-              <select aria-label="Assign Craftperson" className="ml-2 rounded text-slate-900" value="" onChange={(e) => {
+            {terminalReadOnly && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">Read-only · labor history retained</span>}
+            <label className={`rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white ${terminalReadOnly ? "opacity-40" : ""}`}>Assign Craftperson
+              <select aria-label="Assign Craftperson" disabled={terminalReadOnly} className="ml-2 rounded text-slate-900" value="" onChange={(e) => {
+                if (terminalReadOnly) { window.alert("Closed or cancelled work requests cannot be assigned."); return; }
                 const person = craftpeople.find((item) => item.id === e.target.value);
                 if (!person || workRequest.AssignedCraftpersonIds.includes(person.id)) return;
                 update((wr) => assignPerson(wr, {
@@ -202,7 +207,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           </section>
           <div className="flex flex-wrap gap-2">{[
             ["Cancel WR (27%)", 27], ["On Hold (55%)", 55], ["Technically Completed (78%)", 78], ["Complete (100%)", 100],
-          ].map(([label, percent]) => <button key={label} disabled={(percent === 78 && !permissions?.canCompleteWR78) || (percent === 100 && !permissions?.canCloseWR100)} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{label}</button>)}
+          ].map(([label, percent]) => <button key={label} disabled={terminalReadOnly || (percent === 78 && !permissions?.canCompleteWR78) || (percent === 100 && !permissions?.canCloseWR100)} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{label}</button>)}
             <button disabled={!permissions?.canCreateLJ} onClick={() => {
               if (!permissions?.canCreateLJ) { window.alert("Permission required to create a Long Job."); return; }
               let estimatedCost = workRequest.EstimatedCostEur ?? 0;

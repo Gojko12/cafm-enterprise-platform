@@ -7,6 +7,7 @@ import { useSiteContext } from "./contexts/SiteContext";
 import { useApp } from "./hooks/useApp";
 import { qaVerdict, selectAudit, selectRandomAudits, swapAudit, transitionAudit } from "./qa-audits";
 import type { QAOptions } from "./qa-audits";
+import { allocateWorkRequestId } from "./wr-id-migration";
 
 export function useQAActions() {
   const { data, commitSnapshot } = useCafmStore();
@@ -180,7 +181,6 @@ export function useQAActions() {
         if (wr.qaStagedVerdict.spawnFollowUpFJ && !permissions?.canOpenFollowUpFJ) throw new Error(`${id}: permission required to create a follow-up FJ.`);
         return wr;
       });
-      const used = new Set(data.workRequests.map((wr) => wr.WR_ID));
       const followUps: BaseWorkRequest[] = [];
       const items: QAAuditReport["items"] = [];
       const changes = new Map<string, BaseWorkRequest>();
@@ -192,14 +192,7 @@ export function useQAActions() {
         if (decision.verdict === "Fail" && decision.spawnFollowUpFJ) {
       const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
       if (!issued) throw new Error("The 50% corrective maintenance status is not configured.");
-      const year = now.slice(0, 4);
-      const start = activeSiteId === "02-ESOC" ? 300000 : activeSiteId === "01-ESTEC" ? 600000 : 900000;
-      const limit = start + 99999;
-      let sequence = start;
-      while (sequence <= limit && used.has(`${year}${String(sequence).padStart(6, "0")}`)) sequence++;
-      if (sequence > limit) throw new Error(`No QA follow-up numbers remain for ${activeSiteId} in ${year}.`);
-      followId = `${year}${String(sequence).padStart(6, "0")}`;
-      used.add(followId);
+      followId = allocateWorkRequestId([...data.workRequests, ...followUps]);
       const entry = { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `Created QA corrective follow-up ${followId}.` };
       updated = { ...updated, UpdatedAt: now, updatedAt: now,
         ...(parent.WR_Type === "PM" ? { FollowUpFJIds: [...new Set([...(updated.FollowUpFJIds ?? []), followId])] } : {}),

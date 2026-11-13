@@ -140,7 +140,7 @@ export const ESRIN_EQUIPMENT: Equipment[] = [
 // Sample Work Requests across sites
 export const SAMPLE_WORK_REQUESTS: BaseWorkRequest[] = [
   {
-    WR_ID: "LJ-ESOC-001",
+    WR_ID: "2026009004",
     WR_Type: "LJ",
     ESAWorkType: "Corrective Maintenance",
     Description: "Complete HVAC System Overhaul - ESOC Building A",
@@ -171,7 +171,7 @@ export const SAMPLE_WORK_REQUESTS: BaseWorkRequest[] = [
     AcceptanceGates: [],
   },
   {
-    WR_ID: "FJ-ESTEC-001",
+    WR_ID: "2026009005",
     WR_Type: "FJ",
     ESAWorkType: "Corrective Maintenance",
     Description: "Door Lock Repair - Reception",

@@ -11,6 +11,7 @@ import { ahuTemplate } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 import { migratePmState } from "./pm-orders";
 import { mergeRemoteState, stampChangedWorkRequests } from "./state-merge";
+import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -137,10 +138,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             .filter((role) => mapping.assignments[role] !== undefined)
             .map((role) => [role, mapping.assignments[role]])),
         })) ?? defaults.tradeRoleMappings;
-        initial = scopeData(withAccessProfileDefaults({ ...defaults, suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
+        initial = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults({ ...defaults, suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...savedData, roleDefinitions: savedData.roleDefinitions, locationFreezes: savedData.locationFreezes ?? [], craftpersonAbsences: savedData.craftpersonAbsences ?? [], tradeRoleMappings, siteRoleMappings,
           siteRoleAssignments: savedData.siteRoleAssignments ?? defaults.siteRoleAssignments,
           craftspeople: savedData.craftspeople ?? defaults.craftspeople,
-          userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site), site);
+          userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site)), site);
       }
       try {
         const remote = await stateRequest(site, personRef.current, "GET");
@@ -154,7 +155,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         knownRevision.current = true;
         if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
           // Keep local edits but merge newer server records; the next sync pushes the merged result.
-          initial = mergeRemoteState(initial, remote.state);
+          initial = migrateWorkRequestIdsTo10Digits(mergeRemoteState(initial, remote.state));
           acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
         } else if (pending && typeof pending === "object" && "revision" in pending && pending.revision === remote.revision) {
           acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
@@ -165,7 +166,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
             roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
             userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
-          initial = scopeData(withAccessProfileDefaults(remoteData, site), site);
+          initial = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site);
           acknowledged.current = JSON.stringify(remote.state);
         }
         connected.current = true;
@@ -239,7 +240,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             (offlineEdits.current && (!knownRevision.current || revision.current !== remote.revision));
           if (diverged && remote.state && typeof remote.state === "object") {
             // Auto-heal: keep local edits, merge newer server records, and let the next push publish the result.
-            const merged = mergeRemoteState(current.current, remote.state);
+            const merged = migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, remote.state));
             current.current = merged;
             if (active) setData(merged);
           }
@@ -254,7 +255,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
               roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
-            const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
+            const next = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site);
             acknowledged.current = JSON.stringify(remote.state);
             current.current = next;
             if (active) setData(next);
@@ -262,7 +263,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           connected.current = true;
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
         }
-        const snapshot = reconcileAssurance(current.current);
+        const snapshot = migrateWorkRequestIdsTo10Digits(reconcileAssurance(current.current));
         if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
         let outgoing = snapshot;
         let serialized = JSON.stringify(outgoing);
@@ -275,6 +276,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             revision.current = latest.revision;
             if (JSON.stringify(current.current) === JSON.stringify(snapshot)) { current.current = outgoing; if (active) setData(outgoing); }
           }
+          outgoing = scopeData(migrateWorkRequestIdsTo10Digits(outgoing), site);
+          serialized = JSON.stringify(outgoing);
           const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: outgoing });
           revision.current = result.revision;
           acknowledged.current = serialized;
@@ -289,7 +292,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...result.state,
               roleDefinitions: "roleDefinitions" in result.state ? result.state.roleDefinitions : undefined,
               userAccessProfiles: "userAccessProfiles" in result.state ? result.state.userAccessProfiles : undefined } as DemoData;
-            const next = scopeData(withAccessProfileDefaults(remoteData, site), site);
+            const next = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site);
             revision.current = result.revision;
             acknowledged.current = JSON.stringify(result.state);
             safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
@@ -321,10 +324,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     const before = JSON.stringify(expected);
     if (JSON.stringify(current.current) !== before) throw new Error("Data changed since preview. Run the dry-run again.");
     const optimistic = options?.optimistic === true;
-    next = reconcileAssurance(migratePmState({ ...next, workRequests: next.workRequests.map((wr) => {
+    next = scopeData(migrateWorkRequestIdsTo10Digits(reconcileAssurance(migratePmState({ ...next, workRequests: next.workRequests.map((wr) => {
       const old = expected.workRequests.find((item) => item.WR_ID === wr.WR_ID && item.SiteId === wr.SiteId);
       return old && old !== wr ? logChecklistCorrections(old, wr, personRef.current, new Date().toISOString()) : wr;
-    }) }));
+    }) }))), site);
     const after = JSON.stringify(next);
     busy.current = true;
     let committed = false;

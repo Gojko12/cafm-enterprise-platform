@@ -32,6 +32,7 @@ import type { DisputeNavigation } from "@/components/modules/CraftpersonShiftWor
 import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
 import { getWRDisputes, mapWRDisputes } from "@/lib/disputes";
 import type { DisputeViewMode } from "@/lib/disputes";
+import { cannotScheduleMessage, isWrSchedulable, isWrTerminal } from "@/components/modules/scheduler/scheduler-rules";
 
 type Move = { id: string; from?: string; person: string; date: string; start?: string; end?: string };
 const button = "rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100";
@@ -79,6 +80,7 @@ function SchedulerContent() {
   const [error, setError] = useState("");
   const [spotlight, setSpotlight] = useState<TimelineSpotlight | null>(null);
   const [showChoices, setShowChoices] = useState<string | null>(null);
+  const [draggingWr, setDraggingWr] = useState<BaseWorkRequest | null>(null);
   const siteRequests = data.workRequests.filter((wr) => wr.SiteId === activeSiteId && !wr.suppressedByWrId);
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
@@ -112,9 +114,9 @@ function SchedulerContent() {
   const start = view === "month" ? `${date.slice(0, 7)}-01` : date;
   const dates = Array.from({ length: days }, (_, index) => addDays(start, index)).filter((day) => weekends || view === "day" || ![0, 6].includes(new Date(`${day}T12:00:00`).getDay()));
   const visible = (wr: BaseWorkRequest) => (disputeMode !== "only" || (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0) && (!isolateWrId || wr.WR_ID === isolateWrId) && types.includes(wr.WR_Type) && (types.includes("Frozen") || !wr.IsFrozen) && (types.includes("Completed") || ![78, 100].includes(wr.Percentage));
-  const filteredPeople = people.filter((person) => (trades === null || trades.includes(person.Trade)) &&
+  const filteredPeople = people.filter((person) => (trades === null || trades.includes(person.Trade) || person.Trade === draggingWr?.TradeName) &&
     (selectedPeople === null || selectedPeople.includes(person.id)) &&
-    (buildings === null || siteRequests.some((wr) => wr.bl_id && buildings.includes(wr.bl_id) && wr.AssignedCraftpersonIds.includes(person.id))) &&
+    (buildings === null || siteRequests.some((wr) => wr.bl_id && buildings.includes(wr.bl_id) && wr.AssignedCraftpersonIds.includes(person.id)) || person.Trade === draggingWr?.TradeName) &&
     (availability === "All" || dates.some((day) => (activeAbsences(data.craftpersonAbsences, activeSiteId, person.id, day).length > 0) === (availability === "On leave"))) &&
     (disputeMode !== "only" || siteRequests.some((wr) => {
       const slot = intervalFor(wr, person.id);
@@ -131,7 +133,7 @@ function SchedulerContent() {
     const wr = siteRequests.find((item) => item.WR_ID === move.id);
     const person = people.find((item) => item.id === move.person);
     if (!wr || !person) { setError("The selected request or craftsperson is unavailable."); return; }
-    if ([27, 78, 100].includes(wr.Percentage)) { setError("Cancelled or completed requests cannot be rescheduled here."); return; }
+    if (!isWrSchedulable(wr)) { setError(cannotScheduleMessage(wr)); return; }
     const old = intervalFor(wr, person.id) ?? (move.from ? intervalFor(wr, move.from) : null);
     const startTime = move.start ?? `${move.date}T07:00`;
     const endTime = move.end ?? fromWallMinutes(wallMinutes(startTime) + (old ? wallMinutes(old.assignedEndDateTime) - wallMinutes(old.assignedStartDateTime) : Math.max(30, (wr.ExpectedHours ?? 1) * 60)));
@@ -238,6 +240,7 @@ function SchedulerContent() {
     if (!permissions?.canScheduleCraftperson) { setError("Permission required to schedule craftspeople."); return; }
     const original = siteRequests.find((item) => item.WR_ID === id);
     if (!original || !original.AssignedCraftpersonIds.includes(person)) { setError("Assignment is no longer available."); return; }
+    if (isWrTerminal(original)) { setError(`Cannot unassign WR ${id}: ${original.Percentage}% ${original.WorkRequestStatus} assignments are read-only.`); return; }
     if (!window.confirm(`Remove ${person} from ${id}?`)) return;
     setData((state) => {
       const current = state.workRequests.find((item) => item.SiteId === activeSiteId && item.WR_ID === id);
@@ -249,7 +252,7 @@ function SchedulerContent() {
   return <div className="space-y-2 p-3 text-xs">
     {!permissions?.canScheduleCraftperson && <p role="status" className="rounded bg-amber-100 p-2">Scheduling is read-only. Ask a site administrator for permission.</p>}
     <div className="flex gap-2"><button className={button} aria-pressed={tab === "dispatch"} onClick={() => changeTab("dispatch")}>WR Dispatch Calendar</button><button className={button} aria-pressed={tab === "availability"} onClick={() => changeTab("availability")}>Shifts, Vacations &amp; Trainings</button><button className={button} aria-pressed={tab === "freezes"} onClick={() => changeTab("freezes")}>Location Freezes</button><button className={button} aria-pressed={tab === "pms"} onClick={() => changeTab("pms")}>🔁 PMS Default Schedules &amp; Auto-Assign</button><a className={button} href="/work-requests?view=hub#PM">📢 Team Alignment Hub</a></div>
-    {error && <p role="alert" className="rounded bg-red-100 p-2 text-red-900">{error}</p>}
+    {error && <div role="alert" className="flex items-start justify-between gap-2 rounded bg-red-100 p-2 text-red-900"><span>{error}</span><button type="button" className="shrink-0 underline" aria-label="Dismiss scheduling warning" onClick={() => setError("")}>Dismiss</button></div>}
     {notice && <p role="status" className="rounded bg-cyan-100 p-2">{notice}</p>}
     {tab === "dispatch" && <>
     <QAReportNotifications />
@@ -283,8 +286,13 @@ function SchedulerContent() {
       <label><input type="checkbox" checked={weekends} onChange={(event) => setWeekends(event.target.checked)} /> Show Weekends</label>
     </div>
     <p>Shift Hours · <span className="bg-slate-100">Off-Shift</span> · <span className="bg-amber-100">🏖 Vacation</span> · <span className="bg-indigo-100">🎓 Training</span> · <span className="bg-rose-100">🤒 Sick Leave</span> · ❄ Location Freeze</p>
-    <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} disputeMap={disputeMap} disputeMode={disputeMode} onDisputeMode={setDisputeMode} onOpen={setOpen} onShow={showRequest} onAssign={(id) => { setQuickPerson(""); setQuickDate(date); setQuickAssign(id); }} />
-      <HourlyTimeline gates={gates} dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
+    <div className="flex items-start gap-2"><WRSourcePanel requests={siteRequests} people={people} buildings={data.buildings.filter((item) => item.SiteId === activeSiteId)} freezes={data.locationFreezes} now={localNow} disputeMap={disputeMap} disputeMode={disputeMode} onDisputeMode={setDisputeMode} onOpen={setOpen} onShow={showRequest} onDraggingChange={setDraggingWr} onAssign={(id) => {
+      const wr = siteRequests.find((item) => item.WR_ID === id);
+      if (!wr) { setError("Work request is no longer available."); return; }
+      if (!isWrSchedulable(wr)) { setError(cannotScheduleMessage(wr)); return; }
+      setQuickPerson(""); setQuickDate(date); setQuickAssign(id);
+    }} />
+      <HourlyTimeline gates={gates} dates={dates} people={filteredPeople} requests={siteRequests} visible={visible} absences={data.craftpersonAbsences} freezes={data.locationFreezes} disputeMap={disputeMap} disputeMode={disputeMode} site={activeSiteId} firstHour={firstHour} lastHour={lastHour} spotlight={spotlight} draggingWr={draggingWr} onDropRejected={setError} onOpen={setOpen} onRemove={removeAssignment} onEdit={(wr, person) => { const interval = intervalFor(wr, person); if (interval) setEditTime({ id: wr.WR_ID, person, start: interval.assignedStartDateTime, end: interval.assignedEndDateTime }); }} onMove={(id, person, start, end, from) => assign({ id, person, date: start.slice(0, 10), start, end, from })} /></div>
     </>}
     {tab === "freezes" && <LocationFreezes key={activeSiteId} />}
     {tab === "pms" && <PmsDefaultSchedules key={activeSiteId} onNotice={setNotice} />}

@@ -27,6 +27,7 @@ export interface FastJobData {
 }
 import { computeFjSla, slaStoredDate } from "./fj-sla";
 import { getSiteSlaConfig } from "./fj-satisfaction";
+import { allocateWorkRequestId } from "./wr-id-migration";
 
 export interface FjActor { userId?: string; displayName: string; role: string; personId?: string }
 
@@ -42,10 +43,11 @@ export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: De
   const config = getSiteSlaConfig(ctx.data, ctx.siteId);
   const sla = computeFjSla(config, trade, urgencyCode, createdAt, { deferToNextBusinessDay: job.deferToNextBusinessDay });
   const stamp = Date.now();
+  const wrId = allocateWorkRequestId(ctx.data.workRequests);
   const actorName = ctx.actor.displayName;
   const onBehalf = !!job.requestorName && job.requestorName !== actorName;
   return {
-    WR_ID: `FJ-${stamp}`,
+    WR_ID: wrId,
     JobID: `JOB-${stamp}`,
     WR_Type: "FJ",
     ESAWorkType: "Corrective Maintenance",

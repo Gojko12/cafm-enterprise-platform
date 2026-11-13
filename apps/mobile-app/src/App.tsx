@@ -28,6 +28,7 @@ import {
   PmCoordinationRecordSchema,
   evaluatePmGate,
   CLASSICAL_TRADES,
+  allocateWorkRequestId,
 } from "@cafm/shared-schema";
 import type { LocationFreeze, UserAccessProfile, TechnicianFieldUpdate, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, PM_Schedule } from "@cafm/shared-schema";
 import { z } from "zod";
@@ -403,7 +404,7 @@ export default function App() {
     if (!issued) throw new Error("Issued status configuration is missing.");
     const now = new Date().toISOString();
     const request: BaseWorkRequest = {
-      WR_ID: `FJ-${Date.now()}`,
+      WR_ID: allocateWorkRequestId(siteWRs),
       JobID: `JOB-${Date.now()}`,
       WR_Type: "FJ",
       ESAWorkType: issued.ESAWorkType,
@@ -444,7 +445,7 @@ export default function App() {
     if (!access?.permissions.canCreateLJ) throw new Error("Permission required to create a Long Job.");
     const now = new Date().toISOString();
     const request: BaseWorkRequest = {
-      WR_ID: `LJ-${Date.now()}`,
+      WR_ID: allocateWorkRequestId(siteWRs),
       JobID: `JOB-${Date.now()}`,
       WR_Type: "LJ",
       ESAWorkType: "Corrective Maintenance",
@@ -507,7 +508,7 @@ export default function App() {
     const now = new Date().toISOString();
     if (!engine) throw new Error("Offline storage is not ready.");
     if (savingWR.current) throw new Error("Another save is in progress. Try again.");
-    const request: BaseWorkRequest = { WR_ID: `FJ-${crypto.randomUUID()}`, WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, ParentWR_ID: selectedWR.WR_ID, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID, sourcePmWrId: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), originatingChecklistStepId: followUpStep?.id, originatingChecklistStepLabel: followUpStep?.label, UpdatedAt: now, updatedAt: now, CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}${followUpStep ? `, step ${followUpStep.label}` : ""}.` }] };
+    const request: BaseWorkRequest = { WR_ID: allocateWorkRequestId(siteWRs), WR_Type: "FJ", ...issued, Description: followUpDescription.trim(), SiteId: selectedWR.SiteId, bl_id: selectedWR.bl_id, LevelName: selectedWR.LevelName, RoomCode: selectedWR.RoomCode, ProblemLocation: selectedWR.ProblemLocation, EquipmentCodes: [...selectedWR.EquipmentCodes], TradeId: selectedWR.TradeId, TradeName: selectedWR.TradeName, ParentWR_ID: selectedWR.WR_ID, OriginatingWR_ID: selectedWR.WR_ID, ...(selectedWR.WR_Type === "PM" ? { ParentPM_WR_ID: selectedWR.WR_ID, sourcePmWrId: selectedWR.WR_ID } : {}), ...(selectedWR.WR_Type === "FJ" ? { OriginatingFJ_WR_ID: selectedWR.WR_ID } : {}), originatingChecklistStepId: followUpStep?.id, originatingChecklistStepLabel: followUpStep?.label, UpdatedAt: now, updatedAt: now, CreatedDate: now.slice(0, 10), CreatedBy: technicianName, AssignedCraftpersonIds: [currentTechnicianId], AssignedUserIds: [currentTechnicianId], TotalTimeMinutes: 0, IsFrozen: false, StartDateTBD: false, RequiresSAT: false, RequiresDrawingUpdate: false, RequiresInventoryUpdate: false, AcceptanceGates: [], Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: currentTechnicianId, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: `Created follow-up for ${selectedWR.WR_ID}${followUpStep ? `, step ${followUpStep.label}` : ""}.` }] };
     savingWR.current = true;
     try {
       const current = await engine.getWorkRequest(selectedWR.WR_ID);

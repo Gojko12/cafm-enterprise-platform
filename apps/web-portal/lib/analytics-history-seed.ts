@@ -2,6 +2,7 @@ import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
 import type { AuditFinding } from "./audit-assurance-types";
 import type { DemoData } from "./cafm-data";
 import { addDays, calendarDate } from "./dispatch";
+import { allocateWorkRequestId } from "./wr-id-migration";
 
 /**
  * Idempotent 2026 historical analytics dataset for `SITE-01` (`01-01-2026` -> today).
@@ -15,8 +16,6 @@ import { addDays, calendarDate } from "./dispatch";
  * Applied inside `scopeData`, so existing `.data` states are enriched automatically
  * and `Reset Demo Data` includes everything cleanly. Never throws.
  */
-
-const SEED_PREFIX = "2026H";
 
 const BAD_ACTORS = [
   "0000000001", // Chiller — worst actor
@@ -47,6 +46,7 @@ interface SeedContext {
   today: string;
   equipmentByCode: Map<string, Equipment>;
   people: { id: string; name: string }[];
+  usedWorkRequestIds: Set<string>;
 }
 
 function makeWr(
@@ -72,7 +72,8 @@ function makeWr(
     hours?: number;
   },
 ): BaseWorkRequest {
-  const id = `${SEED_PREFIX}${String(sequence).padStart(4, "0")}`;
+  const id = allocateWorkRequestId(context.usedWorkRequestIds);
+  context.usedWorkRequestIds.add(id);
   const asset = context.equipmentByCode.get(options.equipmentCode);
   const trade = asset?.PrimaryTradeId && (TRADES as readonly string[]).includes(asset.PrimaryTradeId)
     ? asset.PrimaryTradeId
@@ -169,7 +170,8 @@ function makeLj(
     timeLogs?: Array<{ person: { id: string; name: string }; hours: number; loggedAt: string }>;
   },
 ): BaseWorkRequest {
-  const id = `${SEED_PREFIX}LJ${String(sequence).padStart(2, "0")}`;
+  const id = allocateWorkRequestId(context.usedWorkRequestIds);
+  context.usedWorkRequestIds.add(id);
   const asset = context.equipmentByCode.get(options.equipmentCode);
   const stageHistory: NonNullable<BaseWorkRequest["StageHistory"]> = [];
   let cursor = options.created;
@@ -303,7 +305,8 @@ function makeFinding(
 export function ensureAnalyticsHistorySeeded(data: DemoData): DemoData {
   try {
     if (!data.sites.includes("02-ESOC")) return data;
-    if (data.workRequests.some((wr) => wr.SiteId === "02-ESOC" && wr.WR_ID.startsWith(SEED_PREFIX))) return data;
+    if (data.workRequests.some((wr) => wr.SiteId === "02-ESOC" && wr.Activity?.some((entry) =>
+      entry.text.includes("Analytics history work request seeded") || entry.text.includes("Analytics history Long Job seeded")))) return data;
 
     const today = calendarDate(new Date());
     const ago = (days: number) => addDays(today, -days);
@@ -312,6 +315,7 @@ export function ensureAnalyticsHistorySeeded(data: DemoData): DemoData {
       equipmentByCode: new Map(data.equipment.filter((asset) =>       asset.SiteId === "02-ESOC").map((asset) => [asset.EquipmentCode, asset])),
             people: data.craftspeople.filter((person) => person.SiteId === "02-ESOC").slice(0, 8)
         .map((person) => ({ id: person.id, name: `${person.Name} ${person.LastName}` })),
+            usedWorkRequestIds: new Set(data.workRequests.map((wr) => wr.WR_ID)),
     };
     if (!context.equipmentByCode.size) return data;
     const person = (index: number) => context.people[index % Math.max(context.people.length, 1)] ?? { id: "S01-C1", name: "Gregor Gojkošek" };
