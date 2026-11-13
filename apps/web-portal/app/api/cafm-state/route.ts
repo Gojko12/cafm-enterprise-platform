@@ -14,6 +14,7 @@ import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, Onboa
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 import { migrateWorkRequestIdsTo10Digits } from "@/lib/wr-id-migration";
+import { sanitizeStateForSite } from "@/lib/site-state-sanitize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -247,45 +248,41 @@ function scope(request: Request) {
   return site.success ? site.data : siteSchema.parse("02-ESOC");
 }
 
-function validateSite(state: z.infer<typeof stateSchema>, site: string) {
-  if (state.sites.length !== 1 || state.sites[0] !== site) return false;
+// Returns the exact failing field so the client never sees a generic rejection, or null when the state is valid.
+// Orphaned BIM links, location freezes and PM suppressions are repaired by sanitizeStateForSite instead of being rejected.
+function validateSite(state: z.infer<typeof stateSchema>, site: string): string | null {
+  if (state.sites.length !== 1 || state.sites[0] !== site) return "sites";
   const scoped = ["buildings", "floors", "rooms", "desks", "equipment", "schedules", "craftspeople", "siteRoleAssignments", "workRequests", "tradeRoleMappings", "siteRoleMappings"] as const;
-  if (scoped.some((key) => state[key].some((item) => item.SiteId !== site))) return false;
-  if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return false;
-  if (state.blueprintAuditLog.some((item) => item.siteId !== site)) return false;
+  for (const key of scoped) if (state[key].some((item) => item.SiteId !== site)) return key;
+  if (state.blueprints.some((item) => item.SiteId !== undefined && item.SiteId !== site)) return "blueprints";
+  if (state.blueprintAuditLog.some((item) => item.siteId !== site)) return "blueprintAuditLog";
   if (state.schedules.some((order) => !state.blueprints.some((bp) => bp.ChecklistCode === order.ChecklistCode) ||
       !state.buildings.some((building) => building.bl_id === order.bl_id) ||
       order.targetType === "equipment" && !state.equipment.some((asset) => asset.EquipmentCode === order.EquipmentCodes[0]) ||
       (order.targetType === "floor" || order.targetType === "room") && !state.floors.some((floor) => floor.bl_id === order.bl_id && floor.LevelName === order.LevelName) ||
-      order.targetType === "room" && !state.rooms.some((room) => room.bl_id === order.bl_id && room.LevelName === order.LevelName && room.RoomCode === order.RoomCode))) return false;
-  if (state.suppressedPmOccurrences?.some((item) => item.siteId !== site ||
-      (item.targetType && item.targetType !== "equipment" ? !state.schedules.some((order) => order.targetKey === item.targetKey) : !state.equipment.some((asset) => asset.EquipmentCode === item.equipmentCode && asset.SiteId === site)) ||
-      !state.workRequests.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site) &&
-      !state.deletedWorkRequests?.some((wr) => wr.WR_ID === item.coveredByWrId && wr.SiteId === site))) return false;
-  if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return false;
-  if (state.onboardingRequests?.some((item) => item.stationedSiteId !== site)) return false;
-  if (state.qaAuditReports?.some((item) => item.siteId !== site)) return false;
-  if (state.auditCampaigns?.some((item) => item.siteId !== site)) return false;
-  if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
-  if (state.auditInspections?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
-  if ((state.auditAssurance?.equipmentInspections ?? []).some((sheet) => sheet.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === sheet.campaignId && campaign.selectedEquipmentIds.includes(sheet.equipmentId)) || !state.equipment.some((asset) => asset.SiteId === site && asset.EquipmentCode === sheet.equipmentId && asset.bl_id === sheet.buildingId && asset.RoomCode === sheet.roomId))) return false;
-  if (state.auditTemplates?.some((item) => item.siteId !== site)) return false;
-  if (state.auditImports?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return false;
-  if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return false;
-  if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return false;
-  if (state.stakeholderTeams?.some((item) => item.siteId !== site) || state.coordinationRequirements?.some((item) => item.siteId !== site) || state.pmCoordination?.some((item) => item.siteId !== site)) return false;
-  if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return false;
-  if (state.locationFreezes?.some((item) => item.siteId !== site ||
-    (item.buildingIds ? item.buildingIds.some((id) => !state.buildings.some((building) => building.bl_id === id)) ||
-      (item.floorIds ?? []).some((id) => !state.floors.some((floor) => item.buildingIds!.includes(String(floor.bl_id)) && floor.LevelName === id)) ||
-      (item.roomIds ?? []).some((id) => !state.rooms.some((room) => item.buildingIds!.includes(String(room.bl_id)) && (item.floorIds ?? []).includes(String(room.LevelName)) && room.RoomCode === id)) :
-      !state.buildings.some((building) => building.bl_id === item.buildingId) ||
-      (item.floorId && !state.floors.some((floor) => floor.bl_id === item.buildingId && floor.LevelName === item.floorId)) ||
-      (item.roomId && !state.rooms.some((room) => room.bl_id === item.buildingId && room.LevelName === item.floorId && room.RoomCode === item.roomId))))) return false;
-  if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return false;
-  if (state.bimElementLinks && Object.entries(state.bimElementLinks).some(([key, link]) =>
-    !key.startsWith(`${link.buildingId}:`) || !state.equipment.some((asset) => asset.EquipmentCode === link.equipmentCode && asset.SiteId === site))) return false;
-  return true;
+      order.targetType === "room" && !state.rooms.some((room) => room.bl_id === order.bl_id && room.LevelName === order.LevelName && room.RoomCode === order.RoomCode))) return "schedules";
+  if (state.suppressedPmOccurrences?.some((item) => item.siteId !== site)) return "suppressedPmOccurrences";
+  if (state.qaInspectorAssignments?.some((item) => item.siteId !== site)) return "qaInspectorAssignments";
+  if (state.onboardingRequests?.some((item) => item.stationedSiteId !== site)) return "onboardingRequests";
+  if (state.qaAuditReports?.some((item) => item.siteId !== site)) return "qaAuditReports";
+  if (state.auditCampaigns?.some((item) => item.siteId !== site)) return "auditCampaigns";
+  if (state.auditFindings?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return "auditFindings";
+  if (state.auditInspections?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return "auditInspections";
+  if ((state.auditAssurance?.equipmentInspections ?? []).some((sheet) => sheet.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === sheet.campaignId && campaign.selectedEquipmentIds.includes(sheet.equipmentId)) || !state.equipment.some((asset) => asset.SiteId === site && asset.EquipmentCode === sheet.equipmentId && asset.bl_id === sheet.buildingId && asset.RoomCode === sheet.roomId))) return "auditAssurance.equipmentInspections";
+  if (state.auditTemplates?.some((item) => item.siteId !== site)) return "auditTemplates";
+  if (state.auditImports?.some((item) => item.siteId !== site || !state.auditCampaigns?.some((campaign) => campaign.id === item.campaignId))) return "auditImports";
+  if (state.userAccessProfiles?.some((item) => item.siteId !== site)) return "userAccessProfiles";
+  if (state.deletedWorkRequests?.some((item) => item.SiteId !== site)) return "deletedWorkRequests";
+  if (state.stakeholderTeams?.some((item) => item.siteId !== site)) return "stakeholderTeams";
+  if (state.coordinationRequirements?.some((item) => item.siteId !== site)) return "coordinationRequirements";
+  if (state.pmCoordination?.some((item) => item.siteId !== site)) return "pmCoordination";
+  if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return "craftpersonAbsences";
+  // Location freezes may reference floors/rooms that are still syncing from BIM; only the site scope is enforced.
+  if (state.locationFreezes?.some((item) => item.siteId !== site)) return "locationFreezes";
+  if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return "users";
+  // A BIM link may point at equipment that is not created yet; only the building-scoped key shape is enforced.
+  if (state.bimElementLinks && Object.entries(state.bimElementLinks).some(([key, link]) => !key.startsWith(`${link.buildingId}:`))) return "bimElementLinks";
+  return null;
 }
 
 function authorize(request: Request) {
@@ -416,7 +413,9 @@ export async function POST(request: Request) {
     try { json = JSON.parse(text); } catch { return reply(request, { error: "Invalid JSON." }, 400); }
     const parsed = payloadSchema.safeParse(json);
     if (!parsed.success) return reply(request, { error: "Invalid state or revision.", details: parsed.error.issues }, 400);
-    if (!validateSite(parsed.data.state, site)) return reply(request, { error: "State contains records from another site." }, 400);
+    parsed.data.state = sanitizeStateForSite(parsed.data.state, site);
+    const invalidField = validateSite(parsed.data.state, site);
+    if (invalidField) return reply(request, { error: `State validation failed: ${invalidField}` }, 400);
     const storage = await backend();
     if (storage.kind !== "supabase") {
       lockFile = storage.lockFile;

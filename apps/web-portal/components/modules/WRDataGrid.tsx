@@ -14,7 +14,7 @@ import { mapWRDisputes } from "@/lib/disputes";
 import type { DisputeViewMode } from "@/lib/disputes";
 import { useQAActions } from "@/lib/use-qa-actions";
 import { WRSignals } from "./WRSignals";
-import { getChecklistProgress, getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { getChecklistProgress, getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount, isPmEligibleForExecutionSignals } from "@/lib/wr-signals";
 import type { SignalTab } from "@/lib/wr-signals";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
@@ -55,9 +55,9 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "status": return `${wr.WorkRequestStatus} · ${wr.WorkRequestSubstatus}`;
       case "percentage": return `${wr.Percentage}%`;
       case "signals": return [
-        wr.WR_Type === "PM" && getChecklistProgress(wr, data).incomplete.length ? `${getChecklistProgress(wr, data).incomplete.length} incomplete checklist steps` : "",
+        isPmEligibleForExecutionSignals(wr) && getChecklistProgress(wr, data).incomplete.length ? `${getChecklistProgress(wr, data).incomplete.length} incomplete checklist steps` : "",
         getUnfavourableStepCount(wr, data) ? `${getUnfavourableStepCount(wr, data)} Unfavourable` : "",
-        wr.WR_Type === "PM" && getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length ? `${getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length} Follow-Up FJ` : "",
+        isPmEligibleForExecutionSignals(wr) && getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length ? `${getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length} Follow-Up FJ` : "",
         getParentPM(wr, data.workRequests) ? `Follow-up of PM #${getParentPM(wr, data.workRequests)!.WR_ID}` : "",
       ].filter(Boolean).join(" · ");
       case "trade": return wr.TradeName ?? wr.TradeId ?? "";
@@ -141,7 +141,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
   };
   const row = (wr: BaseWorkRequest) => <tr key={wr.WR_ID} className={`border-t hover:bg-slate-50 ${disputeMode === "highlight" ? (disputeMap.get(wr.WR_ID)?.length ? "border-l-4 border-l-rose-600 bg-rose-50 ring-1 ring-rose-300" : "opacity-40") : ""}`} onDoubleClick={() => onOpen(wr)}>
     <td className="p-2" title={`Select ${wr.WR_ID}`} onDoubleClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${wr.WR_ID}`} checked={selected.includes(wr.WR_ID)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, wr.WR_ID] : current.filter((id) => id !== wr.WR_ID))} /></td>
-    {config.visible.map(({ id }) => { const key = id as Column; const incompleteCount = key === "signals" && wr.WR_Type === "PM" ? getChecklistProgress(wr, data).incomplete.length : 0; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : displayValue(wr, key)}><div className={key === "signals" ? "flex flex-wrap gap-1" : "truncate"}>{key === "signals" ? <>{incompleteCount > 0 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">Checklist incomplete · {incompleteCount}</span>}<WRSignals wr={wr} onOpen={onOpen} /></> : key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{displayValue(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{displayValue(wr, key)}</span> : displayValue(wr, key) || "—"}</div></td>; })}
+    {config.visible.map(({ id }) => { const key = id as Column; const incompleteCount = key === "signals" && isPmEligibleForExecutionSignals(wr) ? getChecklistProgress(wr, data).incomplete.length : 0; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : displayValue(wr, key)}><div className={key === "signals" ? "flex flex-wrap gap-1" : "truncate"}>{key === "signals" ? <>{incompleteCount > 0 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">Checklist incomplete · {incompleteCount}</span>}<WRSignals wr={wr} onOpen={onOpen} /></> : key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{displayValue(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{displayValue(wr, key)}</span> : displayValue(wr, key) || "—"}</div></td>; })}
     <td className="p-2" title="Open / Edit" onDoubleClick={(event) => event.stopPropagation()}><button className="block max-w-full truncate text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
   return <div className="space-y-2">
     <div className="flex flex-wrap items-center gap-2"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{signalFilters}<div className="ml-auto">{config.menu}</div></div>

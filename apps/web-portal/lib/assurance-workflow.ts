@@ -29,7 +29,7 @@ export function correctiveWR(data: DemoData, findings: AuditFinding[], type: "FJ
   const first = findings[0], asset = data.equipment.find((e) => e.EquipmentCode === first.equipmentId);
   if (!asset || asset.bl_id !== first.buildingId || asset.RoomCode !== first.roomId) throw new Error("The finding's equipment location has changed; validate it before creating work.");
   if (findings.some((f) => f.buildingId !== first.buildingId || f.roomId !== first.roomId || f.trade !== first.trade || !data.equipment.some((e) => e.EquipmentCode === f.equipmentId && e.bl_id === f.buildingId && e.RoomCode === f.roomId && e.LevelName === asset.LevelName))) throw new Error("A collective work request requires the same building, floor, room and trade.");
-  const now = new Date().toISOString(), id = allocateWorkRequestId(data.workRequests);
+  const now = new Date().toISOString(), id = allocateWorkRequestId(data.workRequests, { site: first.siteId, deleted: data.deletedWorkRequests ?? [] });
   const details = findings.map((f) => `${f.id} | ${f.equipmentId} | ${f.componentName} | ${f.urgency} due ${f.calculatedDeadline}\n${f.observation}\nRemedy: ${f.recommendedRemedy}`).join("\n\n");
   return {
     WR_ID: id, WR_Type: type, ...getInitialIssuedStatus("Corrective Maintenance"), Description: `Audit corrective work: ${details}`,

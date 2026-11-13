@@ -20,7 +20,7 @@ import Link from "next/link";
 import { WRSignals } from "@/components/modules/WRSignals";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
-import { getChecklistProgress, getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { getChecklistProgress, getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount, isPmEligibleForExecutionSignals } from "@/lib/wr-signals";
 import { buildFastJobWR } from "@/lib/fj-factory";
 import { isDissatisfied } from "@/lib/fj-satisfaction";
 import type { SignalTab } from "@/lib/wr-signals";
@@ -232,9 +232,9 @@ export default function WorkRequestsPage() {
   });
   const hasSignal = (wr: BaseWorkRequest, signal: NonNullable<typeof signalFilter>) =>
     signal === "unfavourable" ? getUnfavourableStepCount(wr, data) > 0 :
-      signal === "follow-up" ? wr.WR_Type === "PM" && getFollowUpFJsForPM(wr.WR_ID, workRequests).length > 0 :
+      signal === "follow-up" ? isPmEligibleForExecutionSignals(wr) && getFollowUpFJsForPM(wr.WR_ID, workRequests).length > 0 :
         signal === "parent" ? !!getParentPM(wr, workRequests) :
-          wr.WR_Type === "PM" && getChecklistProgress(wr, data).incomplete.length > 0;
+          isPmEligibleForExecutionSignals(wr) && getChecklistProgress(wr, data).incomplete.length > 0;
   const filteredRequests = scopedRequests.filter((wr) => !signalFilter || hasSignal(wr, signalFilter));
   const signalFilters = <div className="flex flex-wrap gap-2 text-xs">
     {([
@@ -287,7 +287,7 @@ export default function WorkRequestsPage() {
         return;
       }
       const newWR: BaseWorkRequest = {
-        WR_ID: allocateWorkRequestId(data.workRequests),
+        WR_ID: allocateWorkRequestId(data.workRequests, { site: activeSiteId, deleted: data.deletedWorkRequests ?? [] }),
         JobID: wr.JobID || `JOB-${Date.now()}`,
         WR_Type: "LJ",
         ESAWorkType: wr.ESAWorkType || "Corrective Maintenance",
@@ -326,7 +326,7 @@ export default function WorkRequestsPage() {
     } else if (drawerMode === "escalate" && selectedWR) {
       const ljWR: BaseWorkRequest = {
         ...selectedWR,
-        WR_ID: allocateWorkRequestId(data.workRequests),
+        WR_ID: allocateWorkRequestId(data.workRequests, { site: activeSiteId, deleted: data.deletedWorkRequests ?? [] }),
         WR_Type: "LJ",
         OriginatingFJ_WR_ID: selectedWR.WR_ID,
         ProcessTrack: "RFQ",
@@ -515,7 +515,7 @@ export default function WorkRequestsPage() {
                     {isDissatisfied(wr) && <span className="rounded bg-red-100 px-2 py-0.5 font-medium text-red-900">Dissatisfied · {wr.Satisfaction?.followUpStatus?.replace(/_/g, " ")}</span>}
                   </p>}
                   <div className="mt-2 flex flex-wrap items-center gap-1">
-                    {wr.WR_Type === "PM" && getChecklistProgress(wr, data).incomplete.length > 0 && <span title="One or more required PM checklist steps are incomplete." className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">Checklist incomplete · {getChecklistProgress(wr, data).incomplete.length}</span>}
+                    {isPmEligibleForExecutionSignals(wr) && getChecklistProgress(wr, data).incomplete.length > 0 && <span title="One or more required PM checklist steps are incomplete." className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">Checklist incomplete · {getChecklistProgress(wr, data).incomplete.length}</span>}
                     <WRSignals wr={wr} onOpen={handleViewWR} />
                   </div>
                 </div>

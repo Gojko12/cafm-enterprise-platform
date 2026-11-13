@@ -20,7 +20,9 @@ import { scopeData, withAccessProfileDefaults, seedData, SITE_ASSIGNMENT_ROLES, 
 const STORAGE_KEY = "cafm-demo-data-v24";
 const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v23", "cafm-demo-data-v22", "cafm-demo-data-v21", "cafm-demo-data-v20", "cafm-demo-data-v19", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
-const BASE_KEY = "cafm-demo-base-v1";
+// v2 baselines keep only `{ revision }` metadata; v1 baselines duplicated the whole state
+// snapshot per site and pushed multi-site setups over Chrome's 5 MB localStorage quota.
+const BASE_KEY = "cafm-demo-base-v2";
 function normalizeServerState(state: DemoData, site: SiteId): DemoData {
   const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...state,
     roleDefinitions: "roleDefinitions" in state ? state.roleDefinitions : undefined,
@@ -38,10 +40,8 @@ function safeStorageSet(key: string, value: string): boolean {
   const storage = window.localStorage;
   for (let index = storage.length - 1; index >= 0; index--) {
     const candidate = storage.key(index);
-    if (candidate?.startsWith("cafm-demo-base-") && !candidate.startsWith(`${BASE_KEY}:`)) {
-      const suffix = candidate.includes(":") ? candidate.slice(candidate.indexOf(":")) : "";
-      if (!storage.getItem(`${PENDING_KEY}${suffix}`)) storage.removeItem(candidate);
-    }
+    // Remove outdated baselines (including v1 full-state snapshots) for every site to reclaim quota.
+    if (candidate?.startsWith("cafm-demo-base-") && !candidate.startsWith(`${BASE_KEY}:`)) storage.removeItem(candidate);
   }
   try { storage.setItem(key, value); return true; }
   catch (error) {
@@ -105,6 +105,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const offlineEdits = useRef(false);
   const knownRevision = useRef(false);
   const dirtyWrIdsRef = useRef(new Set<string>());
+  const pushTimer = useRef<number | null>(null);
+  const schedulePush = useRef<(delay?: number) => void>(() => {});
   current.current = data;
 
   useEffect(() => {
@@ -118,11 +120,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       if (baseText) {
         const base: unknown = JSON.parse(baseText);
         if (!base || typeof base !== "object" || !("revision" in base) || !Number.isInteger(base.revision) ||
-            typeof base.revision !== "number" || base.revision < 0 || !("snapshot" in base) || typeof base.snapshot !== "string") {
+            typeof base.revision !== "number" || base.revision < 0) {
           throw new Error("Stored synchronization baseline has an invalid format.");
         }
         revision.current = base.revision;
-        acknowledged.current = base.snapshot;
         knownRevision.current = true;
       }
       if (saved) {
@@ -189,7 +190,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           acknowledged.current = JSON.stringify(initial);
         }
         connected.current = true;
-        if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+        if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
       } catch (error) {
         setSyncError(error instanceof Error ? error.message : "Could not load server state.");
       }
@@ -275,13 +276,16 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (pending || offlineEdits.current) {
             acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
           } else if (normalizedRemote) {
-            const next = normalizedRemote;
-            acknowledged.current = JSON.stringify(next);
+            // Never drop locally created or edited WRs that the server does not have yet.
+            const next = dirtyWrIdsRef.current.size
+              ? ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, normalizedRemote, dirtyWrIdsRef.current)), site))
+              : normalizedRemote;
+            acknowledged.current = JSON.stringify(normalizedRemote);
             current.current = next;
             if (active) setData(next);
           }
           connected.current = true;
-          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
         }
         const snapshot = ensureFjSurveys(migrateWorkRequestIdsTo10Digits(reconcileAssurance(current.current)));
         if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
@@ -316,7 +320,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           for (const id of dirtyWrIdsRef.current) {
             if (JSON.stringify(currentById.get(id) ?? null) === JSON.stringify(savedById.get(id) ?? null)) dirtyWrIdsRef.current.delete(id);
           }
-          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
           if (JSON.stringify(next) === acknowledged.current) localStorage.removeItem(pendingKey);
           else safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
         } else {
@@ -326,7 +330,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             const next = normalizeServerState(result.state as DemoData, site);
             revision.current = result.revision;
             acknowledged.current = JSON.stringify(next);
-            safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+            safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
             current.current = next;
             if (active) setData(next);
           }
@@ -342,11 +346,27 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       }
     }
     void sync();
+    // Debounced immediate push: a local mutation saves ~150ms later instead of waiting for the next poll tick.
+    schedulePush.current = (delay = 150) => {
+      if (pushTimer.current !== null) window.clearTimeout(pushTimer.current);
+      pushTimer.current = window.setTimeout(() => {
+        pushTimer.current = null;
+        if (busy.current) { schedulePush.current(250); return; }
+        void sync();
+      }, delay);
+    };
     const run = () => { if (document.visibilityState === "visible") void sync(); };
     const interval = window.setInterval(run, 2500);
     window.addEventListener("focus", run);
     document.addEventListener("visibilitychange", run);
-    return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", run); document.removeEventListener("visibilitychange", run); };
+    return () => {
+      active = false;
+      schedulePush.current = () => {};
+      if (pushTimer.current !== null) { window.clearTimeout(pushTimer.current); pushTimer.current = null; }
+      window.clearInterval(interval);
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", run);
+    };
   }, [ready, site, pendingKey, baseKey]);
 
   const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => {
@@ -383,7 +403,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       let cacheError: string | null = null;
       try {
         safeStorageSet(storageKey, acknowledged.current);
-        safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
+        safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
         localStorage.removeItem(pendingKey);
       } catch (error) {
         blocked.current = true;
@@ -437,6 +457,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       for (const wr of previous.workRequests) if (!nextIds.has(wr.WR_ID)) dirtyWrIdsRef.current.add(wr.WR_ID);
       return workRequests === next.workRequests ? next : { ...next, workRequests };
     });
+    schedulePush.current();
   };
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
     {!!data.pmMigrationNotes?.length && <details className="bg-amber-50 p-2 text-sm text-amber-900"><summary>PM assignment migration notes ({data.pmMigrationNotes.length})</summary>{data.pmMigrationNotes.map((note) => <p key={note}>{note}</p>)}</details>}

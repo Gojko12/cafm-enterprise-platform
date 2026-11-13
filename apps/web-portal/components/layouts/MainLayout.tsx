@@ -88,10 +88,10 @@ export function Sidebar() {
                     const isActive = target ? pathname === route || (pathname === "/work-requests" && hash === `#${target}`) : pathname === href || pathname.startsWith(href + "/");
                     if (href.includes("#")) {
                       return (
-                        <a key={href} href={href} aria-current={isActive ? "page" : undefined} className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}>
+                        <Link key={href} href={href} aria-current={isActive ? "page" : undefined} className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}>
                           <Icon size={18} />
                           <span className="font-medium">{label}</span>
-                        </a>
+                        </Link>
                       );
                     }
                     return (

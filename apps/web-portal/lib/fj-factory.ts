@@ -43,7 +43,7 @@ export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: De
   const config = getSiteSlaConfig(ctx.data, ctx.siteId);
   const sla = computeFjSla(config, trade, urgencyCode, createdAt, { deferToNextBusinessDay: job.deferToNextBusinessDay });
   const stamp = Date.now();
-  const wrId = allocateWorkRequestId(ctx.data.workRequests);
+  const wrId = allocateWorkRequestId(ctx.data.workRequests, { site: ctx.siteId, deleted: ctx.data.deletedWorkRequests ?? [] });
   const actorName = ctx.actor.displayName;
   const onBehalf = !!job.requestorName && job.requestorName !== actorName;
   return {

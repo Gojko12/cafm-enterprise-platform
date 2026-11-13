@@ -1,8 +1,51 @@
-import { allocateWorkRequestId, isStrictWorkRequestId } from "@cafm/shared-schema";
+import { isStrictWorkRequestId } from "@cafm/shared-schema";
 
 type WrRecord = Record<string, unknown>;
 
-export { allocateWorkRequestId, isStrictWorkRequestId };
+export { isStrictWorkRequestId };
+
+const WATERMARK_PREFIX = "cafm-wr-watermark";
+
+function collectSequences(items: Iterable<unknown> | undefined, sequences: Set<number>) {
+  if (!items) return;
+  for (const item of items) {
+    const id = typeof item === "string" ? item
+      : item !== null && typeof item === "object" && "WR_ID" in item ? item.WR_ID
+        : undefined;
+    if (isStrictWorkRequestId(id)) sequences.add(Number(id.slice(4)));
+  }
+}
+
+export interface WorkRequestIdContext {
+  /** Persists the high-watermark under `cafm-wr-watermark:${site}` so IDs survive reloads. */
+  site?: string;
+  /** Deleted WRs (or extra reserved IDs) whose IDs must never be reissued. */
+  deleted?: Iterable<unknown>;
+}
+
+/**
+ * Monotonic 10-digit WR ID high-watermark allocator (Section 80): the next ID is always
+ * above the highest sequence across live WRs, deleted WRs and the per-site localStorage
+ * watermark, so a `2026xxxxxx` ID is NEVER reused even across rapid creations or deletions.
+ */
+export function allocateWorkRequestId(existing: Iterable<unknown>, context?: WorkRequestIdContext): string {
+  const sequences = new Set<number>();
+  collectSequences(existing, sequences);
+  collectSequences(context?.deleted, sequences);
+  let watermark = 0;
+  for (const sequence of sequences) if (sequence > watermark) watermark = sequence;
+  const storageKey = context?.site ? `${WATERMARK_PREFIX}:${context.site}` : undefined;
+  if (storageKey && typeof window !== "undefined") {
+    const stored = Number(window.localStorage.getItem(storageKey));
+    if (Number.isInteger(stored) && stored > watermark) watermark = stored;
+  }
+  const sequence = watermark + 1;
+  if (sequence > 999999) throw new Error("No unused 2026 work request IDs remain.");
+  if (storageKey && typeof window !== "undefined") {
+    try { window.localStorage.setItem(storageKey, String(sequence)); } catch { /* quota exhausted: the in-state watermark still applies */ }
+  }
+  return `2026${String(sequence).padStart(6, "0")}`;
+}
 
 function isRecord(value: unknown): value is WrRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);

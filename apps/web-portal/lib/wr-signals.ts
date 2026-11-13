@@ -63,4 +63,18 @@ export function getParentPM(wr: BaseWorkRequest, allWorkRequests: BaseWorkReques
     (ids.includes(pm.WR_ID) || pm.FollowUpFJIds?.includes(wr.WR_ID)));
 }
 
+/**
+ * Execution signals ("Checklist incomplete" and "Follow-Up FJ") apply only to the 4
+ * post-execution / QA PM queues: To Be Inspected, Passed Inspected, PM WRs to be
+ * corrected and Completed. PMs in "Issued PM WRs" (50% / 55%) or "Canceled PM WRs"
+ * (27%) have not been executed yet (or never will be), so they never show them.
+ */
+export function isPmEligibleForExecutionSignals(wr: BaseWorkRequest): boolean {
+  if (wr.WR_Type !== "PM") return false;
+  if (wr.Percentage === 27) return false; // Canceled PM WRs
+  const toBeCorrected = wr.QA_AuditStatus === "QA_Failed_ActionRequired" ||
+    wr.QA_InspectionStatus === "ToBeCorrected" || wr.AuditInspectionStatus === "PM WRs to be corrected";
+  return wr.Percentage === 78 || wr.Percentage === 100 || toBeCorrected;
+}
+
 export type SignalTab = "Checklist - Smart PM" | "PM Follow-up";

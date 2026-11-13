@@ -192,7 +192,7 @@ export function useQAActions() {
         if (decision.verdict === "Fail" && decision.spawnFollowUpFJ) {
       const issued = WR_Statuses.find((status) => status.ESAWorkType === "Corrective Maintenance" && status.Percentage === 50);
       if (!issued) throw new Error("The 50% corrective maintenance status is not configured.");
-      followId = allocateWorkRequestId([...data.workRequests, ...followUps]);
+      followId = allocateWorkRequestId([...data.workRequests, ...followUps], { site: parent.SiteId, deleted: data.deletedWorkRequests ?? [] });
       const entry = { id: crypto.randomUUID(), kind: "log" as const, actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text: `Created QA corrective follow-up ${followId}.` };
       updated = { ...updated, UpdatedAt: now, updatedAt: now,
         ...(parent.WR_Type === "PM" ? { FollowUpFJIds: [...new Set([...(updated.FollowUpFJIds ?? []), followId])] } : {}),

@@ -522,7 +522,7 @@ export function PMWorkRequestPopup({
       return;
     }
     const now = new Date().toISOString();
-    const jobId = allocateWorkRequestId(data.workRequests);
+    const jobId = allocateWorkRequestId(data.workRequests, { site: workRequest.SiteId, deleted: data.deletedWorkRequests ?? [] });
     const job: BaseWorkRequest = {
       WR_ID: jobId,
       JobID: `JOB-${Date.now()}`,

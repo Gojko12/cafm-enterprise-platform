@@ -119,7 +119,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
   const generate = () => run(async () => {
     if (!permissions?.canGeneratePM_WR) throw new Error("Generation permission required.");
     const result = generatePMWorkRequests({ schedules: orders, blueprints: data.blueprints, equipment: data.equipment, workRequests: data.workRequests,
-      siteId: site, mode, selectedIds: selectedOrders, horizonDays: horizon, now: new Date(), craftspeople: data.craftspeople,
+      deletedWorkRequests: data.deletedWorkRequests, siteId: site, mode, selectedIds: selectedOrders, horizonDays: horizon, now: new Date(), craftspeople: data.craftspeople,
       suppressedPmOccurrences: data.suppressedPmOccurrences, actor: { id: actor, name: actor, role: profile?.primaryRole ?? "TeamLeader" } });
     const byId = new Map(result.schedules.map((item) => [item.ScheduleId, item]));
     await persist({ ...data, workRequests: result.workRequests, suppressedPmOccurrences: result.suppressedPmOccurrences, schedules: data.schedules.map((item) => byId.get(item.ScheduleId) ?? item) }, `Generated ${result.generated} WR(s); skipped ${result.skipped} duplicates.`);

@@ -1,4 +1,5 @@
-import { allocateWorkRequestId, createPMCycleKey, getInitialIssuedStatus, pmTargetKey } from "@cafm/shared-schema";
+import { createPMCycleKey, getInitialIssuedStatus, pmTargetKey } from "@cafm/shared-schema";
+import { allocateWorkRequestId } from "./wr-id-migration";
 import { applyAllPmsAutoSchedules } from "./pms-auto-schedule";
 import type { Craftsperson } from "./pms-auto-schedule";
 import type { BaseWorkRequest, Equipment, PM_ChecklistStandard, PM_Schedule, SiteId } from "@cafm/shared-schema";
@@ -12,6 +13,7 @@ type GenerationInput = {
   blueprints: PM_ChecklistStandard[];
   equipment: Equipment[];
   workRequests: BaseWorkRequest[];
+  deletedWorkRequests?: BaseWorkRequest[];
   siteId: SiteId;
   mode: "single" | "selected" | "horizon";
   selectedIds: string[];
@@ -186,7 +188,7 @@ export function generatePMWorkRequests(input: GenerationInput): { workRequests: 
           continue;
         }
         const timestamp = input.now.toISOString();
-        const wrId = allocateWorkRequestId(requests);
+        const wrId = allocateWorkRequestId(requests, { site: input.siteId, deleted: input.deletedWorkRequests ?? [] });
         const request: BaseWorkRequest = {
           WR_ID: wrId, WR_Type: "PM",
           Description: blueprint.Title, TradeId: blueprint.TradeId, TradeName: blueprint.TradeName,

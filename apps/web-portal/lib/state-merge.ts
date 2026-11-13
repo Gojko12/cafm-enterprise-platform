@@ -21,6 +21,9 @@ function mergeWorkRequests(local: unknown, remote: unknown, dirtyWrIds?: Readonl
   for (const item of (Array.isArray(local) ? local : []) as Rec[]) {
     const id = String(item.WR_ID);
     const server = merged.get(id);
+    // A locally created WR that the server does not have yet (e.g. a Fast Job from the BIM or
+    // floor-plan viewer) is ALWAYS preserved, and dirty local edits are kept until the
+    // POST /api/cafm-state succeeds and clears their dirty IDs.
     if (!server || dirtyWrIds?.has(id) && recordStamp(item) >= recordStamp(server)) merged.set(id, item);
   }
   return [...merged.values()];
