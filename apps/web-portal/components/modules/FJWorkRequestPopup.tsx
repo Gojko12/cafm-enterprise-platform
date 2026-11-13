@@ -20,7 +20,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
-import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { LocateInBimButton, OpenRoomInBimButton } from "@/components/common/LocateInBim";
 import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { DissatisfactionPanel, RatingEmailModal } from "@/components/modules/FJSatisfactionPanels";
 import { isCompletedFj } from "@/lib/fj-satisfaction";
@@ -132,6 +132,8 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
             return <LocateInBimButton siteId={workRequest.SiteId} buildingId={workRequest.bl_id} bimBuildingId={bimAsset?.bimBuildingId}
               equipmentCode={bimAsset?.EquipmentCode ?? workRequest.EquipmentCodes[0]} hasBimLink={!!bimAsset?.bimGlobalId} />;
           })()}
+          <OpenRoomInBimButton siteId={workRequest.SiteId} buildingId={workRequest.bimPin?.buildingId ?? workRequest.bl_id}
+            roomCode={workRequest.RoomCode} wrId={workRequest.WR_ID} hasPin={!!workRequest.bimPin} />
           <button aria-label="Close FJ Details Popup" onClick={onClose} className="rounded px-3 py-2 text-xl hover:bg-slate-100">×</button></div>
       </header>
       <FieldUpdateBadges wr={workRequest} />

@@ -1,8 +1,8 @@
 import type React from "react";
 import * as THREE from "three";
-import type { BaseWorkRequest, LocationFreeze } from "@cafm/shared-schema";
+import type { BaseWorkRequest, LocationFreeze, WorkRequestBimPin } from "@cafm/shared-schema";
 import type { useCafmStore } from "@/lib/cafm-store";
-import type { BimElement, BimModelIndex, BimSpace, resolveElementLinks } from "@/lib/ifc-cafm-bridge";
+import type { BimDiscipline, BimElement, BimModelIndex, BimSpace, FunctionalGroup, resolveElementLinks } from "@/lib/ifc-cafm-bridge";
 
 export const COLOR_RED = 0xdc2626;
 export const COLOR_AMBER = 0xf59e0b;
@@ -71,4 +71,45 @@ export type FastJobLocation = { bl_id: string; levelName: string; roomCode: stri
 export type CameraView = "iso" | "top" | "front" | "right";
 export type ViewportHealth = { buildingId: string; meshCount: number; size: [number, number, number]; warning: string } | null;
 export interface IssuePin { key: string; label: string; color: number; kind: "element" | "space"; expressId: number }
-export type BimTab = "linked" | "unassigned" | "rooms";
+export type BimTab = "linked" | "unassigned" | "rooms" | "filter" | "audit";
+
+// ---- Section 76: live status color toggles, MEP discipline layers, multi-select & FJ spot pins ----
+
+export const COLOR_MULTI_HIGHLIGHT = 0xec4899;
+export const EQ_FLY_DIRECTION = new THREE.Vector3(1, 0.95, 1);
+
+export type StatusBucket = "overdue" | "openWr" | "freeze" | "healthy" | "unassigned";
+export type StatusColorVisibility = Record<StatusBucket, boolean>;
+/** `Unassigned MEP element` stays uncolored (normal BIM material) by default. */
+export const DEFAULT_STATUS_COLOR_VISIBILITY: StatusColorVisibility = Object.freeze({
+  overdue: true, openWr: true, freeze: true, healthy: true, unassigned: false,
+});
+export const STATUS_BUCKET_BY_COLOR = new Map<number, StatusBucket>([
+  [COLOR_RED, "overdue"], [COLOR_AMBER, "openWr"], [COLOR_CYAN, "freeze"],
+  [COLOR_EMERALD, "healthy"], [COLOR_VIOLET, "unassigned"],
+]);
+
+export type DisciplineVisibility = Record<BimDiscipline, boolean>;
+export const DEFAULT_DISCIPLINE_VISIBILITY: DisciplineVisibility = Object.freeze({
+  shell: true, hvac: true, piping: true, electrical: true,
+});
+
+export interface BimElementClassification {
+  functionalGroup: FunctionalGroup;
+  discipline: BimDiscipline;
+  manufacturer: string;
+}
+
+export type FloorIsolation = { storeyName: string; roomCode: string } | null;
+export type FastJobPrefill = { equipmentCode?: string; bimPin?: WorkRequestBimPin; spotLabel?: string } | null;
+
+/** Open Fast Job carrying an exact `(x, yBase, z)` 3D spot pin. */
+export interface FjSpotPin { key: string; wr: BaseWorkRequest; pin: WorkRequestBimPin }
+
+/** Converts a world-space Y into the 0–100 `clipPercent` slider domain of the section plane. */
+export function clipPercentForWorldY(modelBox: THREE.Box3 | null, worldY: number): number {
+  if (!modelBox || modelBox.isEmpty()) return 100;
+  const span = modelBox.max.y + 0.5 - modelBox.min.y;
+  if (span <= 0) return 100;
+  return Math.min(100, Math.max(0, Math.round(((worldY - modelBox.min.y) / span) * 100)));
+}

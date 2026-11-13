@@ -1,4 +1,4 @@
-import type { BaseWorkRequest, SiteId, UrgencyCode } from "@cafm/shared-schema";
+import type { BaseWorkRequest, SiteId, UrgencyCode, WorkRequestBimPin } from "@cafm/shared-schema";
 import { WR_Statuses } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
 export interface FastJobData {
@@ -20,6 +20,8 @@ export interface FastJobData {
   requestorEmail?: string;
   requestorPhone?: string;
   requestorDepartment?: string;
+  /** Exact 3D BIM spot pin saved by the viewer / 2D floor plans. */
+  bimPin?: WorkRequestBimPin;
   /** True only when the work was already finished on the spot; the job is then logged at 78% with the time spent. */
   completedOnSpot?: boolean;
 }
@@ -49,6 +51,7 @@ export function buildFastJobWR(job: FastJobData, ctx: { siteId: SiteId; data: De
     ESAWorkType: "Corrective Maintenance",
     Description: job.description,
     ProblemLocation: `${job.bl_id} / ${job.levelName} / ${job.roomCode}`,
+    bimPin: job.bimPin,
     CreatedDate: createdAt.slice(0, 10),
     WorkRequestStatus: status.WorkRequestStatus,
     WorkRequestSubstatus: status.WorkRequestSubstatus,

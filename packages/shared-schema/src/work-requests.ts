@@ -193,6 +193,24 @@ export const LJAcceptanceGateSchema = z.object({
 
 export type LJAcceptanceGate = z.infer<typeof LJAcceptanceGateSchema>;
 
+/**
+ * Exact 3D spot pin saved by the BIM viewer / 2D floor plans for Fast Jobs.
+ * `y` is the un-exploded base Y (`hitPoint.y - storeyOffset(storeyName)`) so
+ * pins shift smoothly with the Explode Storeys slider.
+ */
+export const WorkRequestBimPinSchema = z.object({
+  buildingId: z.string().min(1),
+  storeyName: z.string().optional(),
+  roomCode: z.string().optional(),
+  x: z.number(),
+  y: z.number(),
+  z: z.number(),
+  /** IfcGlobalId of the clicked element, when one was hit. */
+  globalId: z.string().optional(),
+  spotLabel: z.string().optional(),
+});
+export type WorkRequestBimPin = z.infer<typeof WorkRequestBimPinSchema>;
+
 export const BaseWorkRequestSchema = z.object({
   WR_ID: z.string().min(1),
   JobID: z.string().min(1).optional(),
@@ -201,6 +219,8 @@ export const BaseWorkRequestSchema = z.object({
   ESAWorkType: z.string().min(1),
   Description: z.string().min(1),
   ProblemLocation: z.string().optional(),
+  /** Exact 3D BIM spot where the issue was pinned (Fast Jobs from the 3D viewer). */
+  bimPin: WorkRequestBimPinSchema.optional(),
   TradeId: z.string().min(1).optional(),
   TradeName: z.string().min(1).optional(),
   EquipmentCodes: z.array(z.string().min(1)).default([]),

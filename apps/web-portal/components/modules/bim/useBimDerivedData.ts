@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { getUnfavourableStepCount } from "@/lib/wr-signals";
 import { freezeLocations, localNowIso } from "@/lib/location-freezes";
-import { findMissingSyncItems, resolveElementLinks, type BimElement, type BimModelIndex } from "@/lib/ifc-cafm-bridge";
+import { classifyDiscipline, classifyFunctionalGroup, findMissingSyncItems, resolveBimManufacturer, resolveElementLinks, type BimDiscipline, type BimElement, type BimModelIndex } from "@/lib/ifc-cafm-bridge";
 import {
   ALL_STOREYS,
   COLOR_AMBER,
@@ -13,7 +13,9 @@ import {
   COLOR_RED,
   ROOM_LEVEL_COLOR,
   displayName,
+  type BimElementClassification,
   type CafmData,
+  type FjSpotPin,
   type IssuePin,
   type RoomHealth,
 } from "./bim-viewport-math";
@@ -62,6 +64,36 @@ export function useBimDerivedData({
     });
     return result.floors.length || result.rooms.length || result.taggedAssets.length ? result : null;
   }, [index, buildingId, data.floors, data.rooms, siteEquipment]);
+
+  /** functionalGroup / discipline / manufacturer per element (CAFM equipment data wins). */
+  const classificationByExpressId = useMemo(() => {
+    const map = new Map<number, BimElementClassification>();
+    if (!index) return map;
+    for (const element of index.elements) {
+      const link = links.get(element.expressId);
+      const asset = link ? equipmentByCode.get(link.equipmentCode) : undefined;
+      map.set(element.expressId, {
+        functionalGroup: classifyFunctionalGroup(element),
+        discipline: classifyDiscipline(element),
+        manufacturer: resolveBimManufacturer(element, asset?.Manufacturer),
+      });
+    }
+    return map;
+  }, [index, links, equipmentByCode]);
+
+  const disciplineByExpressId = useMemo(() => {
+    const map = new Map<number, BimDiscipline>();
+    for (const [expressId, entry] of classificationByExpressId) map.set(expressId, entry.discipline);
+    return map;
+  }, [classificationByExpressId]);
+
+  /** Open Fast Jobs pinned to an exact 3D spot inside the loaded building. */
+  const fjSpotPins = useMemo<FjSpotPin[]>(() => {
+    if (!buildingId) return [];
+    return data.workRequests
+      .filter((wr) => wr.SiteId === activeSiteId && wr.Percentage < 100 && wr.bimPin?.buildingId === buildingId)
+      .map((wr) => ({ key: `fj-${wr.WR_ID}`, wr, pin: wr.bimPin! }));
+  }, [data.workRequests, activeSiteId, buildingId]);
 
   const statusColorByCode = useMemo(() => {
     const map = new Map<string, number>();
@@ -194,6 +226,7 @@ export function useBimDerivedData({
 
   return {
     siteEquipment, equipmentByCode, links, missing, statusColorByCode, roomHealth, issuePins,
+    classificationByExpressId, disciplineByExpressId, fjSpotPins,
     linkedRows, unassignedRows, roomRows, selectedElement, selectedSpace, selectedRoomHealth,
     roomElements, roomSchedules, selectedLink, selectedEquipment, selectedOpenWRs, selectedSchedules,
     assignCandidates,

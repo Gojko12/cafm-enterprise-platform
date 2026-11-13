@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import type { Building, Equipment, Floor, Room, SiteId } from "@cafm/shared-schema";
 import { buildFastJobWR } from "@/lib/fj-factory";
-import { bimLinkKey, findMissingSyncItems, nextSequentialEquipmentCode, suggestEquipmentCategory, suggestEquipmentTrade, type BimElement, type BimModelIndex } from "@/lib/ifc-cafm-bridge";
+import { bimLinkKey, findMissingSyncItems, nextSequentialEquipmentCode, resolveBimManufacturer, suggestEquipmentCategory, suggestEquipmentTrade, type BimElement, type BimModelIndex } from "@/lib/ifc-cafm-bridge";
 import type { BimModelInfo } from "@/components/common/LocateInBim";
 import type { FastJobData } from "../FastJobModal";
 import { displayName, type CafmData, type SetState } from "./bim-viewport-math";
@@ -264,11 +264,42 @@ export function useBimMutations({
 
   const createFastJob = (job: FastJobData) => {
     if (!canCreateFastJob) { alert("Permission required to create a Fast Job."); return; }
-    const newWR = buildFastJobWR(job, { siteId: activeSiteId, data, actor, source: "Fast Job created from the 3D BIM viewer" });
+    const newWR = buildFastJobWR(job, { siteId: activeSiteId, data, actor, source: job.bimPin ? "Fast Job pinned at an exact 3D spot in the BIM viewer" : "Fast Job created from the 3D BIM viewer" });
     setData((current) => ({ ...current, workRequests: [...current.workRequests, newWR] }));
     setFastJobOpen(false);
     setNotice(`Fast Job ${newWR.WR_ID} was created.`);
   };
 
-  return { busy, assignExisting, unassign, createNewEquipment, syncMissingToCafm, downloadIfc, createFastJob };
+  /** 1-click `Sync IFC Metadata → CAFM Specs`: copies the 3D element's identity into the linked asset. */
+  const syncIfcSpecs = (element: BimElement, equipmentCode: string) => {
+    const stamp = new Date().toISOString();
+    const size = element.bbox
+      ? `${(element.bbox.max[0] - element.bbox.min[0]).toFixed(2)} × ${(element.bbox.max[2] - element.bbox.min[2]).toFixed(2)} × ${(element.bbox.max[1] - element.bbox.min[1]).toFixed(2)} m`
+      : "";
+    setData((current) => ({
+      ...current,
+      equipment: current.equipment.map((asset) => {
+        if (asset.SiteId !== activeSiteId || asset.EquipmentCode !== equipmentCode) return asset;
+        const manufacturer = resolveBimManufacturer(element, asset.Manufacturer);
+        return {
+          ...asset,
+          Manufacturer: asset.Manufacturer?.trim() ? asset.Manufacturer : manufacturer || undefined,
+          bimCategory: element.category || asset.bimCategory,
+          bimTypeName: element.typeName || asset.bimTypeName,
+          TechnicalSpecifications: {
+            ...asset.TechnicalSpecifications,
+            "IFC Class": element.ifcType,
+            "IFC Type / Family": element.typeName || element.name,
+            ...(manufacturer ? { Manufacturer: manufacturer } : {}),
+            ...(element.storeyName ? { "IFC Storey": element.storeyName } : {}),
+            ...(size ? { "BBox Dimensions (m)": size } : {}),
+          },
+          UpdatedAt: stamp,
+        };
+      }),
+    }));
+    setNotice(`IFC metadata was synced into the technical specifications of ${equipmentCode}.`);
+  };
+
+  return { busy, assignExisting, unassign, createNewEquipment, syncMissingToCafm, downloadIfc, createFastJob, syncIfcSpecs };
 }

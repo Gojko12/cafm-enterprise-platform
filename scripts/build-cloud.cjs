@@ -1,6 +1,10 @@
 const { spawnSync } = require("node:child_process");
 const { cpSync, existsSync, mkdirSync } = require("node:fs");
 const path = require("node:path");
+const { runCodeHealthCheck } = require("./check-code-health.cjs");
+
+// Fail fast on modular file-size violations or leftover scratch files.
+runCodeHealthCheck();
 
 const root = path.resolve(__dirname, "..");
 const mobile = path.join(root, "apps", "mobile-app");

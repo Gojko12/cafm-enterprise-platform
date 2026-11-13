@@ -25,7 +25,8 @@ import * as WebIFC from "web-ifc";
 import type { Equipment } from "@cafm/shared-schema";
 import type { BimElementLink } from "./cafm-data";
 import { SHELL_TYPES, ASSIGNABLE_TYPES, PASSIVE_DISTRIBUTION_TYPES, OUTLIER_DISTANCE_M, MEP_CATEGORY_HINTS, PROXY_EQUIPMENT_NAME, vectorToArray, text, numeric, lengthUnitScale, collectElementProperties, collectSpatialContainment, collectAggregates, pointInBox, pointInBoxXZ } from "./bim/ifc-classification";
-export { suggestEquipmentCategory, suggestEquipmentTrade } from "./bim/ifc-classification";
+export { suggestEquipmentCategory, suggestEquipmentTrade, classifyFunctionalGroup, classifyDiscipline, resolveBimManufacturer, FUNCTIONAL_GROUPS } from "./bim/ifc-classification";
+export type { FunctionalGroup, BimDiscipline } from "./bim/ifc-classification";
 
 export interface BimStorey {
   expressId: number;

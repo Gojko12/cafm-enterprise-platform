@@ -1,26 +1,36 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import { ZoomIn, ZoomOut, Info, AlertCircle } from "lucide-react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import { ZoomIn, ZoomOut, Info, AlertCircle, Zap } from "lucide-react";
 import { useApp } from "@/lib/hooks/useApp";
-import { useCafmStore } from "@/lib/cafm-store";
-import type { Room } from "@cafm/shared-schema";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
+import type { BaseWorkRequest, Room } from "@cafm/shared-schema";
 import { CadUpload } from "@/components/modules/CadUpload";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { resolveEquipmentLocation, type EquipmentLocationQuery } from "@/lib/equipment-locator";
+import { OpenRoomInBimButton } from "@/components/common/LocateInBim";
+import { FastJobModal } from "@/components/modules/FastJobModal";
+import { buildFastJobWR, type FastJobData } from "@/lib/fj-factory";
 
 export function FloorPlanViewer() {
   const { selectedFloor: selectedFloorFromApp } = useApp();
-  const { data: sampleData } = useCafmStore();
-  const { activeSiteId } = useSiteContext();
+  const { data: sampleData, setData } = useCafmStore();
+  const { activeSiteId, activePerson, currentUser } = useSiteContext();
+  const { permissions, profile } = useActiveUserPermissions();
   const [locator, setLocator] = useState<EquipmentLocationQuery | null>(null);
+  const [urlTarget, setUrlTarget] = useState<{ building: string; floor: string; room?: string } | null>(null);
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     if (query.has("eqId")) setLocator({ building: query.get("buildingId") ?? "", floor: query.get("floorId") ?? "", room: query.get("roomId") ?? "", equipment: query.get("eqId") ?? "" });
+    // Deep link from the 3D BIM viewer: /floor-plans?building=…&floor=…&room=…
+    else if (query.get("building") && query.get("floor")) setUrlTarget({ building: query.get("building")!, floor: query.get("floor")!, room: query.get("room") ?? undefined });
   }, []);
   const resolved = locator ? resolveEquipmentLocation(locator, activeSiteId, sampleData) : null;
   const equipment = resolved?.equipment;
-  const selectedFloor = locator ? resolved?.floor ?? null : selectedFloorFromApp;
+  const urlFloor = urlTarget
+    ? sampleData.floors.find((floor) => floor.SiteId === activeSiteId && floor.bl_id === urlTarget.building && floor.LevelName === urlTarget.floor) ?? null
+    : null;
+  const selectedFloor = locator ? resolved?.floor ?? null : urlFloor ?? selectedFloorFromApp;
   const locatedRoom = resolved?.room;
 
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -31,7 +41,16 @@ export function FloorPlanViewer() {
   const [selectedRoomForInspection, setSelectedRoomForInspection] =
     useState<Room | null>(null);
   const [maintenanceMode, setMaintenanceMode] = useState(true);
+  const [pinFjMode, setPinFjMode] = useState(false);
+  const [fastJobOpen, setFastJobOpen] = useState(false);
+  const [fastJobLocation, setFastJobLocation] = useState<{ bl_id: string; levelName: string; roomCode: string } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => {
+    if (!urlTarget?.room) return;
+    const room = sampleData.rooms.find((entry) => entry.SiteId === activeSiteId && entry.bl_id === urlTarget.building && entry.RoomCode === urlTarget.room);
+    if (room) setSelectedRoomForInspection(room);
+  }, [urlTarget, sampleData.rooms, activeSiteId]);
 
   const roomsInFloor = selectedFloor
     ? sampleData.rooms.filter(
@@ -47,15 +66,45 @@ export function FloorPlanViewer() {
   const width = points.length ? Math.max(...points.map((point) => point[0])) - minX : 500;
   const height = points.length ? Math.max(...points.map((point) => point[1])) - minY : 500;
 
-  // Mock work request data for maintenance mode color coding
+  // Live open WRs per room drive both the maintenance colors and the ⚡ FJ badges.
+  const openWrsByRoom = useMemo(() => {
+    const map = new Map<string, BaseWorkRequest[]>();
+    if (!selectedFloor) return map;
+    for (const wr of sampleData.workRequests) {
+      if (wr.SiteId !== activeSiteId || wr.Percentage >= 100 || !wr.RoomCode) continue;
+      if (wr.bl_id !== selectedFloor.bl_id || wr.LevelName !== selectedFloor.LevelName) continue;
+      const list = map.get(wr.RoomCode);
+      if (list) list.push(wr);
+      else map.set(wr.RoomCode, [wr]);
+    }
+    return map;
+  }, [sampleData.workRequests, activeSiteId, selectedFloor]);
+  const today = new Date().toISOString().slice(0, 10);
+
   const getRoomColor = (room: Room) => {
     if (!maintenanceMode) return "#e0e7ff";
-
-    // Simulate: some rooms have overdue WRs, some have active ones
-    const hash = room.RoomCode.charCodeAt(0) + room.RoomCode.charCodeAt(1);
-    if (hash % 3 === 0) return "#ef4444"; // red = overdue WRs
-    if (hash % 3 === 1) return "#f97316"; // orange = active WRs
+    const wrs = openWrsByRoom.get(room.RoomCode) ?? [];
+    if (wrs.some((wr) => (wr.Percentage === 50 || wr.Percentage === 55) && !!wr.DueDate && wr.DueDate < today)) return "#ef4444"; // red = overdue WRs
+    if (wrs.length) return "#f97316"; // orange = active WRs
     return "#10b981"; // emerald = healthy
+  };
+
+  const openFastJobInRoom = (room: Room) => {
+    setFastJobLocation({ bl_id: room.bl_id, levelName: room.LevelName, roomCode: room.RoomCode });
+    setFastJobOpen(true);
+  };
+
+  const createFastJob = (job: FastJobData) => {
+    if (!permissions?.canCreateFJ) { alert("Permission required to create a Fast Job."); return; }
+    const newWR = buildFastJobWR(job, {
+      siteId: activeSiteId,
+      data: sampleData,
+      actor: { userId: currentUser?.UserId, displayName: profile?.fullName ?? activePerson, role: String(profile?.primaryRole ?? ""), personId: profile?.id },
+      source: "Fast Job pinned on the 2D floor plan",
+    });
+    setData((current) => ({ ...current, workRequests: [...current.workRequests, newWR] }));
+    setFastJobOpen(false);
+    setPinFjMode(false);
   };
 
   const handleZoom = (direction: "in" | "out") => {
@@ -108,6 +157,16 @@ export function FloorPlanViewer() {
           </div>
           <div className="flex items-center gap-4">
             <CadUpload floor={selectedFloor} />
+            {permissions?.canCreateFJ && (
+              <button
+                type="button"
+                onClick={() => setPinFjMode((value) => !value)}
+                aria-pressed={pinFjMode}
+                className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm font-medium ${pinFjMode ? "border-amber-500 bg-amber-500 text-white" : "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"}`}
+              >
+                <Zap size={15} /> {pinFjMode ? "Click a room to pin the Fast Job…" : "⚡ Pin & Create Fast Job"}
+              </button>
+            )}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -204,19 +263,21 @@ export function FloorPlanViewer() {
 
               const isSelected = selectedRoomForInspection?.RoomCode === room.RoomCode || locatedRoom?.RoomCode === room.RoomCode;
               const fillColor = getRoomColor(room);
+              const openFjCount = (openWrsByRoom.get(room.RoomCode) ?? []).filter((wr) => wr.WR_Type === "FJ").length;
               const coords = room.Polygon.coordinates.map((ring) =>
                 ring.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${point[1]}`).join(" ") + " Z",
               ).join(" ");
               const ring = room.Polygon.coordinates[0];
               const labelX = (Math.min(...ring.map((point) => point[0])) + Math.max(...ring.map((point) => point[0]))) / 2;
               const labelY = (Math.min(...ring.map((point) => point[1])) + Math.max(...ring.map((point) => point[1]))) / 2;
+              const fontSize = Math.max(width, height) * 0.025;
 
               return (
                 <g
                   key={room.RoomCode}
                   className="room-polygon group"
-                  onClick={() => setSelectedRoomForInspection(room)}
-                  style={{ cursor: "pointer" }}
+                  onClick={() => (pinFjMode ? openFastJobInRoom(room) : setSelectedRoomForInspection(room))}
+                  style={{ cursor: pinFjMode ? "crosshair" : "pointer" }}
                 >
                   <path
                     d={coords}
@@ -230,7 +291,7 @@ export function FloorPlanViewer() {
                   <text
                     x={labelX}
                     y={labelY}
-                    fontSize={Math.max(width, height) * 0.025}
+                    fontSize={fontSize}
                     fontWeight="600"
                     fill="#000"
                     textAnchor="middle"
@@ -239,6 +300,21 @@ export function FloorPlanViewer() {
                   >
                     {room.RoomCode}
                   </text>
+                  {openFjCount > 0 && (
+                    <text
+                      x={labelX}
+                      y={labelY + fontSize * 1.2}
+                      fontSize={fontSize * 0.9}
+                      fontWeight="700"
+                      fill="#b45309"
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      pointerEvents="none"
+                      aria-label={`${openFjCount} open Fast Job${openFjCount === 1 ? "" : "s"} in ${room.RoomCode}`}
+                    >
+                      ⚡{openFjCount} FJ
+                    </text>
+                  )}
                 </g>
               );
             })}
@@ -289,18 +365,39 @@ export function FloorPlanViewer() {
               </div>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
                 <Info size={16} />
                 View Equipment
               </button>
-              <button className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm">
-                Create Work Request
-              </button>
+              {permissions?.canCreateFJ && (
+                <button
+                  onClick={() => openFastJobInRoom(selectedRoomForInspection)}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm"
+                >
+                  <Zap size={16} /> + Create Fast Job in Room
+                </button>
+              )}
+              <OpenRoomInBimButton
+                siteId={activeSiteId}
+                buildingId={selectedRoomForInspection.bl_id}
+                roomCode={selectedRoomForInspection.RoomCode}
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-700 text-white rounded-lg hover:bg-cyan-800 transition-colors text-sm"
+              />
+              <span className="text-sm text-gray-600">
+                {(openWrsByRoom.get(selectedRoomForInspection.RoomCode) ?? []).length} open WR(s) in this room
+              </span>
             </div>
           </div>
         </div>
       )}
+
+      <FastJobModal
+        isOpen={fastJobOpen}
+        onClose={() => setFastJobOpen(false)}
+        onSubmit={createFastJob}
+        initialLocation={fastJobLocation}
+      />
     </div>
   );
 }

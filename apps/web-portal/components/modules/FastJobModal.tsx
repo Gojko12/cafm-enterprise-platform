@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { PhotoCapture } from "@/components/common/PhotoCapture";
-import type { CifmPerson, UrgencyCode } from "@cafm/shared-schema";
+import type { CifmPerson, UrgencyCode, WorkRequestBimPin } from "@cafm/shared-schema";
 import { formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
@@ -20,13 +20,21 @@ interface FastJobModalProps {
   onSubmit?: (data: FastJobData) => void;
   /** Pre-fills the location step (e.g. from a selected 3D room). */
   initialLocation?: { bl_id: string; levelName: string; roomCode: string } | null;
+  /** Optional 3D BIM prefill: equipment, exact spot pin, and a human spot label. */
+  prefill?: { equipmentCode?: string; bimPin?: WorkRequestBimPin; spotLabel?: string } | null;
 }
 
 const INTAKE_CHANNELS = ["Phone Call", "Email", "Walk-in", "Self-Service"] as const;
+const PRESET_CHIPS: readonly { label: string; description: string; trade: string }[] = [
+  { label: "💡 Change Lightbulb", description: "Change the broken lightbulb", trade: "Electrical" },
+  { label: "🧹 Cleaning", description: "Cleaning required (spill / dirt)", trade: "Cleaning" },
+  { label: "🚰 Sanitary / Leak", description: "Sanitary issue / water leak", trade: "Mechanical" },
+  { label: "❄️ HVAC", description: "HVAC issue: too hot / too cold / no airflow", trade: "Mechanical" },
+];
 const inputClass = "w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 
-export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: FastJobModalProps) {
+export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation, prefill }: FastJobModalProps) {
   const [step, setStep] = useState<"select-location" | "create-job">("select-location");
   const [selectedEquipmentCodes, setSelectedEquipmentCodes] = useState<string[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState("");
@@ -79,6 +87,11 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
     setSelectedLevelName(initialLocation.levelName);
     setSelectedRoomCode(initialLocation.roomCode);
   }, [isOpen, initialLocation]);
+
+  useEffect(() => {
+    if (!isOpen || !prefill?.equipmentCode) return;
+    setSelectedEquipmentCodes([prefill.equipmentCode]);
+  }, [isOpen, prefill]);
 
   if (!isOpen) return null;
 
@@ -133,6 +146,7 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
       levelName: selectedLevelName,
       roomCode: selectedRoomCode,
       description,
+      bimPin: prefill?.bimPin,
       photoUrl: photoPreview,
       photoName: photoFile?.name,
       photoType: photoFile?.type,
@@ -199,6 +213,20 @@ export function FastJobModal({ isOpen, onClose, onSubmit, initialLocation }: Fas
           ) : (
             <div className="space-y-3">
               <p className="text-xs text-slate-600">📍 <strong>{selectedBuildingId} / {selectedLevelName} / {selectedRoomCode}</strong>{selectedEquipment ? ` · ${selectedEquipment}` : " · room-level job"}</p>
+              {prefill?.bimPin && (
+                <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-900">
+                  ⚡ Pinned 3D spot: <strong>{prefill.spotLabel ?? prefill.bimPin.spotLabel ?? "exact location"}</strong> · ({prefill.bimPin.x.toFixed(1)}, {prefill.bimPin.y.toFixed(1)}, {prefill.bimPin.z.toFixed(1)}) m
+                </p>
+              )}
+              <div className="flex flex-wrap gap-1.5" aria-label="Fast Job presets">
+                {PRESET_CHIPS.map((chip) => (
+                  <button key={chip.label} type="button"
+                    onClick={() => { setDescription(chip.description); if (tradeOptions.includes(chip.trade)) setTradeName(chip.trade); }}
+                    className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-blue-50 hover:border-blue-400">
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
 
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="text-xs font-medium">Intake Channel

@@ -5,5 +5,6 @@
   },
   "python.defaultInterpreterPath": "${workspaceFolder}/services/cad-bim-parser/.venv/Scripts/python.exe",
   "chat.useAgentsMdFile": true,
-  "chat.includeApplyingInstructions": true
+  "chat.includeApplyingInstructions": true,
+  "npm.packageManager": "npm"
 }

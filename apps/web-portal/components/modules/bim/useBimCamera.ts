@@ -108,9 +108,9 @@ export function useBimCamera({
     return boxIsFinite(box) ? box : null;
   }, [loadedRef, storeyOffset]);
 
-  const flyToElement = useCallback((expressId: number) => {
+  const flyToElement = useCallback((expressId: number, viewDirection?: THREE.Vector3) => {
     const box = elementWorldBox(expressId);
-    if (box) fitCameraToBox(box, true, true);
+    if (box) fitCameraToBox(box, true, true, viewDirection);
   }, [elementWorldBox, fitCameraToBox]);
 
   const flyToRoom = useCallback((expressId: number) => {

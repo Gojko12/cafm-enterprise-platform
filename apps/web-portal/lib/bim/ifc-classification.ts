@@ -177,3 +177,111 @@ export function suggestEquipmentTrade(element: BimElement): string {
   if (/(wall|slab|door|window|roof|ceiling|civil)/.test(haystack)) return "Civil";
   return "Mechanical";
 }
+
+// ---------------------------------------------------------------------------
+// Functional group / MEP discipline / manufacturer classification (Section 76)
+// ---------------------------------------------------------------------------
+
+export const FUNCTIONAL_GROUPS = [
+  "Fire Damper", "Toilet / Sanitary", "Ventilation / AHU", "Pump",
+  "Air Terminal / Diffuser", "Lighting / Electrical", "Chiller / Heating", "Other MEP",
+] as const;
+export type FunctionalGroup = (typeof FUNCTIONAL_GROUPS)[number];
+
+export type BimDiscipline = "shell" | "hvac" | "piping" | "electrical";
+
+const HVAC_TYPES = new Set([
+  "IFCDUCTSEGMENT", "IFCDUCTFITTING", "IFCDAMPER", "IFCFAN", "IFCAIRTERMINAL", "IFCAIRTERMINALBOX",
+  "IFCAIRTOAIRHEATRECOVERY", "IFCUNITARYEQUIPMENT", "IFCCHILLER", "IFCBOILER", "IFCCOIL",
+  "IFCCOOLINGTOWER", "IFCCOMPRESSOR", "IFCCONDENSER", "IFCEVAPORATOR", "IFCHUMIDIFIER", "IFCDUCTSILENCER",
+]);
+const PIPING_TYPES = new Set([
+  "IFCPIPESEGMENT", "IFCPIPEFITTING", "IFCPUMP", "IFCVALVE", "IFCSANITARYTERMINAL",
+  "IFCWASTETERMINAL", "IFCINTERCEPTOR", "IFCTANK", "IFCFIRESUPPRESSIONTERMINAL",
+]);
+const ELECTRICAL_TYPES = new Set([
+  "IFCLIGHTFIXTURE", "IFCLAMP", "IFCELECTRICAPPLIANCE", "IFCELECTRICDISTRIBUTIONBOARD",
+  "IFCELECTRICGENERATOR", "IFCELECTRICMOTOR", "IFCELECTRICFLOWSTORAGEDEVICE", "IFCSWITCHINGDEVICE",
+  "IFCCABLECARRIERSEGMENT", "IFCCABLECARRIERFITTING", "IFCCABLESEGMENT", "IFCOUTLET",
+  "IFCALARM", "IFCSENSOR", "IFCCONTROLLER", "IFCAUDIOVISUALAPPLIANCE", "IFCCOMMUNICATIONSAPPLIANCE",
+  "IFCPROTECTIVEDEVICE", "IFCSOLARDEVICE", "IFCTRANSFORMER",
+]);
+
+function classificationHaystack(element: BimElement): string {
+  return `${element.category} ${element.typeName} ${element.name}`.toLowerCase();
+}
+
+/** Classifies a BIM element into one of the CAFM functional groups used for smart filtering. */
+export function classifyFunctionalGroup(element: BimElement): FunctionalGroup {
+  const haystack = classificationHaystack(element);
+  if (element.ifcType === "IFCDAMPER" || /(fire damper|smoke damper|\bdamper\b)/.test(haystack)) return "Fire Damper";
+  if (element.ifcType === "IFCSANITARYTERMINAL" || /(toilet|\bwc\b|urinal|basin|\bsink\b|sanitary|shower|lavatory)/.test(haystack)) return "Toilet / Sanitary";
+  if (element.ifcType === "IFCPUMP" || /\bpump\b/.test(haystack)) return "Pump";
+  if (["IFCAIRTERMINAL", "IFCAIRTERMINALBOX"].includes(element.ifcType) || /(diffuser|grille|air terminal|supply air|return air|extract valve)/.test(haystack)) return "Air Terminal / Diffuser";
+  if (["IFCCHILLER", "IFCBOILER", "IFCCOOLINGTOWER"].includes(element.ifcType) || /(chiller|boiler|heat pump|cooling tower|radiator|condenser)/.test(haystack)) return "Chiller / Heating";
+  if (["IFCFAN", "IFCAIRTOAIRHEATRECOVERY", "IFCUNITARYEQUIPMENT"].includes(element.ifcType) || /(ahu|air handling|heat recovery|\bhru\b|ventilat|\bfan\b|exhaust|rooftop unit|fan coil|\bvav\b|hvac)/.test(haystack)) return "Ventilation / AHU";
+  if (ELECTRICAL_TYPES.has(element.ifcType) || /(light|lamp|luminaire|electrical|panel|switch|\bups\b|generator|alarm|socket|outlet)/.test(haystack)) return "Lighting / Electrical";
+  return "Other MEP";
+}
+
+/** Maps a BIM element to its MEP discipline layer (`shell` covers the architectural envelope). */
+export function classifyDiscipline(element: BimElement): BimDiscipline {
+  if (element.isShell || SHELL_TYPES.has(element.ifcType)) return "shell";
+  if (HVAC_TYPES.has(element.ifcType)) return "hvac";
+  if (PIPING_TYPES.has(element.ifcType)) return "piping";
+  if (ELECTRICAL_TYPES.has(element.ifcType)) return "electrical";
+  const haystack = classificationHaystack(element);
+  if (/(light|lamp|luminaire|electrical|panel|switch|\bups\b|generator|cable|alarm|data|communication|socket|outlet)/.test(haystack)) return "electrical";
+  if (/(pipe|pump|sanitary|toilet|\bwc\b|urinal|basin|\bsink\b|shower|drain|sewer|valve|sprinkler|water)/.test(haystack)) return "piping";
+  switch (classifyFunctionalGroup(element)) {
+    case "Toilet / Sanitary":
+    case "Pump":
+      return "piping";
+    case "Lighting / Electrical":
+      return "electrical";
+    case "Other MEP":
+      return element.isAssignable ? "hvac" : "shell";
+    default:
+      return "hvac";
+  }
+}
+
+export const KNOWN_MANUFACTURERS = [
+  "Grundfos", "Wilo", "Trox", "Halton", "Systemair", "Daikin",
+  "Geberit", "Ideal Standard", "Carrier", "Viessmann", "Schneider Electric",
+] as const;
+
+/** Deterministic brand pairs per functional group (stable fallback for untagged IFC elements). */
+const GROUP_BRANDS: Partial<Record<FunctionalGroup, readonly string[]>> = {
+  Pump: ["Grundfos", "Wilo"],
+  "Fire Damper": ["Trox", "Halton"],
+  "Air Terminal / Diffuser": ["Trox", "Halton"],
+  "Ventilation / AHU": ["Systemair", "Daikin"],
+  "Toilet / Sanitary": ["Geberit", "Ideal Standard"],
+  "Chiller / Heating": ["Carrier", "Viessmann"],
+  "Lighting / Electrical": ["Schneider Electric"],
+};
+
+function stableHash(text: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619) >>> 0;
+  return hash;
+}
+
+/**
+ * Resolves the manufacturer of a BIM element: the linked CAFM equipment wins,
+ * then brand names embedded in the IFC type/family strings, then a deterministic
+ * realistic brand per functional group so brand filtering works on untagged models.
+ */
+export function resolveBimManufacturer(element: BimElement, linkedManufacturer?: string): string {
+  const linked = linkedManufacturer?.trim();
+  if (linked) return linked;
+  const haystack = `${element.category} ${element.typeName} ${element.name}`.toLowerCase();
+  for (const brand of KNOWN_MANUFACTURERS) {
+    if (haystack.includes(brand.toLowerCase())) return brand;
+  }
+  if (element.isShell || !element.isAssignable) return "";
+  const brands = GROUP_BRANDS[classifyFunctionalGroup(element)];
+  if (!brands?.length) return "";
+  return brands[stableHash(element.globalId || element.name) % brands.length];
+}

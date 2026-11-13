@@ -6,6 +6,7 @@ import type { LoadedBimModel, BimModelIndex } from "@/lib/ifc-cafm-bridge";
 import {
   applyBimVisualState,
   buildMeasureGroup,
+  buildMultiSelectionGroup,
   buildRoomHighlightGroup,
   buildSelectionOutline,
   disposeSceneGroup,
@@ -15,11 +16,15 @@ import {
   spaceMapOf,
   type BimLinkMap,
   type ColorMode,
+  type DisciplineVisibility,
+  type FjSpotPin,
   type IsolateTarget,
   type IssuePin,
   type RoomHealth,
   type SetState,
+  type StatusColorVisibility,
 } from "./bim-viewport-math";
+import type { BimDiscipline } from "@/lib/ifc-cafm-bridge";
 
 interface SceneRefs {
   sceneRef: MutableRefObject<THREE.Scene | null>;
@@ -59,6 +64,13 @@ export function useBimSceneEffects({
   elementWorldBox,
   spaceWorldBox,
   issuePins,
+  statusColorVisibility,
+  disciplineVisibility,
+  disciplineByExpressId,
+  multiSelection,
+  ghostRest,
+  fjSpotPins,
+  storeyOffset,
 }: {
   refs: SceneRefs;
   loaded: LoadedBimModel | null;
@@ -83,6 +95,13 @@ export function useBimSceneEffects({
   elementWorldBox: (expressId: number) => THREE.Box3 | null;
   spaceWorldBox: (expressId: number) => THREE.Box3 | null;
   issuePins: IssuePin[];
+  statusColorVisibility: StatusColorVisibility;
+  disciplineVisibility: DisciplineVisibility;
+  disciplineByExpressId: Map<number, BimDiscipline>;
+  multiSelection: number[];
+  ghostRest: boolean;
+  fjSpotPins: FjSpotPin[];
+  storeyOffset: (storeyName: string) => number;
 }) {
   const {
     sceneRef, loadedRef, modelBoxRef, clipPlaneRef, rendererRef, activeClippingPlanesRef,
@@ -139,12 +158,15 @@ export function useBimSceneEffects({
     }
     if (rendererRef.current) rendererRef.current.clippingPlanes = isolatePlanes;
     activeClippingPlanesRef.current = [...(clipEnabled ? [clipPlaneRef.current] : []), ...isolatePlanes];
+    const multiSet = new Set(multiSelection);
     applyBimVisualState(model, {
       clippingPlanes, links, selection, roomSelection, storeyFilter, xray, xrayOpacity,
       colorMode, showSpaces, statusColorByCode, roomHealth,
+      statusColorVisibility, disciplineVisibility, disciplineByExpressId, multiSelection: multiSet, ghostRest,
     });
   }, [index, links, selection, roomSelection, storeyFilter, xray, xrayOpacity, clipEnabled, colorMode,
     showSpaces, statusColorByCode, roomHealth, isolate, isolatePadding, explodeGap, loaded,
+    statusColorVisibility, disciplineVisibility, disciplineByExpressId, multiSelection, ghostRest,
     elementWorldBox, spaceWorldBox, clippingPlanes, loadedRef, rendererRef, activeClippingPlanesRef, clipPlaneRef]);
 
   useEffect(() => {
@@ -174,6 +196,19 @@ export function useBimSceneEffects({
     return () => { scene.remove(group); disposeSceneGroup(group); roomHelperGroupRef.current = null; };
   }, [roomSelection, loaded, spaceWorldBox, explodeGap, sceneRef, roomHelperGroupRef]);
 
+  // Vivid Box3 outlines around every multi-selected element, inside a single THREE.Group.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !loaded || !multiSelection.length) return;
+    const boxes = multiSelection
+      .map((expressId) => elementWorldBox(expressId))
+      .filter((box): box is THREE.Box3 => !!box);
+    if (!boxes.length) return;
+    const group = buildMultiSelectionGroup(boxes);
+    scene.add(group);
+    return () => { scene.remove(group); disposeSceneGroup(group); };
+  }, [multiSelection, loaded, elementWorldBox, explodeGap, sceneRef]);
+
   useEffect(() => {
     const scene = sceneRef.current;
     overlaysDirtyRef.current = true;
@@ -200,6 +235,10 @@ export function useBimSceneEffects({
       const center = box.getCenter(new THREE.Vector3());
       anchors.set(pin.key, new THREE.Vector3(center.x, box.max.y, center.z));
     }
+    // FJ spot pins anchor at their exact (x, yBase + storeyOffset, z) so they ride the Explode slider.
+    for (const spot of fjSpotPins) {
+      anchors.set(spot.key, new THREE.Vector3(spot.pin.x, spot.pin.y + storeyOffset(spot.pin.storeyName ?? ""), spot.pin.z));
+    }
     overlaysDirtyRef.current = true;
-  }, [issuePins, loaded, explodeGap, elementWorldBox, spaceWorldBox, overlayAnchorsRef, overlaysDirtyRef]);
+  }, [issuePins, fjSpotPins, storeyOffset, loaded, explodeGap, elementWorldBox, spaceWorldBox, overlayAnchorsRef, overlaysDirtyRef]);
 }

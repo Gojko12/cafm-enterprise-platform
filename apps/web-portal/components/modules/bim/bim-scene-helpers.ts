@@ -1,27 +1,32 @@
 import * as THREE from "three";
-import { expressIdFromBatchedHit, type LoadedBimModel } from "@/lib/ifc-cafm-bridge";
+import { expressIdFromBatchedHit, type BimSpace, type LoadedBimModel } from "@/lib/ifc-cafm-bridge";
 import {
   ALL_STOREYS,
   COLOR_EMERALD,
   COLOR_HIGHLIGHT,
+  COLOR_MULTI_HIGHLIGHT,
   COLOR_ROOM_HIGHLIGHT,
   COLOR_VIOLET,
   ROOM_LEVEL_COLOR,
+  STATUS_BUCKET_BY_COLOR,
   elementMapOf,
   isFullyVisible,
   spaceMapOf,
   type ColorMode,
+  type DisciplineVisibility,
   type RoomHealth,
   type MeshOriginal,
   type PickResult,
+  type StatusColorVisibility,
 } from "./bim-viewport-math";
+import type { BimDiscipline } from "@/lib/ifc-cafm-bridge";
 
 export function pickAtModel(
   raycaster: THREE.Raycaster,
   model: LoadedBimModel,
   activeClippingPlanes: THREE.Plane[],
   xray: boolean,
-  purpose: "select" | "measure",
+  purpose: "select" | "measure" | "pin-fj",
 ): { result: PickResult; point: THREE.Vector3 | null } {
   const pickables: THREE.Object3D[] = [];
   for (const meshes of model.elementMeshes.values()) for (const mesh of meshes) pickables.push(mesh);
@@ -35,6 +40,14 @@ export function pickAtModel(
     if (!isFullyVisible(mesh)) continue;
     if (!activeClippingPlanes.every((plane) => plane.distanceToPoint(hit.point) >= -1e-4)) continue;
     if (purpose === "measure") return { result: null, point: hit.point.clone() };
+    if (purpose === "pin-fj") {
+      // Pin mode hits any visible surface: floors, ceilings, walls, lamps, toilets, or equipment.
+      const expressId = mesh.userData.batched
+        ? expressIdFromBatchedHit(mesh, hit.faceIndex ?? 0)
+        : (mesh.userData.expressId as number);
+      const element = expressId === null ? undefined : elements.get(expressId);
+      return { result: element ? { kind: "element", expressId: element.expressId } : null, point: hit.point.clone() };
+    }
     if (mesh.userData.isSpace) {
       spaceHit ??= { expressId: mesh.userData.expressId as number, point: hit.point };
       continue;
@@ -59,6 +72,28 @@ export function pickAtModel(
     : { result: null, point: null };
 }
 
+/** Resolves the IfcSpace room containing (or nearest to) a world-space point, explode-aware. */
+export function resolveSpaceAtWorldPoint(
+  model: LoadedBimModel,
+  point: THREE.Vector3,
+  storeyOffset: (storeyName: string) => number,
+): BimSpace | null {
+  const offset = model.group.position;
+  let nearest: { space: BimSpace; gap: number } | null = null;
+  for (const space of model.index.spaces) {
+    if (!space.bbox) continue;
+    const lift = offset.y + storeyOffset(space.storeyName);
+    const minY = space.bbox.min[1] + lift, maxY = space.bbox.max[1] + lift;
+    const inXZ = point.x >= space.bbox.min[0] + offset.x - 0.05 && point.x <= space.bbox.max[0] + offset.x + 0.05
+      && point.z >= space.bbox.min[2] + offset.z - 0.05 && point.z <= space.bbox.max[2] + offset.z + 0.05;
+    if (!inXZ) continue;
+    if (point.y >= minY - 0.3 && point.y <= maxY + 0.3) return space;
+    const gap = Math.min(Math.abs(point.y - minY), Math.abs(point.y - maxY));
+    if (!nearest || gap < nearest.gap) nearest = { space, gap };
+  }
+  return nearest?.space ?? null;
+}
+
 export interface BimVisualStateParams {
   clippingPlanes: THREE.Plane[] | null;
   links: Map<number, { equipmentCode: string }>;
@@ -71,6 +106,11 @@ export interface BimVisualStateParams {
   showSpaces: boolean;
   statusColorByCode: Map<string, number>;
   roomHealth: Map<number, RoomHealth>;
+  statusColorVisibility: StatusColorVisibility;
+  disciplineVisibility: DisciplineVisibility;
+  disciplineByExpressId: Map<number, BimDiscipline>;
+  multiSelection: ReadonlySet<number>;
+  ghostRest: boolean;
 }
 
 function finishMaterialState(
@@ -92,17 +132,23 @@ export function applyBimVisualState(model: LoadedBimModel, params: BimVisualStat
   const {
     clippingPlanes, links, selection, roomSelection, storeyFilter, xray, xrayOpacity,
     colorMode, showSpaces, statusColorByCode, roomHealth,
+    statusColorVisibility, disciplineVisibility, disciplineByExpressId, multiSelection, ghostRest,
   } = params;
   const ghostOpacity = xrayOpacity / 100;
+  const ghostRestActive = ghostRest && multiSelection.size > 0;
   const elementById = elementMapOf(model.index);
   for (const [expressId, meshes] of model.elementMeshes) {
     const element = elementById.get(expressId);
     const link = links.get(expressId);
-    const inFilter = !element || storeyFilter === ALL_STOREYS || element.storeyName === storeyFilter;
+    const discipline = disciplineByExpressId.get(expressId) ?? "hvac";
+    const inFilter = (!element || storeyFilter === ALL_STOREYS || element.storeyName === storeyFilter)
+      && disciplineVisibility[discipline];
     const ghost = xray && !!element && (element.isShell || (!element.isAssignable && !link));
     const selected = selection === expressId;
+    const multiSelected = multiSelection.has(expressId);
+    const ghostedByRest = ghostRestActive && !multiSelected && !selected;
     for (const mesh of meshes) {
-      mesh.visible = inFilter && !(ghost && !selected && xrayOpacity === 0);
+      mesh.visible = inFilter && !(ghost && !selected && !multiSelected && xrayOpacity === 0);
       const material = mesh.material as THREE.MeshLambertMaterial;
       const previousTransparent = material.transparent;
       const previousDepthWrite = material.depthWrite;
@@ -114,16 +160,22 @@ export function applyBimVisualState(model: LoadedBimModel, params: BimVisualStat
       }
       let color = original.color;
       if (colorMode === "status" && element && !element.isShell) {
-        if (link) color = statusColorByCode.get(link.equipmentCode) ?? COLOR_EMERALD;
-        else if (element.isAssignable) color = COLOR_VIOLET;
+        const statusColor = link ? statusColorByCode.get(link.equipmentCode) ?? COLOR_EMERALD : element.isAssignable ? COLOR_VIOLET : null;
+        // Toggled-off status rows keep the element 100% visible in its original BIM material.
+        if (statusColor !== null && statusColorVisibility[STATUS_BUCKET_BY_COLOR.get(statusColor) ?? "healthy"]) color = statusColor;
       }
       material.color.setHex(color);
-      if (selected) {
-        material.emissive.setHex(COLOR_HIGHLIGHT);
+      if (selected || multiSelected) {
+        material.emissive.setHex(multiSelected && !selected ? COLOR_MULTI_HIGHLIGHT : COLOR_HIGHLIGHT);
         material.emissiveIntensity = 0.85;
         material.opacity = 1;
         material.transparent = false;
         material.depthWrite = true;
+      } else if (ghostedByRest) {
+        material.emissive.setHex(0x000000);
+        material.opacity = 0.08;
+        material.transparent = true;
+        material.depthWrite = false;
       } else if (ghost) {
         material.emissive.setHex(0x000000);
         material.opacity = ghostOpacity;
@@ -179,7 +231,8 @@ export function applyBimVisualState(model: LoadedBimModel, params: BimVisualStat
 
   for (const mesh of model.batchedMeshes) {
     const storeyName = mesh.userData.storeyName as string;
-    const inFilter = storeyFilter === ALL_STOREYS || storeyName === storeyFilter;
+    // Batched shell / passive-distribution meshes map to the `shell` discipline layer.
+    const inFilter = (storeyFilter === ALL_STOREYS || storeyName === storeyFilter) && disciplineVisibility.shell;
     mesh.visible = inFilter && !(xray && xrayOpacity === 0);
     const material = mesh.material as THREE.MeshLambertMaterial;
     const previousTransparent = material.transparent;
@@ -190,7 +243,11 @@ export function applyBimVisualState(model: LoadedBimModel, params: BimVisualStat
       finishMaterialState(material, previousTransparent, previousDepthWrite, previousClippingPlanes, clippingPlanes);
       continue;
     }
-    if (xray && xrayOpacity > 0) {
+    if (ghostRestActive) {
+      material.opacity = 0.08;
+      material.transparent = true;
+      material.depthWrite = false;
+    } else if (xray && xrayOpacity > 0) {
       material.opacity = ghostOpacity;
       material.transparent = true;
       material.depthWrite = false;
@@ -205,6 +262,16 @@ export function applyBimVisualState(model: LoadedBimModel, params: BimVisualStat
 
 export function buildSelectionOutline(box: THREE.Box3): THREE.Box3Helper {
   return new THREE.Box3Helper(box.expandByScalar(0.05), new THREE.Color(COLOR_HIGHLIGHT));
+}
+
+/** One shared group of vivid outline boxes for every multi-selected element. */
+export function buildMultiSelectionGroup(boxes: THREE.Box3[]): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "bim-multi-selection";
+  for (const box of boxes) {
+    group.add(new THREE.Box3Helper(box.clone().expandByScalar(0.04), new THREE.Color(COLOR_MULTI_HIGHLIGHT)));
+  }
+  return group;
 }
 
 export function buildRoomHighlightGroup(box: THREE.Box3, hasSpaceMesh: boolean): THREE.Group {

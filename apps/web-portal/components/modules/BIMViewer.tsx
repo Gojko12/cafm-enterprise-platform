@@ -22,13 +22,16 @@ import { BimRightSidebar } from "./bim/BimRightSidebar";
 import { BimViewportOverlays } from "./bim/BimViewportOverlays";
 import { UploadIfcModal } from "./bim/UploadIfcModal";
 import {
-  ALL_STOREYS, SAFE_BOUNDS, elementMapOf, spaceMapOf, boxIsFinite,
-  type MeshOriginal, type ColorMode,
+  ALL_STOREYS, SAFE_BOUNDS, elementMapOf, spaceMapOf, boxIsFinite, clipPercentForWorldY,
+  DEFAULT_DISCIPLINE_VISIBILITY, DEFAULT_STATUS_COLOR_VISIBILITY, EQ_FLY_DIRECTION,
+  type BimTab, type DisciplineVisibility, type FloorIsolation, type MeshOriginal, type ColorMode, type StatusColorVisibility,
 } from "./bim/bim-viewport-math";
 import { useBimDerivedData } from "./bim/useBimDerivedData";
 import { useBimMutations } from "./bim/useBimMutations";
 import { useBimCamera } from "./bim/useBimCamera";
 import { useBimSceneEffects } from "./bim/useBimSceneEffects";
+import { useBimSpotPins } from "./bim/useBimSpotPins";
+import { useBimDeepLinks } from "./bim/useBimDeepLinks";
 import { pickAtModel } from "./bim/bim-scene-helpers";
 
 
@@ -67,9 +70,14 @@ export function BIMViewer() {
   const [measurePoints, setMeasurePoints] = useState<THREE.Vector3[]>([]);
   const [pinsOn, setPinsOn] = useState(false);
   const [fastJobLocation, setFastJobLocation] = useState<{ bl_id: string; levelName: string; roomCode: string } | null>(null);
+  const [statusColorVisibility, setStatusColorVisibility] = useState<StatusColorVisibility>({ ...DEFAULT_STATUS_COLOR_VISIBILITY });
+  const [disciplineVisibility, setDisciplineVisibility] = useState<DisciplineVisibility>({ ...DEFAULT_DISCIPLINE_VISIBILITY });
+  const [multiSelection, setMultiSelection] = useState<number[]>([]);
+  const [ghostRest, setGhostRest] = useState(false);
+  const [floorIsolation, setFloorIsolation] = useState<FloorIsolation>(null);
 
   // ---- Sidebar ----
-  const [tab, setTab] = useState<"linked" | "unassigned" | "rooms">("linked");
+  const [tab, setTab] = useState<BimTab>("linked");
   const [search, setSearch] = useState("");
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignQuery, setAssignQuery] = useState("");
@@ -90,7 +98,6 @@ export function BIMViewer() {
   const clipPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, -1, 0), 0));
   const flyRef = useRef<{ fromPos: THREE.Vector3; toPos: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; start: number; duration: number } | null>(null);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
-  const consumedDeepLink = useRef<string>("");
   const activeClippingPlanesRef = useRef<THREE.Plane[]>([]);
   const explodeGapRef = useRef(0);
   explodeGapRef.current = explodeGap;
@@ -108,6 +115,7 @@ export function BIMViewer() {
 
   const {
     siteEquipment, links, missing, statusColorByCode, roomHealth, issuePins,
+    classificationByExpressId, disciplineByExpressId, fjSpotPins,
     linkedRows, unassignedRows, roomRows, selectedElement, selectedSpace, selectedRoomHealth,
     roomElements, roomSchedules, selectedLink, selectedEquipment, selectedOpenWRs, selectedSchedules,
     assignCandidates,
@@ -228,7 +236,7 @@ export function BIMViewer() {
     setModels(list);
     return list;
   }, [activeSiteId]);
-  const { busy, assignExisting, unassign, createNewEquipment, syncMissingToCafm, downloadIfc, createFastJob } = useBimMutations({
+  const { busy, assignExisting, unassign, createNewEquipment, syncMissingToCafm, downloadIfc, createFastJob, syncIfcSpecs } = useBimMutations({
     data,
     setData,
     activeSiteId,
@@ -251,6 +259,10 @@ export function BIMViewer() {
     setAssignQuery,
     setFastJobOpen,
     refreshModels,
+  });
+
+  const { pinFjMode, setPinFjMode, fastJobPrefill, openFastJob, pickSpot, submitFastJob, closeFastJob } = useBimSpotPins({
+    index, data, buildingId, links, storeyOffset, createFastJob, setPinsOn, setFastJobLocation, setFastJobOpen,
   });
 
   useEffect(() => {
@@ -279,7 +291,6 @@ export function BIMViewer() {
     if (requested && models?.some((model) => model.buildingId === requested) && requested !== buildingId) {
       setBuildingId(requested);
     }
-    consumedDeepLink.current = "";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, models]);
 
@@ -300,6 +311,9 @@ export function BIMViewer() {
         setMeasurePoints([]);
         setViewportHealth(null);
         setStoreyFilter(ALL_STOREYS);
+        setMultiSelection([]);
+        setGhostRest(false);
+        setFloorIsolation(null);
         setStatus("Downloading BIM archive…");
         const buffer = await fetchIfcBuffer(activeSiteId, buildingId, meta.updatedAt, (stage) => { if (active) setStatus(stage); });
         if (!active) return;
@@ -375,24 +389,6 @@ export function BIMViewer() {
   // Dispose the model on unmount.
   useEffect(() => () => { loadedRef.current?.dispose(); }, []);
 
-  // ---- Deep link: ?building=…&eq=… → X-Ray + highlight + fly ----
-  useEffect(() => {
-    const eq = searchParams.get("eq");
-    if (!eq || !index || !loaded) return;
-    const requestedBuilding = searchParams.get("building");
-    if (requestedBuilding && requestedBuilding !== buildingId) return;
-    const key = `${buildingId}:${eq}`;
-    if (consumedDeepLink.current === key) return;
-    const entry = [...links.values()].find((link) => link.equipmentCode === eq);
-    if (!entry) return;
-    consumedDeepLink.current = key;
-    setXray(true);
-    setSelection(entry.element.expressId);
-    setTab("linked");
-    // Fly after the render pass so world matrices exist.
-    requestAnimationFrame(() => flyToElement(entry.element.expressId));
-  }, [searchParams, index, loaded, links, buildingId, flyToElement]);
-
   useBimSceneEffects({
     refs: {
       sceneRef, loadedRef, modelBoxRef, clipPlaneRef, rendererRef, activeClippingPlanesRef,
@@ -401,6 +397,8 @@ export function BIMViewer() {
     loaded, index, explodeGap, measurePoints, setMeasurePoints, clipEnabled, clipPercent, links,
     selection, roomSelection, storeyFilter, xray, xrayOpacity, colorMode, showSpaces,
     statusColorByCode, roomHealth, isolate, isolatePadding, elementWorldBox, spaceWorldBox, issuePins,
+    statusColorVisibility, disciplineVisibility, disciplineByExpressId, multiSelection, ghostRest,
+    fjSpotPins, storeyOffset,
   });
 
   // ---- Picking ----
@@ -430,13 +428,22 @@ export function BIMViewer() {
       if (point) setMeasurePoints((previous) => previous.length === 1 ? [previous[0], point] : [point]);
       return;
     }
+    if (pinFjMode) {
+      pickSpot(raycaster, model, activeClippingPlanesRef.current, xray);
+      return;
+    }
     const { result } = pickAtModel(raycaster, model, activeClippingPlanesRef.current, xray, "select");
+    // Ctrl/Cmd+Click toggles the element in the Smart Filter multi-selection.
+    if ((event.ctrlKey || event.metaKey) && result?.kind === "element") {
+      setMultiSelection((current) => current.includes(result.expressId)
+        ? current.filter((id) => id !== result.expressId)
+        : [...current, result.expressId]);
+      return;
+    }
     if (result?.kind === "element") {
-      setSelection(result.expressId);
-      setRoomSelection(null);
-      setAssignOpen(false);
+      selectAndFly(result.expressId);
     } else if (result?.kind === "space") {
-      selectRoom(result.expressId, false);
+      selectRoom(result.expressId, true);
     } else {
       setSelection(null);
       setRoomSelection(null);
@@ -445,20 +452,70 @@ export function BIMViewer() {
 
   const buildingName = (id: string) => data.buildings.find((entry) => entry.bl_id === id && entry.SiteId === activeSiteId)?.Name;
 
+  /**
+   * EQ selected: restore the storey filter if the EQ's floor was hidden, slice the
+   * ceiling just above the EQ, and fly in along an elevated downward diagonal.
+   */
   const selectAndFly = (expressId: number) => {
     setSelection(expressId);
     setRoomSelection(null);
+    setFloorIsolation(null);
     setAssignOpen(false);
-    flyToElement(expressId);
+    const element = index ? elementMapOf(index).get(expressId) : undefined;
+    if (element && storeyFilter !== ALL_STOREYS && element.storeyName !== storeyFilter) setStoreyFilter(ALL_STOREYS);
+    const box = elementWorldBox(expressId);
+    if (box) {
+      const eqHeight = Math.max(box.max.y - box.min.y, 0.01);
+      setClipEnabled(true);
+      setClipPercent(clipPercentForWorldY(modelBoxRef.current, box.max.y + Math.max(0.35, eqHeight * 0.25)));
+    }
+    flyToElement(expressId, EQ_FLY_DIRECTION.clone());
   };
 
-  function selectRoom(expressId: number, fly: boolean) {
+  /**
+   * Room selected (Rooms tab, 3D click, or URL): isolate its floor, clip 0.20 m
+   * below the room's ceiling when it is taller than 1.8 m, and frame the room.
+   */
+  function selectRoom(expressId: number, fly = true) {
     setSelection(null);
     setRoomSelection(expressId);
     setTab("rooms");
     setAssignOpen(false);
+    const space = index ? spaceMapOf(index).get(expressId) : undefined;
+    if (space?.storeyName) {
+      setStoreyFilter(space.storeyName);
+      setFloorIsolation({ storeyName: space.storeyName, roomCode: space.code });
+    }
+    const box = spaceWorldBox(expressId);
+    if (box && box.max.y - box.min.y > 1.8) {
+      setClipEnabled(true);
+      setClipPercent(clipPercentForWorldY(modelBoxRef.current, box.max.y - 0.2));
+    }
     if (fly) flyToRoom(expressId);
   }
+
+  const showAllFloors = () => {
+    setStoreyFilter(ALL_STOREYS);
+    setFloorIsolation(null);
+  };
+
+  /** 🎯 Fit Selected (N): union box of the multi-selection + clip 0.5 m above the group. */
+  const fitMultiSelection = () => {
+    const union = new THREE.Box3();
+    for (const expressId of multiSelection) {
+      const box = elementWorldBox(expressId);
+      if (box) union.union(box);
+    }
+    if (union.isEmpty()) return;
+    setClipEnabled(true);
+    setClipPercent(clipPercentForWorldY(modelBoxRef.current, union.max.y + 0.5));
+    fitCameraToBox(union.clone().expandByScalar(1), true);
+  };
+
+  useBimDeepLinks({
+    searchParams, index, loaded, links, buildingId, data, activeSiteId,
+    storeyOffset, fitCameraToBox, flyToElement, selectRoom, selectAndFly, setXray, setSelection, setTab, setPinsOn,
+  });
 
   const isolateTarget = (kind: "element" | "room", expressId: number, label: string) => {
     if (isolate && isolate.kind === kind && isolate.expressId === expressId) { setIsolate(null); return; }
@@ -552,6 +609,13 @@ export function BIMViewer() {
             pinsOn={pinsOn}
             setPinsOn={setPinsOn}
             issuePins={issuePins}
+            fjSpotPins={fjSpotPins}
+            onOpenFjPin={setWrPopup}
+            pinFjMode={pinFjMode}
+            setPinFjMode={setPinFjMode}
+            canCreateFastJob={!!permissions?.canCreateFJ}
+            floorIsolation={floorIsolation}
+            onShowAllFloors={showAllFloors}
             setOverlayEl={setOverlayEl}
             setCameraView={setCameraView}
             resetCamera={resetCamera}
@@ -575,6 +639,10 @@ export function BIMViewer() {
             setColorMode={setColorMode}
             showSpaces={showSpaces}
             setShowSpaces={setShowSpaces}
+            statusColorVisibility={statusColorVisibility}
+            setStatusColorVisibility={setStatusColorVisibility}
+            disciplineVisibility={disciplineVisibility}
+            setDisciplineVisibility={setDisciplineVisibility}
           />
         </div>
 
@@ -615,8 +683,16 @@ export function BIMViewer() {
           buildingId={buildingId}
           router={router}
           setWrPopup={setWrPopup}
-          setFastJobLocation={setFastJobLocation}
-          setFastJobOpen={setFastJobOpen}
+          openFastJob={openFastJob}
+          index={index}
+          missing={missing}
+          classificationByExpressId={classificationByExpressId}
+          multiSelection={multiSelection}
+          setMultiSelection={setMultiSelection}
+          ghostRest={ghostRest}
+          setGhostRest={setGhostRest}
+          fitMultiSelection={fitMultiSelection}
+          syncIfcSpecs={syncIfcSpecs}
           spaceWorldBox={spaceWorldBox}
           flyToRoom={flyToRoom}
           selectAndFly={selectAndFly}
@@ -657,7 +733,7 @@ export function BIMViewer() {
       {actualPopupWr && actualPopupWr.WR_Type === "LJ" && (
         <LJWorkRequestPopup workRequest={actualPopupWr} onClose={() => setWrPopup(null)} onNavigate={navigatePopup} />
       )}
-      <FastJobModal isOpen={fastJobOpen} onClose={() => setFastJobOpen(false)} onSubmit={createFastJob} initialLocation={fastJobLocation} />
+      <FastJobModal isOpen={fastJobOpen} onClose={closeFastJob} onSubmit={submitFastJob} initialLocation={fastJobLocation} prefill={fastJobPrefill} />
     </div>
   );
 }

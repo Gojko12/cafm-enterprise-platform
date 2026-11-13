@@ -7,10 +7,13 @@ import { Crosshair, Plus, Search, X } from "lucide-react";
 import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { formatFreezePeriodWindow } from "@/lib/location-freezes";
-import type { BimElement, BimSpace } from "@/lib/ifc-cafm-bridge";
+import type { BimElement, BimSpace, MissingSyncItems } from "@/lib/ifc-cafm-bridge";
+import type { BimModelIndex } from "@/lib/ifc-cafm-bridge";
+import { BimFilterPanel } from "./BimFilterPanel";
+import { BimHandoverAuditPanel } from "./BimHandoverAuditPanel";
 import {
   COLOR_EMERALD, ROOM_LEVEL_COLOR, displayName,
-  type BimLinkMap, type BimTab, type CafmData, type FastJobLocation, type IsolateTarget, type RoomHealth, type SetState,
+  type BimElementClassification, type BimLinkMap, type BimTab, type CafmData, type FastJobLocation, type FastJobPrefill, type IsolateTarget, type RoomHealth, type SetState,
 } from "./bim-viewport-math";
 
 export interface BimRightSidebarProps {
@@ -50,8 +53,16 @@ export interface BimRightSidebarProps {
   buildingId: string;
   router: ReturnType<typeof useRouter>;
   setWrPopup: SetState<BaseWorkRequest | null>;
-  setFastJobLocation: SetState<FastJobLocation>;
-  setFastJobOpen: SetState<boolean>;
+  openFastJob: (prefill: FastJobPrefill, location: FastJobLocation) => void;
+  index: BimModelIndex | null;
+  missing: MissingSyncItems | null;
+  classificationByExpressId: Map<number, BimElementClassification>;
+  multiSelection: number[];
+  setMultiSelection: SetState<number[]>;
+  ghostRest: boolean;
+  setGhostRest: SetState<boolean>;
+  fitMultiSelection: () => void;
+  syncIfcSpecs: (element: BimElement, equipmentCode: string) => void;
   spaceWorldBox: (expressId: number) => THREE.Box3 | null;
   flyToRoom: (expressId: number) => void;
   selectAndFly: (expressId: number) => void;
@@ -63,7 +74,7 @@ export interface BimRightSidebarProps {
 }
 
 export function BimRightSidebar({
-  selection, setSelection, roomSelection, setRoomSelection, isolate, setIsolate, tab, setTab, search, setSearch, sidebarListRef, linkedRows, unassignedRows, roomRows, links, statusColorByCode, roomHealth, selectedElement, selectedSpace, selectedRoomHealth, selectedLink, selectedEquipment, selectedOpenWRs, selectedSchedules, roomElements, roomSchedules, assignOpen, setAssignOpen, assignQuery, setAssignQuery, assignCandidates, busy, data, buildingId, router, setWrPopup, setFastJobLocation, setFastJobOpen, spaceWorldBox, flyToRoom, selectAndFly, selectRoom, isolateTarget, assignExisting, unassign, createNewEquipment,
+  selection, setSelection, roomSelection, setRoomSelection, isolate, setIsolate, tab, setTab, search, setSearch, sidebarListRef, linkedRows, unassignedRows, roomRows, links, statusColorByCode, roomHealth, selectedElement, selectedSpace, selectedRoomHealth, selectedLink, selectedEquipment, selectedOpenWRs, selectedSchedules, roomElements, roomSchedules, assignOpen, setAssignOpen, assignQuery, setAssignQuery, assignCandidates, busy, data, buildingId, router, setWrPopup, openFastJob, index, missing, classificationByExpressId, multiSelection, setMultiSelection, ghostRest, setGhostRest, fitMultiSelection, syncIfcSpecs, spaceWorldBox, flyToRoom, selectAndFly, selectRoom, isolateTarget, assignExisting, unassign, createNewEquipment,
 }: BimRightSidebarProps) {
   return (
     <>
@@ -71,17 +82,50 @@ export function BimRightSidebar({
         <div className="w-[26rem] flex flex-col rounded-lg border border-gray-300 bg-white shadow-lg overflow-hidden">
           <div className="border-b border-gray-200 p-2 space-y-2">
             <div className="flex rounded border border-gray-300 overflow-hidden text-xs font-medium">
-              <button onClick={() => setTab("linked")} aria-pressed={tab === "linked"} className={`flex-1 px-2 py-1.5 ${tab === "linked" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Linked EQ ({linkedRows.length})</button>
-              <button onClick={() => setTab("unassigned")} aria-pressed={tab === "unassigned"} className={`flex-1 px-2 py-1.5 ${tab === "unassigned" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Unassigned IFC ({unassignedRows.length})</button>
-              <button onClick={() => setTab("rooms")} aria-pressed={tab === "rooms"} className={`flex-1 px-2 py-1.5 ${tab === "rooms" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Rooms ({roomRows.length})</button>
+              <button onClick={() => setTab("linked")} aria-pressed={tab === "linked"} className={`flex-1 px-1.5 py-1.5 ${tab === "linked" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Linked ({linkedRows.length})</button>
+              <button onClick={() => setTab("unassigned")} aria-pressed={tab === "unassigned"} className={`flex-1 px-1.5 py-1.5 ${tab === "unassigned" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Unassigned ({unassignedRows.length})</button>
+              <button onClick={() => setTab("rooms")} aria-pressed={tab === "rooms"} className={`flex-1 px-1.5 py-1.5 ${tab === "rooms" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}>Rooms ({roomRows.length})</button>
+              <button onClick={() => setTab("filter")} aria-pressed={tab === "filter"} className={`flex-1 px-1.5 py-1.5 ${tab === "filter" ? "bg-pink-600 text-white" : "bg-white hover:bg-gray-100"}`}>Filter{multiSelection.length ? ` (${multiSelection.length})` : ""}</button>
+              <button onClick={() => setTab("audit")} aria-pressed={tab === "audit"} className={`flex-1 px-1.5 py-1.5 ${tab === "audit" ? "bg-emerald-700 text-white" : "bg-white hover:bg-gray-100"}`}>Audit</button>
             </div>
-            <div className="relative">
-              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search elements, EQ IDs, rooms…" className="w-full rounded border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
-            </div>
+            {["linked", "unassigned", "rooms"].includes(tab) && (
+              <div className="relative">
+                <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search elements, EQ IDs, rooms…" className="w-full rounded border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
+              </div>
+            )}
           </div>
 
+          {tab === "filter" && (
+            <BimFilterPanel
+              index={index}
+              classificationByExpressId={classificationByExpressId}
+              links={links}
+              multiSelection={multiSelection}
+              setMultiSelection={setMultiSelection}
+              ghostRest={ghostRest}
+              setGhostRest={setGhostRest}
+              fitMultiSelection={fitMultiSelection}
+              selectAndFly={selectAndFly}
+            />
+          )}
+          {tab === "audit" && (
+            <BimHandoverAuditPanel
+              data={data}
+              buildingId={buildingId}
+              index={index}
+              links={links}
+              missing={missing}
+              selectedElement={selectedElement}
+              selectedIsLinked={!!selectedLink}
+              busy={busy}
+              assignExisting={assignExisting}
+              selectAndFly={selectAndFly}
+            />
+          )}
+
           {/* Element list */}
+          {["linked", "unassigned", "rooms"].includes(tab) && (
           <div ref={sidebarListRef} className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {tab === "linked" && linkedRows.map((element) => {
               const link = links.get(element.expressId)!;
@@ -130,6 +174,7 @@ export function BimRightSidebar({
             {tab === "unassigned" && !unassignedRows.length && <p className="p-3 text-xs text-gray-500">Every MEP element has an EQ ID. 🎉</p>}
             {tab === "rooms" && !roomRows.length && <p className="p-3 text-xs text-gray-500">No IfcSpace rooms detected.</p>}
           </div>
+          )}
 
           {/* Selected Element Action Card */}
           {selectedElement && (
@@ -227,8 +272,17 @@ export function BimRightSidebar({
                       : <p className="text-gray-500">No SmartPM schedules target this equipment.</p>}
                   </div>
                   <div className="flex gap-1.5">
-                    <button onClick={() => { setFastJobLocation(null); setFastJobOpen(true); }} className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
-                      <Plus size={12} /> Create Fast Job
+                    <button onClick={() => syncIfcSpecs(selectedElement, selectedLink.equipmentCode)} disabled={busy} className="flex-1 rounded border border-indigo-400 bg-indigo-50 px-2 py-1.5 font-semibold text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                      title="Copy IFC Class, Type/Family, Manufacturer, Storey and BBox dimensions into this asset's Technical Specifications">
+                      Sync IFC Metadata → CAFM Specs
+                    </button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => openFastJob(
+                      { equipmentCode: selectedLink.equipmentCode, spotLabel: `${selectedLink.equipmentCode} · ${displayName(selectedElement)}` },
+                      selectedEquipment ? { bl_id: selectedEquipment.bl_id, levelName: selectedEquipment.LevelName, roomCode: selectedEquipment.RoomCode } : null,
+                    )} className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
+                      <Plus size={12} /> + Fast Job
                     </button>
                     <button onClick={() => router.push(`/equipment?eq=${encodeURIComponent(selectedLink.equipmentCode)}`)} className="flex-1 rounded border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-800 hover:bg-gray-100">
                       Open in Equipment Registry
@@ -303,12 +357,17 @@ export function BimRightSidebar({
                   {!openWrs.length && !roomSchedules.length && <p className="text-gray-500">No open work requests or schedules.</p>}
                 </div>
                 <button
-                  onClick={() => {
-                    setFastJobLocation({ bl_id: buildingId, levelName: cafmRoom?.LevelName ?? selectedSpace.storeyName, roomCode: selectedSpace.code });
-                    setFastJobOpen(true);
-                  }}
+                  onClick={() => openFastJob(
+                    { spotLabel: `Room ${selectedSpace.code}` },
+                    { bl_id: buildingId, levelName: cafmRoom?.LevelName ?? selectedSpace.storeyName, roomCode: selectedSpace.code },
+                  )}
                   className="w-full inline-flex items-center justify-center gap-1 rounded bg-amber-600 px-2 py-1.5 font-semibold text-white hover:bg-amber-700">
-                  <Plus size={12} /> Create Room Fast Job
+                  <Plus size={12} /> + Fast Job in Room
+                </button>
+                <button
+                  onClick={() => router.push(`/floor-plans?building=${encodeURIComponent(buildingId)}&floor=${encodeURIComponent(cafmRoom?.LevelName ?? selectedSpace.storeyName)}&room=${encodeURIComponent(selectedSpace.code)}`)}
+                  className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-800 hover:bg-gray-100">
+                  🗺 Open in 2D Floor Plan
                 </button>
               </div>
             );

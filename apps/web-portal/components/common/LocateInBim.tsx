@@ -85,3 +85,37 @@ export function LocateInBimButton({ siteId, buildingId, bimBuildingId, equipment
     </button>
   );
 }
+
+interface OpenRoomInBimButtonProps {
+  siteId: string;
+  buildingId: string;
+  roomCode?: string;
+  /** Work request deep link (`?wr=…`) used when the WR carries an exact 3D `bimPin`. */
+  wrId?: string;
+  hasPin?: boolean;
+  className?: string;
+}
+
+/**
+ * `Open Room in 3D BIM` deep link for 2D floor plans and WR popups: jumps to
+ * `/bim-viewer?building=…&wr=…` when the WR has an exact 3D spot pin, otherwise
+ * `…&room=…` to isolate and frame the room. Hidden when no `.ifc` model exists.
+ */
+export function OpenRoomInBimButton({ siteId, buildingId, roomCode, wrId, hasPin, className }: OpenRoomInBimButtonProps) {
+  const router = useRouter();
+  const models = useBimModels(siteId);
+  if (!models?.some((model) => model.buildingId === buildingId)) return null;
+  const usePin = !!wrId && !!hasPin;
+  if (!usePin && !roomCode) return null;
+  const query = new URLSearchParams({ building: buildingId, ...(usePin ? { wr: wrId! } : { room: roomCode! }) });
+  return (
+    <button
+      type="button"
+      onClick={() => router.push(`/bim-viewer?${query.toString()}`)}
+      className={className ?? "inline-flex items-center gap-1 rounded border border-cyan-300 bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800 hover:bg-cyan-100"}
+      title={usePin ? "Fly to the exact pinned 3D spot in the BIM viewer" : "Isolate this room's floor and frame it in the 3D BIM viewer"}
+    >
+      <Box size={13} /> {usePin ? "Open Pinned Spot in 3D BIM" : "Open Room in 3D BIM"}
+    </button>
+  );
+}
