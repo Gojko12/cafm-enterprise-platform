@@ -333,6 +333,11 @@ export const BaseWorkRequestSchema = z.object({
   ChecklistSteps: z.array(PM_ScheduleStepSchema).optional(),
   ChecklistStandardCode: z.string().optional(),
   ChecklistCompleted: z.boolean().optional(),
+  ChecklistIncompleteOverride: z.object({
+    overriddenAt: z.string().min(1),
+    overriddenBy: z.string().min(1),
+    incompleteStepIds: z.array(z.string().min(1)),
+  }).optional(),
   ChecklistInstances: z.array(PM_WorkRequestStepSchema).optional(),
   StepAuditLogs: z.array(PM_StepAuditLogSchema).optional(),
   ChecklistHistory: z.array(ChecklistHistoryEntrySchema).optional(),

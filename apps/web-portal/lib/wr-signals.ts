@@ -29,6 +29,26 @@ export function getUnfavourableStepCount(wr: BaseWorkRequest, state: ChecklistSt
   return [...ids].filter((id) => getChecklistFinding(wr, id) === "Unfavourable").length;
 }
 
+export function getChecklistProgress(wr: BaseWorkRequest, state: ChecklistState) {
+  const requiredSteps = getChecklistSteps(wr, state).filter((step) => step.IsRequired !== false);
+  const todoSteps = wr.todoSteps ?? [];
+  const steps = requiredSteps.length ? requiredSteps : todoSteps;
+  const incomplete = steps.filter((step) => {
+    if ("StepId" in step) {
+      const result = wr.ChecklistResults?.find((item) => item.stepId === step.StepId);
+      if (!result) return !wr.ChecklistInstances?.find((item) => item.StepId === step.StepId)?.IsCompleted;
+      const empty = typeof result.value === "string" ? !result.value.trim() :
+        Array.isArray(result.value) ? result.value.length === 0 : false;
+      return empty || !result.passed && (
+        step.RequiresCommentOnFailure !== false && !result.comment?.trim() ||
+        step.RequiresPhotoOnFailure !== false && !result.photoPaths?.length
+      );
+    }
+    return !step.completed;
+  });
+  return { total: steps.length, completed: steps.length - incomplete.length, incomplete };
+}
+
 export function getFollowUpFJsForPM(pmWrId: string, allWorkRequests: BaseWorkRequest[]): BaseWorkRequest[] {
   const pm = allWorkRequests.find((wr) => wr.WR_ID === pmWrId && wr.WR_Type === "PM");
   return allWorkRequests.filter((wr) => wr.WR_Type === "FJ" && (!pm || wr.SiteId === pm.SiteId) &&

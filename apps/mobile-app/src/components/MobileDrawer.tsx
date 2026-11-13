@@ -24,6 +24,7 @@ interface MobileDrawerProps {
   vpaTrades: readonly string[];
   onTechnicianChange: (id: string) => void;
   onSyncNow: () => Promise<SyncStatus>;
+  onClearPending: () => Promise<number>;
   isSimulatedOffline: boolean;
   isOffline: boolean;
   pendingCount: number;
@@ -44,9 +45,10 @@ const items: Array<[DrawerTarget, string]> = [
 
 export const MobileDrawer: React.FC<MobileDrawerProps> = ({
   open, onClose, activeSiteId, onSiteChange, technicianId, technicians, profiles, vpaTrades, onTechnicianChange,
-  onSyncNow, isSimulatedOffline, isOffline, pendingCount, onToggleOffline, currentView, onNavigate, version, timerCount,
+  onSyncNow, onClearPending, isSimulatedOffline, isOffline, pendingCount, onToggleOffline, currentView, onNavigate, version, timerCount,
 }) => {
   const [syncing, setSyncing] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [lastSync, setLastSync] = useState<Date>();
   useEffect(() => {
     const synced = () => setLastSync(new Date());
@@ -63,6 +65,16 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
     } catch (error) {
       notify(error instanceof Error ? error.message : "Synchronization failed.");
     } finally { setSyncing(false); }
+  };
+  const clearPending = async () => {
+    if (!window.confirm(`Permanently remove ${pendingCount} pending sync item${pendingCount === 1 ? "" : "s"} from this device? Saved work requests remain on this device, but these changes will no longer upload.`)) return;
+    setClearing(true);
+    try {
+      const count = await onClearPending();
+      notify(`Removed ${count} pending sync item${count === 1 ? "" : "s"}. Saved work requests remain on this device.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not clear the pending sync queue.");
+    } finally { setClearing(false); }
   };
   const forceReload = async () => {
     try {
@@ -107,6 +119,10 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             </button>
           </div>
           <p className="text-xs text-slate-500">{lastSync ? `Last synced ${formatDateTimeDDMMYYYY(lastSync)}` : "Not synced yet"}</p>
+          {pendingCount > 0 && <button type="button" onClick={() => void clearPending()} disabled={clearing || syncing}
+            className="rounded border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-800 disabled:opacity-50">
+            {clearing ? "Clearing…" : "Clear pending queue"}
+          </button>}
           <label className="flex items-center justify-between text-xs text-slate-700">
             Simulate Offline
             <input type="checkbox" checked={isSimulatedOffline} onChange={(event) => onToggleOffline(event.target.checked)} className="h-4 w-4" />

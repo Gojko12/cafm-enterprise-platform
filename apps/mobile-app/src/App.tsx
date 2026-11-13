@@ -323,9 +323,9 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [engine, activeSiteId, currentTechnicianId, isSimulatedOffline, refreshData]);
 
-  const handleSyncNow = async () => {
+  const handleSyncNow = async (workRequestId?: string) => {
     if (!engine) throw new Error("The offline engine is not ready.");
-    const result = await engine.syncAfterChanges();
+    const result = await engine.syncAfterChanges(workRequestId);
     setLastSyncAt(new Date());
     await refreshData();
     setSyncNotice(result.pending ? `Synchronized ${result.synced} changes; ${result.pending} remain queued.` : `Synchronization complete. ${result.synced} changes sent.`);
@@ -597,7 +597,7 @@ export default function App() {
       case "audit-assurance":
         return <AuditInspection key={activeSiteId} site={activeSiteId} equipment={siteEquipment} rooms={rooms} requests={siteWRs} profiles={profiles} sync={handleSyncNow} />;
       case "hub":
-        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} allWorkRequests={siteWRs} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} gate={pmGate} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? () => openFollowUp() : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} sync={async () => { await handleSyncNow(); }} /> : null;
+        return selectedWR ? <ExecutionHub key={selectedWR.WR_ID} wr={selectedWR} allWorkRequests={siteWRs} technician={currentTechnicianId} technicianName={technicianName} person={person} people={technicians} equipment={equipment} freezes={freezes} gate={pmGate} save={saveSelected} now={now} navigationRef={hubNavigation} report={() => setFieldWR(selectedWR.WR_ID)} back={() => { setOpenCompletion(false); setCurrentView("home"); setSelectedWR(null); }} checklist={(step) => { setOpenCompletion(false); setChecklistStart(step ?? 0); setCurrentView("checklist"); }} followUp={access?.permissions.canOpenFollowUpFJ ? () => openFollowUp() : undefined} canComplete={!!access?.permissions.canCompleteWR78} openCompletion={openCompletion} offline={!browserOnline || isSimulatedOffline} sync={async (wrId) => { await handleSyncNow(wrId); }} /> : null;
       case "checklist":
         if (!selectedWR) return null;
         if (selectedWR.WR_Type === "PM") return <MobileChecklist {...checklistTimerProps} startStep={checklistStart} key={selectedWR.WR_ID} wr={selectedWR} steps={checklistSteps} exit={() => setCurrentView("hub")} complete={access?.permissions.canCompleteWR78 ? finishChecklist : undefined} followUp={access?.permissions.canOpenFollowUpFJ ? openFollowUp : undefined} save={async (results, baseline) => saveSelected((current) => {
@@ -736,6 +736,10 @@ export default function App() {
         onTechnicianChange={changeTechnician}
         onSiteChange={changeSite}
         onSyncNow={handleSyncNow}
+        onClearPending={async () => {
+          if (!engine) throw new Error("The offline engine is not ready.");
+          return engine.clearPendingQueue();
+        }}
         isSimulatedOffline={isSimulatedOffline}
         isOffline={offlineNow}
         pendingCount={pendingCount}

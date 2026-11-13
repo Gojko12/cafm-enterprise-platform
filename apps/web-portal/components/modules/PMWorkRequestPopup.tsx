@@ -4,7 +4,7 @@ import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
-import { getChecklistFinding, getChecklistSteps, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { getChecklistFinding, getChecklistProgress, getChecklistSteps, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import {
   BaseWorkRequest,
   PM_ScheduleStep,
@@ -37,12 +37,14 @@ import { PMHistoryFooter } from "./pm/PMHistoryFooter";
 import { PMKpiPanel } from "./pm/PMKpiPanel";
 import { PMDocumentsPanel } from "./pm/PMDocumentsPanel";
 import { PMChecklistSummaryPanel } from "./pm/PMChecklistSummaryPanel";
+import { PMIncompleteChecklistModal } from "./pm/PMIncompleteChecklistModal";
 import { PMStakeholderAlignmentSection } from "./pm/PMStakeholderAlignmentSection";
 import { PMFollowUpPanel } from "./pm/PMFollowUpPanel";
 import { PMAuditLogPanel } from "./pm/PMAuditLogPanel";
 import { PMSmartChecklistPanel } from "./pm/PMSmartChecklistPanel";
 import { allocateWorkRequestId } from "@/lib/wr-id-migration";
 import { isWrTerminal } from "./scheduler/scheduler-rules";
+import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
 
 const TABS = [
   "Work request details",
@@ -97,6 +99,7 @@ export function PMWorkRequestPopup({
   const [executorOpen, setExecutorOpen] = useState(false);
   const [executorUnlocked, setExecutorUnlocked] = useState(false);
   const [pendingFreezeStatus, setPendingFreezeStatus] = useState<StatusChoice | null>(null);
+  const [checklistWarningOpen, setChecklistWarningOpen] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [craftFilter, setCraftFilter] = useState("");
   const [documentFilter, setDocumentFilter] = useState("");
@@ -129,6 +132,9 @@ export function PMWorkRequestPopup({
     (!item.SiteId || item.SiteId === workRequest.SiteId),
   );
   const checklistSteps: PM_ScheduleStep[] = getChecklistSteps(workRequest, data);
+  const checklistProgress = getChecklistProgress(workRequest, data);
+  const incompleteChecklistLabels = checklistProgress.incomplete.map((step, index) =>
+    "StepId" in step ? `${step.SortOrder + 1}. ${step.Title}` : step.title);
   const unfavourableCount = getUnfavourableStepCount(workRequest, data);
   const equipment = workRequest.EquipmentCodes
     .map((code) => data.equipment.find((item) =>
@@ -236,11 +242,15 @@ export function PMWorkRequestPopup({
       onClose={canUpdatePms && permissions?.canCloseWR100 && workRequest.Percentage === 78 ? () => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!) : undefined} />
   ) : null;
 
-  const applyStatus = (choice: StatusChoice, skipFreezeGate = false) => {
+  const applyStatus = (choice: StatusChoice, skipFreezeGate = false, checklistOverride = false) => {
     if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (choice.percentage === 78 && !skipFreezeGate && wrFreezes.length > 0 && !workRequest.freezeAcknowledged) {
       setPendingFreezeStatus(choice);
+      return;
+    }
+    if (choice.percentage === 78 && incompleteChecklistLabels.length > 0 && !checklistOverride) {
+      setChecklistWarningOpen(true);
       return;
     }
     if (choice.percentage === 100 && hasOpenQARework(workRequest)) {
@@ -272,13 +282,20 @@ export function PMWorkRequestPopup({
           WorkRequestSubstatus: configured!.WorkRequestSubstatus,
         };
     if (choice.percentage === 100) commitClosureDraft();
+    const checklistOverrideRecord = checklistOverride ? {
+      overriddenAt: new Date().toISOString(),
+      overriddenBy: actorName,
+      incompleteStepIds: checklistProgress.incomplete.map((step) => "StepId" in step ? step.StepId : step.id),
+    } : undefined;
     updateWorkRequest((current) => ({
       ...current,
       ...status,
       Percentage: choice.percentage,
+      ...(checklistOverrideRecord ? { ChecklistIncompleteOverride: checklistOverrideRecord } : {}),
+      ...(checklistOverrideRecord ? { ChecklistCompleted: false } : {}),
       ...(reason ? { IsFrozen: true, FreezeReason: reason } : {}),
       ...(choice.percentage !== 55 ? { IsFrozen: false } : {}),
-    }), `WR status changed from ${workRequest.Percentage}% to ${choice.percentage}% (${choice.label}) by ${actorName}`);
+    }), `WR status changed from ${workRequest.Percentage}% to ${choice.percentage}% (${choice.label}) by ${actorName}${checklistOverrideRecord ? ` with incomplete checklist override (${checklistOverrideRecord.incompleteStepIds.length} steps)` : ""}`);
   };
 
   const addComment = () => {
@@ -688,7 +705,7 @@ export function PMWorkRequestPopup({
                   }}
                   className="mt-1 block w-full rounded border px-3 py-2">
                   <option value="">Select a status</option>
-                  {STATUS_CHOICES.map((item) => <option key={item.key} value={item.key} disabled={(item.percentage === 78 && !permissions?.canCompleteWR78) || (item.percentage === 100 && !permissions?.canCloseWR100)}>{item.label}</option>)}
+                  {STATUS_CHOICES.map((item) => <option key={item.key} value={item.key} disabled={(item.percentage === 78 && !permissions?.canCompleteWR78) || (item.percentage === 100 && (!permissions?.canCloseWR100 || !canCloseWorkRequestAt100(workRequest)))}>{item.label}</option>)}
                 </select>
               </label>
               <div className="flex flex-wrap items-end gap-2">
@@ -696,7 +713,7 @@ export function PMWorkRequestPopup({
                   className="rounded bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700">Cancel WR (27%)</button>
                 <button type="button" disabled={terminalReadOnly || !permissions?.canCompleteWR78} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!)}
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Technically Completed (78%)</button>
-                <button type="button" disabled={terminalReadOnly || !permissions?.canCloseWR100} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
+                <button type="button" title={!canCloseWorkRequestAt100(workRequest) ? "Complete (100%) is available only after Technically Completed (78%)." : undefined} disabled={terminalReadOnly || !permissions?.canCloseWR100 || !canCloseWorkRequestAt100(workRequest)} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
                   className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Complete (100%)</button>
               </div>
             </div>
@@ -763,6 +780,8 @@ export function PMWorkRequestPopup({
       {pendingFreezeStatus && <FreezeSafetyGate freezes={wrFreezes} unlockLabel="Confirm & Set to 78%" backLabel="Cancel"
         onBack={() => setPendingFreezeStatus(null)}
         onUnlock={() => { const choice = pendingFreezeStatus; setPendingFreezeStatus(null); stampFreezeAcknowledgment(); applyStatus(choice, true); }} />}
+      {checklistWarningOpen && <PMIncompleteChecklistModal labels={incompleteChecklistLabels} onCancel={() => setChecklistWarningOpen(false)}
+        onConfirm={() => { setChecklistWarningOpen(false); applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!, true, true); }} />}
       {executorOpen && wrFreezes.length > 0 && !executorUnlocked && <FreezeSafetyGate freezes={wrFreezes}
         onBack={() => setExecutorOpen(false)}
         onUnlock={() => { stampFreezeAcknowledgment(); setExecutorUnlocked(true); }} />}

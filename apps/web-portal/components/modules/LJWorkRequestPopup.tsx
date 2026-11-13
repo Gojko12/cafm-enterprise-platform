@@ -20,6 +20,7 @@ import { useApp } from "@/lib/hooks/useApp";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { isWrTerminal } from "./scheduler/scheduler-rules";
+import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
 
 const TABS = [
   "Work request details & Roles",
@@ -131,6 +132,10 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
   };
   const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[], allowBackward = false) => {
     if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
+    if (percentage === 100 && workRequest.Percentage !== 100 && !canCloseWorkRequestAt100(workRequest)) {
+      window.alert("Complete (100%) is available only after Technically Completed (78%).");
+      return;
+    }
     if (((percentage === 78 || (percentage === 94 && workRequest.Percentage < 78)) && !permissions?.canCompleteWR78) || (percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (percentage < 0 || percentage > 100) return;
     if (allowedRoles && !hasPermission(allowedRoles)) {

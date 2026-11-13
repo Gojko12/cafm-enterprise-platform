@@ -8,7 +8,10 @@ import { describeLocationFreeze, getCurrentLocationFreezes } from "../../../lib/
 import { intervalFor } from "../../../lib/dispatch";
 import { startRequestDrag } from "../../../lib/drag-preview";
 import { tradeColor } from "../../../lib/trade-colors";
+import { useTableColumns } from "../../common/TableColumns";
 import { cannotScheduleMessage, isWrSchedulable } from "./scheduler-rules";
+import { SchedulerPoolTable } from "./SchedulerPoolTable";
+import { finishSchedulerRequestDrag } from "../../../lib/scheduler-drag";
 import { DateInputDDMMYYYY } from "../../common/DateInputDDMMYYYY";
 import type { DisputeViewMode, WRDispute } from "../../../lib/disputes";
 import { DisputeViewFilter } from "../../common/DisputeViewFilter";
@@ -49,8 +52,6 @@ export function SchedulerPoolFilters({ requests, people, buildings, freezes, now
 }) {
   const [expanded, setExpanded] = useState(true);
   const [mode, setMode] = useState<"card" | "list">("card");
-  const [shown, setShown] = useState<Field[]>(fields.slice(0, 9).map(([id]) => id));
-  const [order, setOrder] = useState<Field[]>(fields.map(([id]) => id));
   const [types, setTypes] = useState<string[]>(["PM", "FJ", "LJ"]);
   const [activeOnly, setActiveOnly] = useState(true);
   const [includeClosed, setIncludeClosed] = useState(false);
@@ -63,9 +64,6 @@ export function SchedulerPoolFilters({ requests, people, buildings, freezes, now
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [scheduleFilter, setScheduleFilter] = useState<"all" | "scheduled" | "unscheduled">("all");
-  const [sort, setSort] = useState<Field>("id");
-  const [descending, setDescending] = useState(false);
-  const ordered = order.map((id) => fields.find(([field]) => field === id)!).filter(([id]) => shown.includes(id));
   const typesInUse = requests.filter((wr) => types.includes(wr.WR_Type));
   const statusOptions = useMemo(() => [...new Set(typesInUse.map((wr) => String(wr.Percentage)))].sort((a, b) => Number(a) - Number(b)).map((percentage) => {
     const matches = typesInUse.filter((wr) => String(wr.Percentage) === percentage);
@@ -86,6 +84,9 @@ export function SchedulerPoolFilters({ requests, people, buildings, freezes, now
     margin: wr.MarginDate?.slice(0, 10) ?? "", urgency: String(wr.Helper_SortUrgency ?? ""),
     person: wr.AssignedCraftpersonIds.map((id) => { const p = people.find((item) => item.id === id); return p ? `${p.Name} ${p.LastName}` : id; }).join(", "),
   });
+  const table = useTableColumns("scheduler-pool", fields.map(([id, label]) => ({
+    id, label, value: (wr: BaseWorkRequest) => valueFor(wr)[id],
+  })), fields.slice(0, 9).map(([id]) => id), "Fields ⚙");
   const baseRows = requests.filter((wr) => {
     const schedulable = isWrSchedulable(wr);
     const terminal = wr.Percentage === 27 || wr.Percentage === 29 || wr.Percentage >= 78;
@@ -99,17 +100,18 @@ export function SchedulerPoolFilters({ requests, people, buildings, freezes, now
       (disputeMode !== "only" || (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0) &&
       (!from || !!wr.DueDate && wr.DueDate.slice(0, 10) >= from) && (!to || !!wr.DueDate && wr.DueDate.slice(0, 10) <= to) &&
       Object.values(valueFor(wr)).some((value) => value.toLowerCase().includes(search.toLowerCase()));
-  }).sort((a, b) => valueFor(a)[sort].localeCompare(valueFor(b)[sort], undefined, { numeric: true }) * (descending ? -1 : 1));
+  });
   const scheduled = (wr: BaseWorkRequest) => wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id) !== null);
-  const rows = baseRows.filter((wr) => scheduleFilter === "all" || scheduled(wr) === (scheduleFilter === "scheduled"));
+  const rows = table.sorted(baseRows.filter((wr) => scheduleFilter === "all" || scheduled(wr) === (scheduleFilter === "scheduled")));
   const dueLabels = [from && `From ${formatDateDDMMYYYY(from)}`, to && `To ${formatDateDDMMYYYY(to)}`].filter(Boolean);
-  const changed = !activeOnly || includeClosed || types.length !== 3 || statuses.length > 0 || substatuses.length > 0 || trades.length > 0 || selectedBuildings.length > 0 || !!location || !!search || !!from || !!to || disputeMode !== "all";
-  const reset = () => { setTypes(["PM", "FJ", "LJ"]); setActiveOnly(true); setIncludeClosed(false); setStatuses([]); setSubstatuses([]); setTrades([]); setSelectedBuildings([]); setLocation(""); setSearch(""); setFrom(""); setTo(""); onDisputeMode("all"); };
+  const changed = !activeOnly || includeClosed || types.length !== 3 || statuses.length > 0 || substatuses.length > 0 || trades.length > 0 || selectedBuildings.length > 0 || !!location || !!search || !!from || !!to || disputeMode !== "all" || scheduleFilter !== "all";
+  const reset = () => { setTypes(["PM", "FJ", "LJ"]); setActiveOnly(true); setIncludeClosed(false); setStatuses([]); setSubstatuses([]); setTrades([]); setSelectedBuildings([]); setLocation(""); setSearch(""); setFrom(""); setTo(""); setScheduleFilter("all"); onDisputeMode("all"); };
   const toggleType = (type: string) => setTypes((old) => old.includes(type) ? old.filter((item) => item !== type) : [...old, type]);
   const chip = (label: string, remove: () => void) => <button key={label} type="button" onClick={remove} className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-800 hover:bg-blue-100">{label} ×</button>;
-  const cell = (wr: BaseWorkRequest, field: Field) => field === "id" ? <>{wr.WR_ID} <FrequencyPill code={wr.pmFrequency} /></>
-    : field === "due" ? formatDateDDMMYYYY(wr.DueDate) || "—" : field === "margin" ? formatDateDDMMYYYY(wr.MarginDate) || "—" : valueFor(wr)[field] || "—";
-  const dragStart = (event: React.DragEvent, wr: BaseWorkRequest) => { if (!isWrSchedulable(wr)) { event.preventDefault(); return; } onDraggingChange?.(wr); startRequestDrag(event, wr); };
+  const cell = (wr: BaseWorkRequest, field: string) => field === "id" ? <>{wr.WR_ID} <FrequencyPill code={wr.pmFrequency} /></>
+    : field === "due" ? formatDateDDMMYYYY(wr.DueDate) || "—" : field === "margin" ? formatDateDDMMYYYY(wr.MarginDate) || "—" : valueFor(wr)[field as Field] || "—";
+  const dragStart = (event: React.DragEvent, wr: BaseWorkRequest) => { if (!isWrSchedulable(wr)) { event.preventDefault(); return; } startRequestDrag(event, wr); onDraggingChange?.(wr); };
+  const dragEnd = () => { finishSchedulerRequestDrag(); onDraggingChange?.(null); };
   const actions = (wr: BaseWorkRequest) => <span className="flex flex-wrap gap-1">
     {isWrSchedulable(wr) ? <button className={button} title="Assign a craftperson or drag onto the calendar" onClick={() => onAssign(wr.WR_ID)}>Assign...</button>
       : wr.Percentage === 27 || wr.Percentage === 29 || wr.Percentage >= 78 ? <button className={button} onClick={() => onOpen(wr.WR_ID)}>View</button>
@@ -117,11 +119,11 @@ export function SchedulerPoolFilters({ requests, people, buildings, freezes, now
     <button className={button} onClick={() => onOpen(wr.WR_ID)}>👁 Open</button>
     {wr.AssignedCraftpersonIds.some((id) => intervalFor(wr, id)) && <button className={button} onClick={() => onShow(wr.WR_ID)}>📍 Show</button>}
   </span>;
-  return <aside className={`order-2 shrink-0 rounded border bg-white p-2 ${expanded ? "w-[min(34rem,70vw)] min-w-[22rem] resize-x overflow-auto" : "w-12"}`}>
+  return <aside className={`order-2 shrink-0 rounded border bg-white p-2 ${expanded ? "w-[min(34rem,70vw)] min-w-[22rem]" : "w-12"}`}>
     <button className={button} onClick={() => setExpanded(!expanded)}>{expanded ? "▶ Pool" : "◀"}</button>
     {expanded && <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-1"><button className={button} aria-pressed={mode === "card"} onClick={() => setMode("card")}>Card</button><button className={button} aria-pressed={mode === "list"} onClick={() => setMode("list")}>List</button>
-        <details className="relative"><summary className={`${button} cursor-pointer`}>Fields ⚙</summary><div className="absolute right-0 z-40 max-h-72 w-64 overflow-auto rounded border bg-white p-2 shadow-lg">{order.map((id, index) => <div key={id} className="flex items-center gap-1"><label className="flex-1"><input type="checkbox" checked={shown.includes(id)} onChange={(event) => setShown((old) => event.target.checked ? [...old, id] : old.filter((item) => item !== id))} /> {fields.find(([field]) => field === id)![1]}</label><button disabled={index === 0} onClick={() => setOrder((old) => { const next = [...old]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })}>↑</button><button disabled={index === order.length - 1} onClick={() => setOrder((old) => { const next = [...old]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; return next; })}>↓</button></div>)}</div></details>
+        <div className="[&>details>summary]:rounded [&>details>summary]:border [&>details>summary]:bg-white [&>details>summary]:px-2 [&>details>summary]:py-1 [&>details>summary]:text-xs [&>details>summary]:cursor-pointer">{table.menu}</div>
       </div>
       <div className="flex flex-wrap items-center gap-1 rounded bg-slate-50 p-1">
         <input aria-label="Search work requests" className="min-w-48 flex-1 rounded border px-2 py-1" placeholder="Search WR ID, title, EQ, room..." value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -162,16 +164,15 @@ export function SchedulerPoolFilters({ requests, people, buildings, freezes, now
           const schedulable = isWrSchedulable(wr);
           const disputes = disputeMap.get(wr.WR_ID) ?? [];
           const freezesForWr = getCurrentLocationFreezes(wr, freezes, now);
-          return <article key={`${wr.SiteId}-${wr.WR_ID}`} draggable={schedulable} title={schedulable ? undefined : cannotScheduleMessage(wr)} onDragStart={(event) => dragStart(event, wr)} onDragEnd={() => onDraggingChange?.(null)} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)} ${!schedulable ? "cursor-not-allowed opacity-50" : "cursor-grab"} ${disputeMode === "highlight" && disputes.length ? "bg-rose-100 text-rose-950 ring-2 ring-rose-500" : ""}`}>
+          return <article key={`${wr.SiteId}-${wr.WR_ID}`} draggable={schedulable} title={schedulable ? undefined : cannotScheduleMessage(wr)} onDragStart={(event) => dragStart(event, wr)} onDragEnd={dragEnd} className={`mb-1 rounded border border-l-4 p-2 ${tradeColor(wr.TradeName)} ${!schedulable ? "cursor-not-allowed opacity-50" : "cursor-grab"} ${disputeMode === "highlight" && disputes.length ? "bg-rose-100 text-rose-950 ring-2 ring-rose-500" : ""}`}>
             {disputes.length > 0 && <p title={disputes.map((item) => item.detail).join("\n")} className="text-rose-800">⚠ {disputes.map((item) => item.label).join(", ")}</p>}
-            {ordered.map(([id, label]) => <p key={id} className="truncate" title={`${label}: ${valueFor(wr)[id]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
+            {table.visible.map(({ id, label }) => <p key={id} className="truncate" title={`${label}: ${valueFor(wr)[id as Field]}`}><strong>{label}: </strong>{cell(wr, id)}</p>)}
             {freezesForWr.length > 0 && <span title={freezesForWr.map(describeLocationFreeze).join("; ")}>❄ Freeze Active at Location</span>}
             {actions(wr)}
           </article>;
-        }) : <table className="w-full table-fixed text-left"><thead><tr>{ordered.map(([id, label]) => <th key={id} className="p-1"><button className="w-full truncate text-left" onClick={() => { if (sort === id) setDescending(!descending); else { setSort(id); setDescending(false); } }}>{label}{sort === id ? descending ? " ▼" : " ▲" : ""}</button></th>)}<th>Actions</th></tr></thead><tbody>
-          {rows.map((wr) => <tr key={`${wr.SiteId}-${wr.WR_ID}`} draggable={isWrSchedulable(wr)} title={isWrSchedulable(wr) ? undefined : cannotScheduleMessage(wr)} onDragStart={(event) => dragStart(event, wr)} onDragEnd={() => onDraggingChange?.(null)} className={`border-t ${!isWrSchedulable(wr) ? "cursor-not-allowed opacity-50" : "cursor-grab"}`}>{ordered.map(([id]) => <td key={id} className="truncate p-1" title={valueFor(wr)[id]}>{cell(wr, id)}</td>)}<td>{actions(wr)}</td></tr>)}
-        </tbody></table>}
-        {!rows.length && <p className="p-2">No matching work requests.</p>}
+        }) : <SchedulerPoolTable rows={rows} columns={table.visible} sort={table.sort} onSort={table.toggleSort} width={table.width} onResize={table.resize}
+          isSchedulable={isWrSchedulable} dragStart={dragStart} dragEnd={dragEnd}
+          cell={(wr, id) => cell(wr, id)} actions={actions} />}
       </div>
     </div>}
   </aside>;

@@ -13,6 +13,7 @@ import { WR_Statuses, validateWorkRequestStatusTransition } from "@cafm/shared-s
 import { AcceptanceGatesPanel } from "./AcceptanceGatesPanel";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
+import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
 
 interface LJDrawerProps {
   isOpen: boolean;
@@ -171,6 +172,10 @@ export function LongJobDrawer({
 
   const updateWorkRequest = (percentage: number, updates: Partial<BaseWorkRequest>, description: string, role = actingRole) => {
     if (!workRequest) return;
+    if (percentage === 100 && workRequest.Percentage !== 100 && !canCloseWorkRequestAt100(workRequest)) {
+      window.alert("Complete (100%) is available only after Technically Completed (78%).");
+      return;
+    }
     const actorName = currentUser?.DisplayName ?? "Current user";
     setData((current) => ({ ...current, workRequests: current.workRequests.map((wr) => {
       if (wr.WR_ID !== workRequest.WR_ID || wr.SiteId !== workRequest.SiteId || wr.Percentage !== workRequest.Percentage) return wr;

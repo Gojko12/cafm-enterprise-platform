@@ -25,6 +25,7 @@ import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { DissatisfactionPanel, RatingEmailModal } from "@/components/modules/FJSatisfactionPanels";
 import { isCompletedFj } from "@/lib/fj-satisfaction";
 import { isWrTerminal } from "./scheduler/scheduler-rules";
+import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
 
 type Tab = "Work request details" | "Labor, parts & Completion" | "Technician To-Do & AI Task List" | "Attached Documents" | "AuditLog & QA" | "Checklist - Smart PM";
 
@@ -92,7 +93,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
       window.alert(`No WR_Statuses configuration exists for ${percentage}% ${workRequest.ESAWorkType}.`);
       return;
     }
-    if (percentage === 100 && workRequest.Percentage !== 78) {
+    if (percentage === 100 && !canCloseWorkRequestAt100(workRequest)) {
       window.alert("Complete (100%) is available only after Technically Completed (78%).");
       return;
     }
@@ -207,7 +208,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           </section>
           <div className="flex flex-wrap gap-2">{[
             ["Cancel WR (27%)", 27], ["On Hold (55%)", 55], ["Technically Completed (78%)", 78], ["Complete (100%)", 100],
-          ].map(([label, percent]) => <button key={label} disabled={terminalReadOnly || (percent === 78 && !permissions?.canCompleteWR78) || (percent === 100 && !permissions?.canCloseWR100)} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{label}</button>)}
+          ].map(([label, percent]) => <button key={label} title={percent === 100 && !canCloseWorkRequestAt100(workRequest) ? "Complete (100%) is available only after Technically Completed (78%)." : undefined} disabled={terminalReadOnly || (percent === 78 && !permissions?.canCompleteWR78) || (percent === 100 && (!permissions?.canCloseWR100 || !canCloseWorkRequestAt100(workRequest)))} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{label}</button>)}
             <button disabled={!permissions?.canCreateLJ} onClick={() => {
               if (!permissions?.canCreateLJ) { window.alert("Permission required to create a Long Job."); return; }
               let estimatedCost = workRequest.EstimatedCostEur ?? 0;

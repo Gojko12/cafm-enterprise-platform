@@ -20,11 +20,12 @@ import Link from "next/link";
 import { WRSignals } from "@/components/modules/WRSignals";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
-import { getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { getChecklistProgress, getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import { buildFastJobWR } from "@/lib/fj-factory";
 import { isDissatisfied } from "@/lib/fj-satisfaction";
 import type { SignalTab } from "@/lib/wr-signals";
 import { allocateWorkRequestId } from "@/lib/wr-id-migration";
+import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
 
 const mockWorkRequests: BaseWorkRequest[] = [
   {
@@ -152,7 +153,7 @@ export default function WorkRequestsPage() {
   useEffect(() => { if (new URLSearchParams(window.location.search).get("view") === "hub") setPmView("hub"); }, []);
   const coordinationActionCount = useCoordinationActionCount(90);
   const [initialTab, setInitialTab] = useState<SignalTab>();
-  const [signalFilter, setSignalFilter] = useState<"unfavourable" | "follow-up" | "parent" | null>(null);
+  const [signalFilter, setSignalFilter] = useState<"unfavourable" | "follow-up" | "parent" | "incomplete-checklist" | null>(null);
   useEffect(() => { setSignalFilter(null); }, [activeSiteId, requestType]);
   const [locationFilter, setLocationFilter] = useState<{
     building: Building | null;
@@ -232,11 +233,13 @@ export default function WorkRequestsPage() {
   const hasSignal = (wr: BaseWorkRequest, signal: NonNullable<typeof signalFilter>) =>
     signal === "unfavourable" ? getUnfavourableStepCount(wr, data) > 0 :
       signal === "follow-up" ? wr.WR_Type === "PM" && getFollowUpFJsForPM(wr.WR_ID, workRequests).length > 0 :
-        !!getParentPM(wr, workRequests);
+        signal === "parent" ? !!getParentPM(wr, workRequests) :
+          wr.WR_Type === "PM" && getChecklistProgress(wr, data).incomplete.length > 0;
   const filteredRequests = scopedRequests.filter((wr) => !signalFilter || hasSignal(wr, signalFilter));
   const signalFilters = <div className="flex flex-wrap gap-2 text-xs">
     {([
       ["unfavourable", "⚠ Unfavourable Checklist"],
+      ...(requestType === "PM" ? [["incomplete-checklist", "⚠ Incomplete Checklist"]] : []),
       ...(requestType === "PM" ? [["follow-up", "🔧 Has Follow-Up FJ"]] : []),
       ...(requestType === "FJ" ? [["parent", "🔗 PM Follow-Ups Only"]] : []),
     ] as Array<[NonNullable<typeof signalFilter>, string]>).map(([signal, label]) => <button key={signal} type="button" aria-pressed={signalFilter === signal} className={`rounded-lg border px-2 py-1 font-semibold ${signalFilter === signal ? "border-blue-600 bg-blue-100 text-blue-900" : "bg-white"}`} onClick={() => setSignalFilter((current) => current === signal ? null : signal)}>{label} ({scopedRequests.filter((wr) => hasSignal(wr, signal)).length})</button>)}
@@ -511,7 +514,10 @@ export default function WorkRequestsPage() {
                     {wr.SlaDueAt && <span>SLA: {wr.SlaTargetLabel} → {formatDateTimeDDMMYYYY(wr.SlaDueAt)}</span>}
                     {isDissatisfied(wr) && <span className="rounded bg-red-100 px-2 py-0.5 font-medium text-red-900">Dissatisfied · {wr.Satisfaction?.followUpStatus?.replace(/_/g, " ")}</span>}
                   </p>}
-                  <div className="mt-2"><WRSignals wr={wr} onOpen={handleViewWR} /></div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                    {wr.WR_Type === "PM" && getChecklistProgress(wr, data).incomplete.length > 0 && <span title="One or more required PM checklist steps are incomplete." className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">Checklist incomplete · {getChecklistProgress(wr, data).incomplete.length}</span>}
+                    <WRSignals wr={wr} onOpen={handleViewWR} />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -579,13 +585,14 @@ export default function WorkRequestsPage() {
                   </div>
                 )}
                 {requestType === "PM" && bucket === "passed" && wr.Percentage === 78 && (
-                  <button type="button" disabled={!permissions?.canCloseWR100} onClick={() => {
+                  <button type="button" onClick={() => {
                     if (!permissions?.canCloseWR100) return;
+                    if (!canCloseWorkRequestAt100(wr)) { alert("Complete (100%) is available only after Technically Completed (78%)."); return; }
                     const complete = WR_Statuses.find((status) => status.ESAWorkType === wr.ESAWorkType && status.Percentage === 100);
                     if (!complete) { alert(`No 100% WR_Statuses configuration exists for ${wr.ESAWorkType}.`); return; }
                     const now = new Date().toISOString();
                     setData((current) => ({ ...current, workRequests: current.workRequests.map((item) =>
-                      item.WR_ID === wr.WR_ID && item.SiteId === wr.SiteId ? {
+                      item.WR_ID === wr.WR_ID && item.SiteId === wr.SiteId && item.Percentage === 78 ? {
                         ...item, Percentage: 100, WorkRequestStatus: complete.WorkRequestStatus,
                         WorkRequestSubstatus: complete.WorkRequestSubstatus, QA_InspectionStatus: "Passed",
                         UpdatedAt: now, Activity: [...(item.Activity ?? []), {
@@ -595,7 +602,7 @@ export default function WorkRequestsPage() {
                         }],
                       } : item,
                     ) }));
-                  }} className="mt-3 rounded bg-green-700 px-4 py-2 text-sm font-semibold text-white">Complete (100%)</button>
+                  }} title={!canCloseWorkRequestAt100(wr) ? "Complete (100%) is available only after Technically Completed (78%)." : undefined} disabled={!permissions?.canCloseWR100 || !canCloseWorkRequestAt100(wr)} className="mt-3 rounded bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Complete (100%)</button>
                 )}
                 {requestType === "PM" && bucket === "corrected" && (
                   <div className="mt-3 space-y-2 border-t border-gray-200 pt-3">

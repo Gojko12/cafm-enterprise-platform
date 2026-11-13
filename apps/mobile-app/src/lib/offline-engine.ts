@@ -299,6 +299,39 @@ export class OfflineEngine {
     return items.length;
   }
 
+  async clearPendingQueue(): Promise<number> {
+    const db = await getDB();
+    const tx = db.transaction(["syncQueue", "photoQueue"], "readwrite");
+    const [mutations, photos] = await Promise.all([
+      tx.objectStore("syncQueue").index("by-status").getAll("PENDING"),
+      tx.objectStore("photoQueue").index("by-status").getAll("PENDING"),
+    ]);
+    for (const item of mutations) await tx.objectStore("syncQueue").delete(item.QueueId);
+    for (const item of photos) await tx.objectStore("photoQueue").delete(item.QueueId);
+    await tx.done;
+    return mutations.length + photos.length;
+  }
+
+  private async coalescePendingWorkRequestUpdates(db: Awaited<ReturnType<typeof getDB>>): Promise<void> {
+    const tx = db.transaction("syncQueue", "readwrite");
+    const pending = await tx.store.index("by-status").getAll("PENDING");
+    const groups = new Map<string, typeof pending>();
+    for (const item of pending) {
+      if (item.MutationType !== "WR_UPDATE" || typeof item.Payload.WR_ID !== "string" || typeof item.Payload.SiteId !== "string") continue;
+      const key = JSON.stringify([item.Payload.SiteId, item.Payload.WR_ID]);
+      groups.set(key, [...(groups.get(key) ?? []), item]);
+    }
+    const syncedAt = new Date().toISOString();
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      group.sort((a, b) => a.CreatedAt.localeCompare(b.CreatedAt) || a.QueueId.localeCompare(b.QueueId));
+      const first = group[0], latest = group[group.length - 1];
+      await tx.store.put({ ...latest, BaseWorkRequest: first.BaseWorkRequest ?? null });
+      for (const item of group.slice(0, -1)) await tx.store.put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
+    }
+    await tx.done;
+  }
+
   async queueMutation(
     mutationType: "STEP_COMPLETE" | "SESSION_LOG",
     payload: Record<string, unknown>,
@@ -332,7 +365,7 @@ export class OfflineEngine {
   /**
    * Sync all pending mutations
    */
-  async syncNow(): Promise<SyncStatus> {
+  async syncNow(workRequestId?: string): Promise<SyncStatus> {
     if (this.syncInProgress) {
       throw new Error("Synchronization is already in progress.");
     }
@@ -346,10 +379,12 @@ export class OfflineEngine {
 
     try {
       const db = await getDB();
-
-      const syncItems = await db.getAllFromIndex("syncQueue", "by-status", "PENDING");
-      const photoItems = await db.getAllFromIndex("photoQueue", "by-status", "PENDING");
-      status.pending = syncItems.length + photoItems.length;
+      await this.coalescePendingWorkRequestUpdates(db);
+      const allSyncItems = await db.getAllFromIndex("syncQueue", "by-status", "PENDING");
+      const allPhotoItems = await db.getAllFromIndex("photoQueue", "by-status", "PENDING");
+      const syncItems = workRequestId ? allSyncItems.filter((item) => item.Payload.WR_ID === workRequestId) : allSyncItems;
+      const photoItems = workRequestId ? allPhotoItems.filter((item) => item.WR_ID === workRequestId) : allPhotoItems;
+      status.pending = allSyncItems.length + allPhotoItems.length;
       status.lastSyncTime = await this.getLastSyncTime();
       this.syncStatusListeners.forEach((listener) => listener(status));
       if (this.simulatedOffline || !this.isOnline) {
@@ -357,7 +392,14 @@ export class OfflineEngine {
       }
       const result = await synchronizePortal(db, this.site, this.person, syncItems, photoItems, controller.signal);
       status.synced = result.synced;
-      status.pending = result.pending;
+      if (workRequestId) {
+        const [remainingItems, remainingPhotos] = await Promise.all([
+          db.getAllFromIndex("syncQueue", "by-status", "PENDING"),
+          db.getAllFromIndex("photoQueue", "by-status", "PENDING"),
+        ]);
+        status.pending = remainingItems.filter((item) => item.Payload.WR_ID === workRequestId).length +
+          remainingPhotos.filter((item) => item.WR_ID === workRequestId).length;
+      } else status.pending = result.pending;
       status.lastSyncTime = result.lastSyncTime;
       this.syncStatusListeners.forEach((listener) => listener(status));
       return status;
@@ -369,9 +411,9 @@ export class OfflineEngine {
     }
   }
 
-  async syncAfterChanges(): Promise<SyncStatus> {
+  async syncAfterChanges(workRequestId?: string): Promise<SyncStatus> {
     while (this.syncFinished) await this.syncFinished;
-    return this.syncNow();
+    return this.syncNow(workRequestId);
   }
 
   isOnlineNow(): boolean {

@@ -1,9 +1,11 @@
 import { WR_Statuses } from "@cafm/shared-schema";
 import type { BaseWorkRequest, UserRole } from "@cafm/shared-schema";
 import { hasOpenQARework } from "./qa-settings";
+import { assertCanCloseWorkRequestAt100 } from "./wr-transition-rules";
 
 export function gridStatusChange(wr: BaseWorkRequest, percentage: number, role: UserRole): BaseWorkRequest {
   if (wr.Percentage === percentage) return wr;
+  if (percentage === 100) assertCanCloseWorkRequestAt100(wr);
   if (percentage === 100 && hasOpenQARework(wr)) throw new Error(`${wr.WR_ID}: QA rework must be verified before closing.`);
   if (wr.WR_Type === "LJ") throw new Error(`${wr.WR_ID}: use the LJ Actions panel so role and acceptance gates are checked.`);
   const configured = WR_Statuses.find((status) => status.ESAWorkType === wr.ESAWorkType && status.Percentage === percentage);
@@ -15,7 +17,7 @@ export function gridStatusChange(wr: BaseWorkRequest, percentage: number, role: 
   if (wr.WR_Type === "PM" && percentage === 100 && wr.QA_InspectionStatus !== "Passed" && wr.AuditInspectionStatus !== "Passed Inspected") {
     throw new Error(`${wr.WR_ID}: QA inspection must pass before PM completion.`);
   }
-  if ((percentage === 78 && wr.Percentage !== 50) || (percentage === 100 && wr.Percentage !== 78) || percentage === 50) {
+  if ((percentage === 78 && wr.Percentage !== 50) || percentage === 50) {
     throw new Error(`${wr.WR_ID}: this status transition is not permitted from ${wr.Percentage}%.`);
   }
   return { ...wr, ...configured, Percentage: percentage, IsFrozen: false,

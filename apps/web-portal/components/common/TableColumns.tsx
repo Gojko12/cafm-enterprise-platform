@@ -31,8 +31,11 @@ export function ResizeHandle({ label, onResize, width }: { label: string; width:
     }} />;
 }
 
-export function useTableColumns<T>(key: string, columns: TableColumn<T>[]) {
-  const [settings, setSettings] = useState<Settings>({ order: columns.map((column) => column.id), hidden: [] });
+export function useTableColumns<T>(key: string, columns: TableColumn<T>[], defaultVisibleIds?: string[], menuLabel = "Columns ⚙️") {
+  const [settings, setSettings] = useState<Settings>(() => ({
+    order: columns.map((column) => column.id),
+    hidden: defaultVisibleIds ? columns.map((column) => column.id).filter((id) => !defaultVisibleIds.includes(id)) : [],
+  }));
   const [loaded, setLoaded] = useState(false);
   const [sort, setSort] = useState<{ id: string; direction: "asc" | "desc" } | null>(null);
   useEffect(() => {
@@ -82,7 +85,7 @@ export function useTableColumns<T>(key: string, columns: TableColumn<T>[]) {
   const width = (id: string) => settings.widths?.[id] ?? (id === "__select" ? 60 : id === "__action" ? 120 : 150);
   const resize = (id: string, value: number) => setSettings((current) => ({ ...current, widths: { ...current.widths, [id]: value } }));
   return { visible, ordered, sort, toggleSort, sorted, width, resize, menu: <details className="relative text-xs">
-    <summary className="cursor-pointer rounded border bg-white px-2 py-1">Columns ⚙️</summary>
+    <summary className="cursor-pointer rounded border bg-white px-2 py-1">{menuLabel}</summary>
     <div className="absolute right-0 z-30 max-h-80 w-64 overflow-auto rounded border bg-white p-2 shadow-lg">
       {ordered.map((column, index) => <div key={column.id} className="flex items-center gap-1 py-1" draggable
         onDragStart={(event) => event.dataTransfer.setData("text/plain", column.id)}

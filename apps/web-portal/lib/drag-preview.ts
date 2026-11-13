@@ -1,9 +1,10 @@
 import type React from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { tradeColor } from "./trade-colors";
+import { startSchedulerRequestDrag } from "./scheduler-drag";
 
 export function startRequestDrag(event: React.DragEvent, wr: BaseWorkRequest, from?: string) {
-  event.dataTransfer.setData("application/json", JSON.stringify({ id: wr.WR_ID, ...(from ? { from } : {}) }));
+  startSchedulerRequestDrag(event, wr, from);
   const ghost = document.createElement("div");
   ghost.textContent = `${wr.WR_ID} (2h)`;
   ghost.className = `border-l-4 ${tradeColor(wr.TradeName)}`;

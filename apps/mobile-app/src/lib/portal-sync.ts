@@ -123,41 +123,104 @@ async function request(site: SiteId, person: string, method: "GET" | "POST", bod
   return parsed.data;
 }
 
-function withoutSteps(wr: unknown): string {
-  if (!wr || typeof wr !== "object") return stable(wr);
-  const { ChecklistSteps, ChecklistInstances, UpdatedAt, updatedAt, StepAuditLogs, ...rest } = wr as Record<string, unknown>;
-  void ChecklistSteps; void ChecklistInstances; void UpdatedAt; void updatedAt; void StepAuditLogs;
-  return stable(rest);
+const ignoredUpdateFields = new Set(["WR_ID", "SiteId", "UpdatedAt", "updatedAt"]);
+const terminalStatusFields = new Set(["Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "IsFrozen", "ClosedAt", "CompletedAt"]);
+const arrayIdentity: Record<string, string> = {
+  Activity: "id", ChecklistResults: "stepId", ChecklistHistory: "id", StepAuditLogs: "AuditLogId",
+  ChecklistInstances: "StepInstanceId", MobileWorkSessions: "SessionId", Attachments: "id",
+  timeSessions: "id", laborEntries: "craftpersonId", SpareParts: "id", ChecklistSteps: "StepId",
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-// The server only appended checklist steps (e.g. an enriched blueprint); nothing else (status, assignee…) changed.
-function onlyAddedSteps(server: BaseWorkRequest | undefined, base: BaseWorkRequest | undefined) {
-  if (!server || !base) return false;
-  const serverSteps = server.ChecklistSteps ?? [], baseSteps = base.ChecklistSteps ?? [];
-  if (serverSteps.length <= baseSteps.length) return false;
-  if (!baseSteps.every((step) => serverSteps.some((item) => item.StepId === step.StepId))) return false;
-  const stripResults = (wr: BaseWorkRequest) => withoutSteps(wr);
-  return stripResults(server) === stripResults(base);
+function mergeChangedValue(field: string, base: unknown, current: unknown, local: unknown): unknown {
+  if (Array.isArray(base) && Array.isArray(current) && Array.isArray(local)) {
+    return mergeChangedArray(field, base, current, local);
+  }
+  if (isRecord(base) && isRecord(current) && isRecord(local)) {
+    return mergeChangedRecord(base, current, local);
+  }
+  return local;
 }
 
-function mergeAddedSteps(local: BaseWorkRequest, server: BaseWorkRequest): BaseWorkRequest {
-  const localSteps = local.ChecklistSteps ?? [];
-  const known = new Set(localSteps.map((step) => step.StepId));
-  const addedSteps = (server.ChecklistSteps ?? []).filter((step) => !known.has(step.StepId));
-  const knownInstances = new Set((local.ChecklistInstances ?? []).map((item) => item.StepInstanceId));
-  const addedInstances = (server.ChecklistInstances ?? []).filter((item) => !knownInstances.has(item.StepInstanceId));
-  return { ...local, ChecklistSteps: [...localSteps, ...addedSteps], ChecklistInstances: [...(local.ChecklistInstances ?? []), ...addedInstances] };
+function mergeChangedRecord(base: Record<string, unknown>, current: Record<string, unknown>, local: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...current };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local)])) {
+    if (stable(base[key]) === stable(local[key])) continue;
+    merged[key] = mergeChangedValue(key, base[key], current[key], local[key]);
+  }
+  return merged;
 }
 
-function replaceRequest(state: State, wr: BaseWorkRequest) {
-  const index = state.workRequests.findIndex((item) => item.WR_ID === wr.WR_ID);
+function mergeChangedArray(field: string, base: unknown[], current: unknown[], local: unknown[]): unknown[] {
+  const identity = arrayIdentity[field];
+  if (!identity || [...base, ...current, ...local].some((item) => !isRecord(item) || typeof item[identity] !== "string")) {
+    if ([...base, ...current, ...local].every((item) => typeof item === "string")) {
+      const baseSet = new Set(base as string[]), localSet = new Set(local as string[]);
+      return [...new Set([...(current as string[]).filter((item) => !baseSet.has(item) || localSet.has(item)), ...(local as string[]).filter((item) => !baseSet.has(item))])];
+    }
+    return local;
+  }
+  const baseById = new Map(base.map((item) => [(item as Record<string, unknown>)[identity] as string, item]));
+  const localById = new Map(local.map((item) => [(item as Record<string, unknown>)[identity] as string, item]));
+  const merged = [...current];
+  for (const [id, localItem] of localById) {
+    const baseItem = baseById.get(id);
+    if (baseItem !== undefined && stable(baseItem) === stable(localItem)) continue;
+    const index = merged.findIndex((item) => (item as Record<string, unknown>)[identity] === id);
+    if (index < 0) merged.push(localItem);
+    else {
+      const currentItem = merged[index];
+      merged[index] = isRecord(baseItem) && isRecord(currentItem) && isRecord(localItem)
+        ? mergeChangedRecord(baseItem, currentItem, localItem)
+        : localItem;
+    }
+  }
+  for (const [id, baseItem] of baseById) {
+    if (localById.has(id)) continue;
+    const index = merged.findIndex((item) => (item as Record<string, unknown>)[identity] === id);
+    if (index >= 0 && stable(merged[index]) === stable(baseItem)) merged.splice(index, 1);
+  }
+  return merged;
+}
+
+function mergeLocalWorkRequestChanges(server: BaseWorkRequest, base: BaseWorkRequest, local: BaseWorkRequest): BaseWorkRequest {
+  const next: Record<string, unknown> = { ...server };
+  const baseRecord = base as unknown as Record<string, unknown>;
+  const localRecord = local as unknown as Record<string, unknown>;
+  const serverRecord = server as unknown as Record<string, unknown>;
+  const terminal = server.Percentage === 100 || server.Percentage === 27 || server.Percentage === 29;
+  for (const key of new Set([...Object.keys(baseRecord), ...Object.keys(localRecord)])) {
+    if (ignoredUpdateFields.has(key) || stable(baseRecord[key]) === stable(localRecord[key])) continue;
+    if (terminal && terminalStatusFields.has(key)) continue;
+    const localValue = localRecord[key], baseValue = baseRecord[key], serverValue = serverRecord[key];
+    next[key] = Array.isArray(localValue) && Array.isArray(baseValue) && Array.isArray(serverValue)
+      ? mergeChangedArray(key, baseValue, serverValue, localValue)
+      : localValue;
+  }
+  return workRequestSchema.parse({
+    ...next, WR_ID: server.WR_ID, SiteId: server.SiteId,
+    UpdatedAt: server.UpdatedAt, updatedAt: server.updatedAt,
+  });
+}
+
+function findServerWorkRequest(state: State, local: BaseWorkRequest): BaseWorkRequest | undefined {
+  return state.workRequests.find((item) => item.SiteId === local.SiteId && item.WR_ID === local.WR_ID) ??
+    (local.JobID ? state.workRequests.find((item) => item.SiteId === local.SiteId && item.JobID === local.JobID) : undefined);
+}
+
+function replaceRequest(state: State, wr: BaseWorkRequest, previous?: BaseWorkRequest) {
+  const index = state.workRequests.findIndex((item) => previous ? item === previous :
+    item.SiteId === wr.SiteId && (item.WR_ID === wr.WR_ID || !!wr.JobID && item.JobID === wr.JobID));
   if (index < 0) state.workRequests.push(wr);
   else state.workRequests[index] = wr;
 }
 
 export async function synchronizePortal(
   db: IDBPDatabase<MobileAppDB>, site: SiteId, person: string,
-  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal,
+  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal, conflictRetry = 0,
 ) {
   let response = await request(site, person, "GET", undefined, signal);
   if (!response.state) {
@@ -188,7 +251,6 @@ export async function synchronizePortal(
   }
   const localRequests = await db.getAll("workRequests");
   const localById = new Map(localRequests.map((item) => [item.WR_ID, item]));
-  const serverById = new Map(state.workRequests.map((item) => [item.WR_ID, item]));
   const applied = new Set(state.mobileMutationIds ?? []);
   const selected: SyncQueueEntry[] = [];
   const selectedPhotos: OfflinePhotoQueueEntry[] = [];
@@ -209,20 +271,24 @@ export async function synchronizePortal(
     if (itemSite === site) selectedPhotos.push(photo);
   }
 
-  const updates = selected.filter((entry) => entry.MutationType === "WR_UPDATE");
-  while (updates.length) {
-    const index = updates.findIndex((entry) => {
-      if (applied.has(entry.QueueId)) return true;
-      const current = state.workRequests.find((wr) => wr.WR_ID === entry.Payload.WR_ID);
-      return entry.BaseWorkRequest !== undefined && (stable(current ?? null) === stable(entry.BaseWorkRequest) || onlyAddedSteps(current, entry.BaseWorkRequest as BaseWorkRequest));
-    });
-    if (index < 0) throw new Error(`Work request ${String(updates[0].Payload.WR_ID)} changed on the portal; its local changes were retained.`);
-    const [item] = updates.splice(index, 1);
+  const updates = selected.filter((entry) => entry.MutationType === "WR_UPDATE" || entry.MutationType === "WR_ASSIGNMENT")
+    .sort((a, b) => a.CreatedAt.localeCompare(b.CreatedAt) || a.QueueId.localeCompare(b.QueueId));
+  for (const item of updates) {
     if (applied.has(item.QueueId)) continue;
     const parsed = workRequestSchema.safeParse(item.Payload);
     if (!parsed.success || parsed.data.SiteId !== site) throw new Error(`Invalid queued work request ${item.QueueId}.`);
-    const serverCurrent = state.workRequests.find((wr) => wr.WR_ID === parsed.data.WR_ID);
-    replaceRequest(state, serverCurrent && onlyAddedSteps(serverCurrent, item.BaseWorkRequest as BaseWorkRequest) ? mergeAddedSteps(parsed.data, serverCurrent) : parsed.data);
+    const serverCurrent = findServerWorkRequest(state, parsed.data);
+    const base = item.BaseWorkRequest ?? null;
+    if (serverCurrent && base) {
+      replaceRequest(state, mergeLocalWorkRequestChanges(serverCurrent, base, parsed.data), serverCurrent);
+    } else if (serverCurrent && stable({ ...serverCurrent, UpdatedAt: undefined, updatedAt: undefined }) === stable({ ...parsed.data, UpdatedAt: undefined, updatedAt: undefined })) {
+      applied.add(item.QueueId);
+      continue;
+    } else if (serverCurrent) {
+      throw new Error(`Work request ID ${parsed.data.WR_ID} already exists on the portal with different data; local changes were retained for review.`);
+    } else {
+      replaceRequest(state, parsed.data);
+    }
     applied.add(item.QueueId);
   }
 
@@ -266,18 +332,16 @@ export async function synchronizePortal(
     Object.assign(state, completeEquipmentInspection(state, sheet));
     applied.add(item.QueueId);
   }
-  for (const item of selected.filter((entry) => entry.MutationType !== "WR_UPDATE" && entry.MutationType !== "AUDIT_FINDING" && entry.MutationType !== "EQUIPMENT_INSPECTION")) {
+  for (const item of selected.filter((entry) => entry.MutationType !== "WR_UPDATE" && entry.MutationType !== "WR_ASSIGNMENT" && entry.MutationType !== "AUDIT_FINDING" && entry.MutationType !== "EQUIPMENT_INSPECTION")) {
     if (applied.has(item.QueueId)) continue;
     const wrId = item.Payload.WR_ID;
-    const wr = state.workRequests.find((entry) => entry.WR_ID === wrId);
+    if (typeof wrId !== "string") throw new Error(`Queued mutation ${item.QueueId} has no work request ID.`);
+    const localRequest = localById.get(wrId);
+    const wr = state.workRequests.find((entry) => entry.WR_ID === wrId && (!localRequest || entry.SiteId === localRequest.SiteId)) ??
+      (localRequest ? findServerWorkRequest(state, localRequest) : undefined);
     if (!wr) throw new Error(`Cannot synchronize mutation ${item.QueueId}: work request not found.`);
     if (item.MutationType === "STEP_COMPLETE") {
       const step = stepSchema.parse(item.Payload);
-      const serverResult = serverById.get(step.WR_ID)?.ChecklistResults?.find((result) => result.stepId === step.StepId);
-      const baseResult = item.BaseWorkRequest?.ChecklistResults?.find((result) => result.stepId === step.StepId);
-      if (stable(serverResult) !== stable(baseResult)) {
-        throw new Error(`Checklist step ${step.StepId} changed on the portal; its local changes were retained.`);
-      }
       const previousResult = wr.ChecklistResults?.find((result) => result.stepId === step.StepId);
       const results = [...(wr.ChecklistResults ?? [])].filter((result) => result.stepId !== step.StepId);
       results.push({
@@ -288,7 +352,7 @@ export async function synchronizePortal(
       });
       replaceRequest(state, {
         ...wr, ChecklistResults: results,
-        ChecklistHistory: [...(wr.ChecklistHistory ?? []), {
+        ChecklistHistory: (wr.ChecklistHistory ?? []).some((entry) => entry.id === step.AuditId) ? wr.ChecklistHistory : [...(wr.ChecklistHistory ?? []), {
           id: step.AuditId, timestamp: step.Timestamp, performedBy: step.TechnicianId,
           actionType: step.Action, stepReference: step.StepId,
           details: `${step.Action}: ${String(step.Result ?? "")}${step.TechnicianComment ? `; ${step.TechnicianComment}` : ""} (checksum ${step.ImmutableChecksum})`,
@@ -296,10 +360,11 @@ export async function synchronizePortal(
       });
     } else if (item.MutationType === "SESSION_LOG") {
       const session = sessionSchema.parse(item.Payload);
+      const existingSession = (wr.MobileWorkSessions ?? []).some((entry) => entry.SessionId === session.SessionId);
       replaceRequest(state, {
-        ...wr, TotalTimeMinutes: (wr.TotalTimeMinutes ?? 0) + session.TotalTimeMinutes,
-        MobileWorkSessions: [...(wr.MobileWorkSessions ?? []), session],
-        Activity: [...(wr.Activity ?? []), {
+        ...wr, TotalTimeMinutes: (wr.TotalTimeMinutes ?? 0) + (existingSession ? 0 : session.TotalTimeMinutes),
+        MobileWorkSessions: existingSession ? wr.MobileWorkSessions : [...(wr.MobileWorkSessions ?? []), session],
+        Activity: (wr.Activity ?? []).some((entry) => entry.id === session.SessionId) ? wr.Activity : [...(wr.Activity ?? []), {
           id: session.SessionId, kind: "log", actorId: person, actorName: person, actorRole: "MobileTechnician",
           createdAt: session.StoppedAt,
           text: `Work session: ${session.TotalTimeMinutes} minutes${session.TimerOverrideReason ? `; ${session.TimerOverrideReason}` : ""}`,
@@ -312,7 +377,9 @@ export async function synchronizePortal(
   }
   for (const photo of selectedPhotos) {
     if (applied.has(photo.QueueId)) continue;
-    const wr = state.workRequests.find((entry) => entry.WR_ID === photo.WR_ID);
+    const localRequest = localById.get(photo.WR_ID);
+    const wr = state.workRequests.find((entry) => entry.WR_ID === photo.WR_ID && (!localRequest || entry.SiteId === localRequest.SiteId)) ??
+      (localRequest ? findServerWorkRequest(state, localRequest) : undefined);
     if (!wr) throw new Error(`Cannot synchronize photo ${photo.QueueId}: work request not found.`);
     replaceRequest(state, {
       ...wr,
@@ -331,7 +398,15 @@ export async function synchronizePortal(
   const changed = selected.some((item) => !(response.state?.mobileMutationIds ?? []).includes(item.QueueId)) ||
     selectedPhotos.some((item) => !(response.state?.mobileMutationIds ?? []).includes(item.QueueId));
   state.mobileMutationIds = [...applied];
-  if (changed) await request(site, person, "POST", { revision: response.revision, state }, signal);
+  if (changed) {
+    try { await request(site, person, "POST", { revision: response.revision, state }, signal); }
+    catch (error) {
+      if (error instanceof SyncRequestError && error.status === 409 && conflictRetry < 2) {
+        return synchronizePortal(db, site, person, queued, photos, signal, conflictRetry + 1);
+      }
+      throw error;
+    }
+  }
 
   const syncedAt = new Date().toISOString();
   const tx = db.transaction(["workRequests", "buildings", "floors", "rooms", "equipment", "checklists", "schedules", "syncQueue", "photoQueue", "syncMetadata"], "readwrite");
