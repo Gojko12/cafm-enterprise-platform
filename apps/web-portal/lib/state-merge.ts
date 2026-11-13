@@ -14,13 +14,27 @@ function mergeList(local: unknown, remote: unknown, key: string): Rec[] | undefi
   return [...merged.values()];
 }
 
+function mergeWorkRequests(local: unknown, remote: unknown, dirtyWrIds?: ReadonlySet<string>): Rec[] | undefined {
+  if (!Array.isArray(local) && !Array.isArray(remote)) return undefined;
+  const merged = new Map<string, Rec>();
+  for (const item of (Array.isArray(remote) ? remote : []) as Rec[]) merged.set(String(item.WR_ID), item);
+  for (const item of (Array.isArray(local) ? local : []) as Rec[]) {
+    const id = String(item.WR_ID);
+    const server = merged.get(id);
+    if (!server || dirtyWrIds?.has(id) && recordStamp(item) >= recordStamp(server)) merged.set(id, item);
+  }
+  return [...merged.values()];
+}
+
 // Per-record newest-wins merge so a stale tab or device never reverts newer server work.
-export function mergeRemoteState<T extends object>(local: T, remote: unknown): T {
+export function mergeRemoteState<T extends object>(local: T, remote: unknown, dirtyWrIds?: ReadonlySet<string>): T {
   if (!remote || typeof remote !== "object") return local;
   const source = local as Rec;
   const server = remote as Rec;
   const next: Rec = { ...source };
-  for (const [field, key] of [["workRequests", "WR_ID"], ["auditFindings", "id"], ["auditInspections", "id"], ["suppressedPmOccurrences", "id"], ["blueprintAuditLog", "id"], ["pmCoordination", "id"], ["stakeholderTeams", "id"], ["coordinationRequirements", "id"], ["onboardingRequests", "id"]] as const) {
+  const workRequests = mergeWorkRequests(source.workRequests, server.workRequests, dirtyWrIds);
+  if (workRequests) next.workRequests = workRequests;
+  for (const [field, key] of [["auditFindings", "id"], ["auditInspections", "id"], ["suppressedPmOccurrences", "id"], ["blueprintAuditLog", "id"], ["pmCoordination", "id"], ["stakeholderTeams", "id"], ["coordinationRequirements", "id"], ["onboardingRequests", "id"]] as const) {
     const merged = mergeList(source[field], server[field], key);
     if (merged) next[field] = merged;
   }

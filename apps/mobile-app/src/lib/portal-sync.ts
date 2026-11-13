@@ -135,6 +135,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function nextStamp(server: BaseWorkRequest, local?: BaseWorkRequest): string {
+  return new Date(Math.max(
+    Date.now(),
+    Date.parse(String(server.UpdatedAt ?? "")) || 0,
+    Date.parse(String(server.updatedAt ?? "")) || 0,
+    Date.parse(String(local?.UpdatedAt ?? "")) || 0,
+    Date.parse(String(local?.updatedAt ?? "")) || 0,
+  ) + 1).toISOString();
+}
+
 function mergeChangedValue(field: string, base: unknown, current: unknown, local: unknown): unknown {
   if (Array.isArray(base) && Array.isArray(current) && Array.isArray(local)) {
     return mergeChangedArray(field, base, current, local);
@@ -200,9 +210,9 @@ function mergeLocalWorkRequestChanges(server: BaseWorkRequest, base: BaseWorkReq
       ? mergeChangedArray(key, baseValue, serverValue, localValue)
       : localValue;
   }
+  const timestamp = nextStamp(server, local);
   return workRequestSchema.parse({
-    ...next, WR_ID: server.WR_ID, SiteId: server.SiteId,
-    UpdatedAt: server.UpdatedAt, updatedAt: server.updatedAt,
+    ...next, WR_ID: server.WR_ID, SiteId: server.SiteId, UpdatedAt: timestamp, updatedAt: timestamp,
   });
 }
 
@@ -252,22 +262,48 @@ export async function synchronizePortal(
   const localRequests = await db.getAll("workRequests");
   const localById = new Map(localRequests.map((item) => [item.WR_ID, item]));
   const applied = new Set(state.mobileMutationIds ?? []);
+  const failedMessages = new Map<string, string>();
+  const failedEntries = new Map<string, SyncQueueEntry | OfflinePhotoQueueEntry>();
+  const markFailed = (item: SyncQueueEntry | OfflinePhotoQueueEntry, error: unknown) => {
+    const message = error instanceof Error ? error.message : "Invalid legacy synchronization item.";
+    console.error(`Skipping malformed mobile sync item ${item.QueueId}:`, error);
+    failedEntries.set(item.QueueId, item);
+    failedMessages.set(item.QueueId, message);
+  };
   const selected: SyncQueueEntry[] = [];
   const selectedPhotos: OfflinePhotoQueueEntry[] = [];
   for (const item of queued) {
+    if (!item || typeof item.QueueId !== "string" || !item.QueueId) {
+      console.error("Skipping malformed mobile sync item with no queue ID:", item);
+      continue;
+    }
+    if (!item.Payload || typeof item.Payload !== "object" || Array.isArray(item.Payload)) {
+      markFailed(item, new Error("Queued mutation has an invalid payload."));
+      continue;
+    }
     if (item.MutationType === "AUDIT_FINDING" || item.MutationType === "EQUIPMENT_INSPECTION") {
-      if (item.Payload.siteId === site) selected.push(item);
+      if (typeof item.Payload.siteId !== "string") markFailed(item, new Error("Queued mutation has no site ID."));
+      else if (item.Payload.siteId === site) selected.push(item);
       continue;
     }
     const wrId = item.Payload.WR_ID;
-    if (typeof wrId !== "string") throw new Error(`Queued mutation ${item.QueueId} has no work request ID.`);
+    if (typeof wrId !== "string") { markFailed(item, new Error("Queued mutation has no work request ID.")); continue; }
     const itemSite = item.MutationType === "WR_UPDATE" ? item.Payload.SiteId : localById.get(wrId)?.SiteId;
-    if (!itemSite) throw new Error(`Cannot determine the site of queued mutation ${item.QueueId}.`);
+    if (typeof itemSite !== "string") { markFailed(item, new Error("Cannot determine the site of queued mutation.")); continue; }
     if (itemSite === site) selected.push(item);
   }
   for (const photo of photos) {
+    if (!photo || typeof photo.QueueId !== "string" || !photo.QueueId) {
+      console.error("Skipping malformed mobile photo item with no queue ID:", photo);
+      continue;
+    }
+    if (typeof photo.WR_ID !== "string" || typeof photo.CompressedDataUrl !== "string" ||
+        typeof photo.CreatedAt !== "string" || !Number.isFinite(photo.CompressedSizeKB)) {
+      markFailed(photo, new Error("Queued photo has an invalid payload."));
+      continue;
+    }
     const itemSite = localById.get(photo.WR_ID)?.SiteId;
-    if (!itemSite) throw new Error(`Cannot determine the site of queued photo ${photo.QueueId}.`);
+    if (!itemSite) { markFailed(photo, new Error("Cannot determine the site of queued photo.")); continue; }
     if (itemSite === site) selectedPhotos.push(photo);
   }
 
@@ -275,25 +311,30 @@ export async function synchronizePortal(
     .sort((a, b) => a.CreatedAt.localeCompare(b.CreatedAt) || a.QueueId.localeCompare(b.QueueId));
   for (const item of updates) {
     if (applied.has(item.QueueId)) continue;
-    const parsed = workRequestSchema.safeParse(item.Payload);
-    if (!parsed.success || parsed.data.SiteId !== site) throw new Error(`Invalid queued work request ${item.QueueId}.`);
-    const serverCurrent = findServerWorkRequest(state, parsed.data);
-    const base = item.BaseWorkRequest ?? null;
-    if (serverCurrent && base) {
-      replaceRequest(state, mergeLocalWorkRequestChanges(serverCurrent, base, parsed.data), serverCurrent);
-    } else if (serverCurrent && stable({ ...serverCurrent, UpdatedAt: undefined, updatedAt: undefined }) === stable({ ...parsed.data, UpdatedAt: undefined, updatedAt: undefined })) {
+    try {
+      const parsed = workRequestSchema.safeParse(item.Payload);
+      if (!parsed.success || parsed.data.SiteId !== site) throw new Error("Invalid queued work request.");
+      const serverCurrent = findServerWorkRequest(state, parsed.data);
+      const base = item.BaseWorkRequest ?? null;
+      if (serverCurrent && base) {
+        replaceRequest(state, mergeLocalWorkRequestChanges(serverCurrent, base, parsed.data), serverCurrent);
+      } else if (serverCurrent && stable({ ...serverCurrent, UpdatedAt: undefined, updatedAt: undefined }) === stable({ ...parsed.data, UpdatedAt: undefined, updatedAt: undefined })) {
+        applied.add(item.QueueId);
+        continue;
+      } else if (serverCurrent) {
+        replaceRequest(state, mergeLocalWorkRequestChanges(serverCurrent, serverCurrent, { ...serverCurrent, ...parsed.data }), serverCurrent);
+      } else {
+        replaceRequest(state, parsed.data);
+      }
       applied.add(item.QueueId);
-      continue;
-    } else if (serverCurrent) {
-      throw new Error(`Work request ID ${parsed.data.WR_ID} already exists on the portal with different data; local changes were retained for review.`);
-    } else {
-      replaceRequest(state, parsed.data);
+    } catch (error) {
+      markFailed(item, error);
     }
-    applied.add(item.QueueId);
   }
 
   for (const item of selected.filter((entry) => entry.MutationType === "AUDIT_FINDING")) {
     if (applied.has(item.QueueId)) continue;
+    try {
     const parsed = AuditFindingSchema.safeParse(item.Payload.finding);
     if (!parsed.success || parsed.data.siteId !== site || parsed.data.validationStatus !== "PendingValidation" || parsed.data.assuranceState !== "AwaitingValidation") throw new Error(`Invalid queued audit finding ${item.QueueId}.`);
     const finding = parsed.data;
@@ -314,9 +355,13 @@ export async function synchronizePortal(
     }
     state.auditFindings = [...(state.auditFindings ?? []), finding];
     applied.add(item.QueueId);
+    } catch (error) {
+      markFailed(item, error);
+    }
   }
   for (const item of selected.filter((entry) => entry.MutationType === "EQUIPMENT_INSPECTION")) {
     if (applied.has(item.QueueId)) continue;
+    try {
     const sheet = EquipmentInspectionSheetSchema.parse(item.Payload.sheet);
     if (sheet.siteId !== site) throw new Error("Inspection belongs to another site.");
     const profile = state.userAccessProfiles?.find((p) => p.siteId === site && p.personName === sheet.inspectorName);
@@ -331,9 +376,13 @@ export async function synchronizePortal(
     if (stable(sheet.scoringConfig) !== stable(state.auditAssurance?.kmisConfig ?? defaultKmisConfig)) throw new Error("KMIS settings changed on the portal; the local inspection was retained for review.");
     Object.assign(state, completeEquipmentInspection(state, sheet));
     applied.add(item.QueueId);
+    } catch (error) {
+      markFailed(item, error);
+    }
   }
   for (const item of selected.filter((entry) => entry.MutationType !== "WR_UPDATE" && entry.MutationType !== "WR_ASSIGNMENT" && entry.MutationType !== "AUDIT_FINDING" && entry.MutationType !== "EQUIPMENT_INSPECTION")) {
     if (applied.has(item.QueueId)) continue;
+    try {
     const wrId = item.Payload.WR_ID;
     if (typeof wrId !== "string") throw new Error(`Queued mutation ${item.QueueId} has no work request ID.`);
     const localRequest = localById.get(wrId);
@@ -344,6 +393,7 @@ export async function synchronizePortal(
       const step = stepSchema.parse(item.Payload);
       const previousResult = wr.ChecklistResults?.find((result) => result.stepId === step.StepId);
       const results = [...(wr.ChecklistResults ?? [])].filter((result) => result.stepId !== step.StepId);
+      const timestamp = nextStamp(wr);
       results.push({
         stepId: step.StepId, passed: step.Action !== "FAIL",
         value: typeof step.Result === "boolean" ? String(step.Result) : step.Result ?? "",
@@ -351,7 +401,7 @@ export async function synchronizePortal(
         ...(previousResult?.photoPaths ? { photoPaths: previousResult.photoPaths } : {}),
       });
       replaceRequest(state, {
-        ...wr, ChecklistResults: results,
+        ...wr, UpdatedAt: timestamp, updatedAt: timestamp, ChecklistResults: results,
         ChecklistHistory: (wr.ChecklistHistory ?? []).some((entry) => entry.id === step.AuditId) ? wr.ChecklistHistory : [...(wr.ChecklistHistory ?? []), {
           id: step.AuditId, timestamp: step.Timestamp, performedBy: step.TechnicianId,
           actionType: step.Action, stepReference: step.StepId,
@@ -361,8 +411,10 @@ export async function synchronizePortal(
     } else if (item.MutationType === "SESSION_LOG") {
       const session = sessionSchema.parse(item.Payload);
       const existingSession = (wr.MobileWorkSessions ?? []).some((entry) => entry.SessionId === session.SessionId);
+      const timestamp = nextStamp(wr);
       replaceRequest(state, {
-        ...wr, TotalTimeMinutes: (wr.TotalTimeMinutes ?? 0) + (existingSession ? 0 : session.TotalTimeMinutes),
+        ...wr, UpdatedAt: timestamp, updatedAt: timestamp,
+        TotalTimeMinutes: (wr.TotalTimeMinutes ?? 0) + (existingSession ? 0 : session.TotalTimeMinutes),
         MobileWorkSessions: existingSession ? wr.MobileWorkSessions : [...(wr.MobileWorkSessions ?? []), session],
         Activity: (wr.Activity ?? []).some((entry) => entry.id === session.SessionId) ? wr.Activity : [...(wr.Activity ?? []), {
           id: session.SessionId, kind: "log", actorId: person, actorName: person, actorRole: "MobileTechnician",
@@ -374,15 +426,21 @@ export async function synchronizePortal(
       throw new Error(`Unsupported queued mutation ${item.MutationType}; it remains on this device.`);
     }
     applied.add(item.QueueId);
+    } catch (error) {
+      markFailed(item, error);
+    }
   }
   for (const photo of selectedPhotos) {
     if (applied.has(photo.QueueId)) continue;
+    try {
     const localRequest = localById.get(photo.WR_ID);
     const wr = state.workRequests.find((entry) => entry.WR_ID === photo.WR_ID && (!localRequest || entry.SiteId === localRequest.SiteId)) ??
       (localRequest ? findServerWorkRequest(state, localRequest) : undefined);
     if (!wr) throw new Error(`Cannot synchronize photo ${photo.QueueId}: work request not found.`);
+    const timestamp = nextStamp(wr);
     replaceRequest(state, {
       ...wr,
+      UpdatedAt: timestamp, updatedAt: timestamp,
       Attachments: [...(wr.Attachments ?? []), {
         id: photo.QueueId, name: photo.StepId ? `Step ${photo.StepId} photo` : "Mobile photo",
         type: "image", dataUrl: photo.CompressedDataUrl,
@@ -393,10 +451,13 @@ export async function synchronizePortal(
           : result) : wr.ChecklistResults,
     });
     applied.add(photo.QueueId);
+    } catch (error) {
+      markFailed(photo, error);
+    }
   }
 
-  const changed = selected.some((item) => !(response.state?.mobileMutationIds ?? []).includes(item.QueueId)) ||
-    selectedPhotos.some((item) => !(response.state?.mobileMutationIds ?? []).includes(item.QueueId));
+  const serverMutationIds = new Set(response.state.mobileMutationIds ?? []);
+  const changed = [...applied].some((id) => !serverMutationIds.has(id));
   state.mobileMutationIds = [...applied];
   if (changed) {
     try { await request(site, person, "POST", { revision: response.revision, state }, signal); }
@@ -412,10 +473,14 @@ export async function synchronizePortal(
   const tx = db.transaction(["workRequests", "buildings", "floors", "rooms", "equipment", "checklists", "schedules", "syncQueue", "photoQueue", "syncMetadata"], "readwrite");
   const pendingNow = await tx.objectStore("syncQueue").getAll();
   const pendingPhotosNow = await tx.objectStore("photoQueue").getAll();
-  const confirmed = new Set(selected.map((item) => item.QueueId));
-  const confirmedPhotos = new Set(selectedPhotos.map((item) => item.QueueId));
+  const confirmed = new Set([...selected.map((item) => item.QueueId), ...failedEntries.keys()]);
+  const confirmedPhotos = new Set([...selectedPhotos.map((item) => item.QueueId), ...failedEntries.keys()]);
   const dirtyIds = new Set(pendingNow.filter((item) => item.SyncStatus === "PENDING" && !confirmed.has(item.QueueId))
     .map((item) => item.Payload.WR_ID).filter((id): id is string => typeof id === "string"));
+  for (const item of failedEntries.values()) {
+    const wrId = "Payload" in item ? item.Payload.WR_ID : item.WR_ID;
+    if (typeof wrId === "string") dirtyIds.add(wrId);
+  }
   const requests = tx.objectStore("workRequests");
   const [storedRequests, storedBuildings, storedFloors, storedRooms, storedEquipment, storedSchedules, storedChecklists] = await Promise.all([
     requests.getAll(), tx.objectStore("buildings").getAll(), tx.objectStore("floors").getAll(),
@@ -451,8 +516,14 @@ export async function synchronizePortal(
   for (const item of state.equipment) await tx.objectStore("equipment").put(item);
   for (const item of state.blueprints) await tx.objectStore("checklists").put(item);
   for (const item of state.schedules) await tx.objectStore("schedules").put(item);
-  for (const item of selected) await tx.objectStore("syncQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
-  for (const item of selectedPhotos) await tx.objectStore("photoQueue").put({ ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
+  for (const item of [...selected, ...failedEntries.values()].filter((entry): entry is SyncQueueEntry => "Payload" in entry)) {
+    const message = failedMessages.get(item.QueueId);
+    await tx.objectStore("syncQueue").put(message ? { ...item, SyncStatus: "FAILED", ErrorMessage: message } : { ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
+  }
+  for (const item of [...selectedPhotos, ...failedEntries.values()].filter((entry): entry is OfflinePhotoQueueEntry => !("Payload" in entry))) {
+    const message = failedMessages.get(item.QueueId);
+    await tx.objectStore("photoQueue").put(message ? { ...item, SyncStatus: "FAILED", ErrorMessage: message } : { ...item, SyncStatus: "SYNCED", SyncedAt: syncedAt });
+  }
   await tx.objectStore("syncMetadata").put({ key: "lastSyncTime", value: syncedAt, updatedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: `siteContext:${site}`, value: JSON.stringify({ craftspeople: state.craftspeople ?? [], userAccessProfiles: state.userAccessProfiles ?? [], locationFreezes: state.locationFreezes ?? [],   suppressedPmOccurrences: state.suppressedPmOccurrences ?? [], stakeholderTeams: state.stakeholderTeams ?? [], coordinationRequirements: state.coordinationRequirements ?? [], pmCoordination: state.pmCoordination ?? [] }), updatedAt: syncedAt });
   await tx.objectStore("syncMetadata").put({ key: `auditContext:${site}`, value: JSON.stringify({ auditCampaigns: state.auditCampaigns ?? [], auditFindings: state.auditFindings ?? [], auditInspections: state.auditInspections ?? [], auditSettings: state.auditSettings, auditTemplates: state.auditTemplates ?? [], auditAssurance: state.auditAssurance }), updatedAt: syncedAt });
@@ -460,5 +531,9 @@ export async function synchronizePortal(
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cafm-audit-sync", { detail: site }));
   const pending = pendingNow.filter((item) => item.SyncStatus === "PENDING" && !confirmed.has(item.QueueId)).length +
     pendingPhotosNow.filter((item) => item.SyncStatus === "PENDING" && !confirmedPhotos.has(item.QueueId)).length;
-  return { synced: selected.length + selectedPhotos.length, pending, lastSyncTime: syncedAt };
+  return {
+    synced: selected.filter((item) => applied.has(item.QueueId)).length +
+      selectedPhotos.filter((item) => applied.has(item.QueueId)).length,
+    failed: failedEntries.size, pending, lastSyncTime: syncedAt,
+  };
 }

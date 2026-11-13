@@ -64,7 +64,9 @@ export async function compressPhoto(
 export class OfflineEngine {
   private isOnline: boolean = navigator.onLine;
   private syncInProgress: boolean = false;
+  private pendingResync: boolean = false;
   private syncFinished: Promise<void> | null = null;
+  private lastSyncStatus: SyncStatus | null = null;
   private site: SiteId = "02-ESOC";
   private person = "TECH-001";
   private simulatedOffline = false;
@@ -367,7 +369,12 @@ export class OfflineEngine {
    */
   async syncNow(workRequestId?: string): Promise<SyncStatus> {
     if (this.syncInProgress) {
-      throw new Error("Synchronization is already in progress.");
+      this.pendingResync = true;
+      const currentSync = this.syncFinished;
+      if (currentSync) await currentSync;
+      if (this.syncInProgress && this.syncFinished) await this.syncFinished;
+      if (this.pendingResync && !this.syncInProgress) return this.syncNow(workRequestId);
+      return this.lastSyncStatus ?? { synced: 0, failed: 0, pending: 0, lastSyncTime: null };
     }
 
     this.syncInProgress = true;
@@ -392,6 +399,7 @@ export class OfflineEngine {
       }
       const result = await synchronizePortal(db, this.site, this.person, syncItems, photoItems, controller.signal);
       status.synced = result.synced;
+      status.failed = result.failed;
       if (workRequestId) {
         const [remainingItems, remainingPhotos] = await Promise.all([
           db.getAllFromIndex("syncQueue", "by-status", "PENDING"),
@@ -401,18 +409,21 @@ export class OfflineEngine {
           remainingPhotos.filter((item) => item.WR_ID === workRequestId).length;
       } else status.pending = result.pending;
       status.lastSyncTime = result.lastSyncTime;
+      this.lastSyncStatus = { ...status };
       this.syncStatusListeners.forEach((listener) => listener(status));
       return status;
     } finally {
+      const rerun = this.pendingResync;
+      this.pendingResync = false;
       this.syncInProgress = false;
       this.syncAbort = null;
       this.syncFinished = null;
       finishSync();
+      if (rerun) void this.syncNow().catch((error: unknown) => console.error("Trailing background sync failed:", error));
     }
   }
 
   async syncAfterChanges(workRequestId?: string): Promise<SyncStatus> {
-    while (this.syncFinished) await this.syncFinished;
     return this.syncNow(workRequestId);
   }
 

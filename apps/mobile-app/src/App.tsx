@@ -4,6 +4,7 @@ import { logChecklistCorrections, checklistAnswerFingerprint } from "@cafm/share
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { initOfflineEngine, OfflineEngine } from "./lib/offline-engine";
 import { getDB } from "./lib/db";
+import { persistActiveTimers, restoreActiveTimers } from "./lib/timer-state";
 import {
   MobileDrawer,
   MenuButton,
@@ -123,6 +124,7 @@ export default function App() {
   const checklistNavigation = useRef<((destination: () => void) => void) | null>(null);
   const hubNavigation = useRef<(() => boolean) | null>(null);
   const savingWR = useRef(false);
+  const checklistSyncTimer = useRef<number | null>(null);
   const activeSelection = useRef({ activeSiteId, currentTechnicianId });
   activeSelection.current = { activeSiteId, currentTechnicianId };
 
@@ -216,7 +218,12 @@ export default function App() {
     ]);
     if (activeSelection.current.activeSiteId !== activeSiteId ||
         activeSelection.current.currentTechnicianId !== currentTechnicianId) return;
-    const siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
+    let siteRequests = storedRequests.filter((item) => item.SiteId === activeSiteId);
+    try { siteRequests = restoreActiveTimers(activeSiteId, siteRequests); }
+    catch (error) {
+      console.error("Could not restore active timer state:", error);
+      setTimerStorageError(error instanceof Error ? error.message : "Could not restore active timer state.");
+    }
     const siteContext = context ? siteContextSchema.parse(JSON.parse(context.value)) : { craftspeople: [], locationFreezes: [], userAccessProfiles: [], stakeholderTeams: [], coordinationRequirements: [], pmCoordination: [] };
     setCoordination({ teams: siteContext.stakeholderTeams.filter((item) => item.siteId === activeSiteId), requirements: siteContext.coordinationRequirements.filter((item) => item.siteId === activeSiteId), records: siteContext.pmCoordination.filter((item) => item.siteId === activeSiteId), schedules: storedSchedules.filter((item) => item.SiteId === activeSiteId) });
     const people = siteContext.craftspeople.filter((item) => item.SiteId === activeSiteId);
@@ -289,11 +296,7 @@ export default function App() {
 
   useEffect(() => {
     if (loadedSite !== activeSiteId) return;
-    const activeTimers: Record<string, { wrId: string; craftpersonId: string; craftpersonName: string; startedAt: string }> = {};
-    for (const wr of siteWRs) for (const session of wr.timeSessions ?? []) {
-      if (!session.endedAt) activeTimers[JSON.stringify([activeSiteId, wr.WR_ID, session.craftpersonId, session.id])] = { wrId: wr.WR_ID, craftpersonId: session.craftpersonId, craftpersonName: session.craftpersonName, startedAt: session.startedAt };
-    }
-    try { localStorage.setItem(`cafm-active-timers:${activeSiteId}`, JSON.stringify(activeTimers)); setTimerStorageError(""); }
+    try { persistActiveTimers(activeSiteId, siteWRs); setTimerStorageError(""); }
     catch { setTimerStorageError("Could not save the timer index to local storage. Timers remain in offline work request storage."); }
   }, [siteWRs, activeSiteId, loadedSite]);
 
@@ -498,6 +501,19 @@ export default function App() {
     setSiteWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
     setMyWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
     setUnassignedWRs((items) => items.map((item) => item.WR_ID === updated.WR_ID ? updated : item));
+    if (answersChanged) {
+      if (checklistSyncTimer.current !== null) window.clearTimeout(checklistSyncTimer.current);
+      checklistSyncTimer.current = window.setTimeout(() => {
+        checklistSyncTimer.current = null;
+        void engine.syncAfterChanges(updated.WR_ID).then(async (status) => {
+          if (status.failed) notify(`${status.failed} synchronization item(s) need attention.`);
+          await refreshData();
+        }).catch((error: unknown) => {
+          console.error("Checklist progress sync failed:", error);
+          notify(`Checklist progress is saved on this device but has not synchronized: ${error instanceof Error ? error.message : "Retry Sync Now."}`);
+        });
+      }, 300);
+    }
     } finally { savingWR.current = false; }
   };
   const createFollowUp = async () => {
@@ -604,7 +620,9 @@ export default function App() {
           const now = new Date().toISOString();
           const changed = results.filter((result) => checklistAnswerFingerprint(result) !== checklistAnswerFingerprint(baseline.find((item) => item.stepId === result.stepId)));
           for (const result of changed) {
-            if (checklistAnswerFingerprint(current.ChecklistResults?.find((item) => item.stepId === result.stepId)) !== checklistAnswerFingerprint(baseline.find((item) => item.stepId === result.stepId))) throw new Error(`Step ${result.stepId} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
+            const currentFingerprint = checklistAnswerFingerprint(current.ChecklistResults?.find((item) => item.stepId === result.stepId));
+            const baseFingerprint = checklistAnswerFingerprint(baseline.find((item) => item.stepId === result.stepId));
+            if (currentFingerprint !== baseFingerprint && currentFingerprint !== checklistAnswerFingerprint(result)) throw new Error(`Step ${result.stepId} changed elsewhere. Your edits have not been saved; resolve the conflict before leaving.`);
           }
           return { ...current, ChecklistResults: [...(current.ChecklistResults ?? []).filter((item) => !changed.some((result) => result.stepId === item.stepId)), ...changed], ChecklistHistory: [...(current.ChecklistHistory ?? []), ...changed.map((result) => ({ id: crypto.randomUUID(), timestamp: now, performedBy: technicianName, actionType: "Mobile checklist updated", stepReference: result.stepId, details: `Answer: ${String(result.value)}; ${result.passed ? "favourable" : "unfavourable"}${result.comment ? `; ${result.comment}` : ""}` }))], StepAuditLogs: [...(current.StepAuditLogs ?? []), ...changed.flatMap((result) => { const instance = current.ChecklistInstances?.find((item) => item.StepId === result.stepId); return instance ? [{ AuditLogId: crypto.randomUUID(), StepInstanceId: instance.StepInstanceId, WR_ID: current.WR_ID, ActorId: currentTechnicianId, Action: "modified" as const, PreviousValue: baseline.find((item) => item.stepId === result.stepId)?.value, NewValue: result.value, OccurredAt: now }] : []; })] };
         }, "Checklist progress saved.")} />;

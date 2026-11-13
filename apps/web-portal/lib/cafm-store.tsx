@@ -10,7 +10,7 @@ import { seedAccessProfiles, resolveEffectivePermissions } from "./access-profil
 import { ahuTemplate } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 import { migratePmState } from "./pm-orders";
-import { mergeRemoteState, stampChangedWorkRequests } from "./state-merge";
+import { mergeRemoteState, recordStamp, stampChangedWorkRequests } from "./state-merge";
 import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
@@ -21,6 +21,19 @@ const STORAGE_KEY = "cafm-demo-data-v24";
 const LEGACY_STORAGE_KEYS = ["cafm-demo-data-v23", "cafm-demo-data-v22", "cafm-demo-data-v21", "cafm-demo-data-v20", "cafm-demo-data-v19", "cafm-demo-data-v16", "cafm-demo-data-v15", "cafm-demo-data-v14", "cafm-demo-data-v13", "cafm-demo-data-v12", "cafm-demo-data-v11", "cafm-demo-data-v10", "cafm-demo-data-v9", "cafm-demo-data-v8", "cafm-demo-data-v7", "cafm-demo-data-v6", "cafm-demo-data-v5", "cafm-demo-data-v4", "cafm-demo-data-v3", "cafm-demo-data-v2", "cafm-demo-data-v1"];
 const PENDING_KEY = "cafm-demo-pending-v1";
 const BASE_KEY = "cafm-demo-base-v1";
+function normalizeServerState(state: DemoData, site: SiteId): DemoData {
+  const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, ...state,
+    roleDefinitions: "roleDefinitions" in state ? state.roleDefinitions : undefined,
+    userAccessProfiles: "userAccessProfiles" in state ? state.userAccessProfiles : undefined } as DemoData;
+  return ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site));
+}
+function trackNewerLocalWorkRequests(local: DemoData, remote: DemoData | null, dirtyIds: Set<string>) {
+  const serverById = new Map((remote?.workRequests ?? []).map((wr) => [wr.WR_ID, wr]));
+  for (const wr of local.workRequests) {
+    const server = serverById.get(wr.WR_ID);
+    if (!server || recordStamp(wr) > recordStamp(server)) dirtyIds.add(wr.WR_ID);
+  }
+}
 function safeStorageSet(key: string, value: string): boolean {
   const storage = window.localStorage;
   for (let index = storage.length - 1; index >= 0; index--) {
@@ -91,6 +104,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const initialized = useRef(false);
   const offlineEdits = useRef(false);
   const knownRevision = useRef(false);
+  const dirtyWrIdsRef = useRef(new Set<string>());
   current.current = data;
 
   useEffect(() => {
@@ -145,6 +159,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       }
       try {
         const remote = await stateRequest(site, personRef.current, "GET");
+        if (remote.state !== null && (!remote.state || typeof remote.state !== "object" ||
+            !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests))) {
+          throw new Error("Invalid server state.");
+        }
         const pendingText = localStorage.getItem(pendingKey);
         const pending: unknown = pendingText ? JSON.parse(pendingText) : null;
         if (pending !== null && (!pending || typeof pending !== "object" || !("revision" in pending) ||
@@ -155,19 +173,20 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         knownRevision.current = true;
         if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
           // Keep local edits but merge newer server records; the next sync pushes the merged result.
-          initial = migrateWorkRequestIdsTo10Digits(mergeRemoteState(initial, remote.state));
-          acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
+          const normalizedRemote = remote.state ? normalizeServerState(remote.state as DemoData, site) : null;
+          trackNewerLocalWorkRequests(initial, normalizedRemote, dirtyWrIdsRef.current);
+          initial = ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(initial, normalizedRemote, dirtyWrIdsRef.current)), site));
+          acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
         } else if (pending && typeof pending === "object" && "revision" in pending && pending.revision === remote.revision) {
-          acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
+          const normalizedRemote = remote.state ? normalizeServerState(remote.state as DemoData, site) : null;
+          trackNewerLocalWorkRequests(initial, normalizedRemote, dirtyWrIdsRef.current);
+          acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
         } else if (remote.state !== null) {
           if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
             throw new Error("Invalid server state.");
           }
-          const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
-            roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
-            userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
-          initial = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site);
-          acknowledged.current = JSON.stringify(remote.state);
+          initial = normalizeServerState(remote.state as DemoData, site);
+          acknowledged.current = JSON.stringify(initial);
         }
         connected.current = true;
         if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
@@ -175,6 +194,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         setSyncError(error instanceof Error ? error.message : "Could not load server state.");
       }
       if (!active) return;
+      initial = ensureFjSurveys(initial);
       current.current = initial;
       setData(initial);
       initialized.current = true;
@@ -228,6 +248,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       try {
         if (!connected.current) {
           const remote = await stateRequest(site, personRef.current, "GET");
+          if (remote.state !== null && (!remote.state || typeof remote.state !== "object" ||
+              !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests))) {
+            throw new Error("Invalid server state.");
+          }
           const pendingText = localStorage.getItem(pendingKey);
           let pending: unknown = null;
           try { pending = pendingText ? JSON.parse(pendingText) : null; } catch { pending = null; }
@@ -236,34 +260,30 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             localStorage.removeItem(pendingKey);
             pending = null;
           }
+          const normalizedRemote = remote.state ? normalizeServerState(remote.state as DemoData, site) : null;
+          if (pending || offlineEdits.current) trackNewerLocalWorkRequests(current.current, normalizedRemote, dirtyWrIdsRef.current);
           const diverged = (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) ||
             (offlineEdits.current && (!knownRevision.current || revision.current !== remote.revision));
-          if (diverged && remote.state && typeof remote.state === "object") {
+          if (diverged && normalizedRemote) {
             // Auto-heal: keep local edits, merge newer server records, and let the next push publish the result.
-            const merged = migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, remote.state));
+            const merged = ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, normalizedRemote, dirtyWrIdsRef.current)), site));
             current.current = merged;
             if (active) setData(merged);
           }
           revision.current = remote.revision;
           knownRevision.current = true;
           if (pending || offlineEdits.current) {
-            acknowledged.current = remote.state ? JSON.stringify(remote.state) : "";
-          } else if (remote.state !== null) {
-            if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
-              throw new Error("Invalid server state.");
-            }
-            const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...remote.state,
-              roleDefinitions: "roleDefinitions" in remote.state ? remote.state.roleDefinitions : undefined,
-              userAccessProfiles: "userAccessProfiles" in remote.state ? remote.state.userAccessProfiles : undefined } as DemoData;
-            const next = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site);
-            acknowledged.current = JSON.stringify(remote.state);
+            acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
+          } else if (normalizedRemote) {
+            const next = normalizedRemote;
+            acknowledged.current = JSON.stringify(next);
             current.current = next;
             if (active) setData(next);
           }
           connected.current = true;
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
         }
-        const snapshot = migrateWorkRequestIdsTo10Digits(reconcileAssurance(current.current));
+        const snapshot = ensureFjSurveys(migrateWorkRequestIdsTo10Digits(reconcileAssurance(current.current)));
         if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
         let outgoing = snapshot;
         let serialized = JSON.stringify(outgoing);
@@ -271,7 +291,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           // Merge newer server records before pushing so stale local copies never overwrite them.
           const latest = await stateRequest(site, personRef.current, "GET");
           if (latest.state && latest.revision !== revision.current) {
-            outgoing = mergeRemoteState(snapshot, latest.state);
+            outgoing = ensureFjSurveys(migrateWorkRequestIdsTo10Digits(mergeRemoteState(snapshot, latest.state, dirtyWrIdsRef.current)));
             serialized = JSON.stringify(outgoing);
             revision.current = latest.revision;
             if (JSON.stringify(current.current) === JSON.stringify(snapshot)) { current.current = outgoing; if (active) setData(outgoing); }
@@ -280,21 +300,32 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           serialized = JSON.stringify(outgoing);
           const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: outgoing });
           revision.current = result.revision;
-          acknowledged.current = serialized;
+          if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) {
+            throw new Error("Server returned an invalid saved state.");
+          }
+          const savedState = normalizeServerState(result.state as DemoData, site);
+          acknowledged.current = JSON.stringify(savedState);
           offlineEdits.current = false;
+          const unchangedDuringSync = JSON.stringify(current.current) === serialized;
+          const next = unchangedDuringSync ? savedState :
+            ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, savedState, dirtyWrIdsRef.current)), site));
+          current.current = next;
+          if (active) setData(next);
+          const savedById = new Map(savedState.workRequests.map((wr) => [wr.WR_ID, wr]));
+          const currentById = new Map(next.workRequests.map((wr) => [wr.WR_ID, wr]));
+          for (const id of dirtyWrIdsRef.current) {
+            if (JSON.stringify(currentById.get(id) ?? null) === JSON.stringify(savedById.get(id) ?? null)) dirtyWrIdsRef.current.delete(id);
+          }
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
-          if (JSON.stringify(current.current) === serialized) localStorage.removeItem(pendingKey);
+          if (JSON.stringify(next) === acknowledged.current) localStorage.removeItem(pendingKey);
           else safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
         } else {
           const result = await stateRequest(site, personRef.current, "GET");
           if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
-            const remoteData = { ...seedData(), suppressedPmOccurrences: [], auditCampaigns: [], auditFindings: [], auditInspections: [], auditTemplates: [], auditAssurance: { checkpointTemplates: [ahuTemplate], equipmentInspections: [] }, craftpersonAbsences: [], locationFreezes: [], ...result.state,
-              roleDefinitions: "roleDefinitions" in result.state ? result.state.roleDefinitions : undefined,
-              userAccessProfiles: "userAccessProfiles" in result.state ? result.state.userAccessProfiles : undefined } as DemoData;
-            const next = scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site);
+            const next = normalizeServerState(result.state as DemoData, site);
             revision.current = result.revision;
-            acknowledged.current = JSON.stringify(result.state);
+            acknowledged.current = JSON.stringify(next);
             safeStorageSet(baseKey, JSON.stringify({ revision: revision.current, snapshot: acknowledged.current }));
             current.current = next;
             if (active) setData(next);
@@ -312,7 +343,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     }
     void sync();
     const run = () => { if (document.visibilityState === "visible") void sync(); };
-    const interval = window.setInterval(run, 5000);
+    const interval = window.setInterval(run, 2500);
     window.addEventListener("focus", run);
     document.addEventListener("visibilitychange", run);
     return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", run); document.removeEventListener("visibilitychange", run); };
@@ -340,7 +371,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       committed = true;
       revision.current = result.revision;
       if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Server returned an invalid saved state.");
-      const savedState = scopeData(withAccessProfileDefaults(result.state as DemoData, site), site);
+      const savedState = normalizeServerState(result.state as DemoData, site);
       acknowledged.current = JSON.stringify(savedState);
       if (JSON.stringify(current.current) !== (optimistic ? after : before)) {
         blocked.current = true;
@@ -348,6 +379,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       }
       current.current = savedState;
       setData(savedState);
+      dirtyWrIdsRef.current.clear();
       let cacheError: string | null = null;
       try {
         safeStorageSet(storageKey, acknowledged.current);
@@ -396,6 +428,13 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         return old && old !== wr ? logChecklistCorrections(old, wr, personRef.current, now) : wr;
       }) };
       const workRequests = stampChangedWorkRequests(previous.workRequests, next.workRequests);
+      const previousById = new Map(previous.workRequests.map((wr) => [wr.WR_ID, wr]));
+      for (const wr of next.workRequests) {
+        const old = previousById.get(wr.WR_ID);
+        if (!old || JSON.stringify(old) !== JSON.stringify(wr)) dirtyWrIdsRef.current.add(wr.WR_ID);
+      }
+      const nextIds = new Set(next.workRequests.map((wr) => wr.WR_ID));
+      for (const wr of previous.workRequests) if (!nextIds.has(wr.WR_ID)) dirtyWrIdsRef.current.add(wr.WR_ID);
       return workRequests === next.workRequests ? next : { ...next, workRequests };
     });
   };
