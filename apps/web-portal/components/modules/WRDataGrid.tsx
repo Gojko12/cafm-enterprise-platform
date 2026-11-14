@@ -56,7 +56,7 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
       case "percentage": return `${wr.Percentage}%`;
       case "signals": return [
         isPmEligibleForExecutionSignals(wr) && getChecklistProgress(wr, data).incomplete.length ? `${getChecklistProgress(wr, data).incomplete.length} incomplete checklist steps` : "",
-        getUnfavourableStepCount(wr, data) ? `${getUnfavourableStepCount(wr, data)} Unfavourable` : "",
+        (wr.WR_Type !== "PM" || isPmEligibleForExecutionSignals(wr)) && getUnfavourableStepCount(wr, data) ? `${getUnfavourableStepCount(wr, data)} Unfavourable` : "",
         isPmEligibleForExecutionSignals(wr) && getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length ? `${getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length} Follow-Up FJ` : "",
         getParentPM(wr, data.workRequests) ? `Follow-up of PM #${getParentPM(wr, data.workRequests)!.WR_ID}` : "",
       ].filter(Boolean).join(" · ");

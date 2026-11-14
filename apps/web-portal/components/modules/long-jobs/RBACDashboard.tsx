@@ -30,6 +30,7 @@ import { StakeholderCatalogSection } from "@/components/modules/StakeholderCatal
 import { CLASSICAL_TRADES, PLATFORM_SITE_IDS } from "@cafm/shared-schema";
 import type { CifmPerson } from "@cafm/shared-schema";
 import { CifmDirectoryTab, FmAccessModal, FmStaffTable, SiteAdminCards } from "./PeopleDirectory";
+import { EditLoginAccountModal } from "./EditLoginAccountModal";
 import { TradeManagerAssignments } from "@/components/modules/TradeManagerAssignments";
 import { OnboardingQueue, OnboardPersonModal } from "./OnboardingQueue";
 import { pendingOnboardingCount } from "@/lib/onboarding";
@@ -102,6 +103,7 @@ export function RBACDashboard() {
   const users = data.users;
   const { profile } = useActiveUserPermissions();
   const canEditMatrices = !!(profile?.isSuperAdmin || profile?.isSiteAdmin);
+  const isSuperAdminEditor = !!profile?.isSuperAdmin;
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<UserAccess | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
@@ -173,10 +175,14 @@ export function RBACDashboard() {
           item.siteId === activeSiteId && item.personName === personName ? { ...item, isSiteAdmin: value } : item) }))}
         onAddUser={handleAddUser}
         onDeleteUser={handleDeleteUser}
+        onEditUser={setEditingUser}
         expandedUser={expandedUser}
         setExpandedUser={setExpandedUser}
       />
       </details>
+      {editingUser && <EditLoginAccountModal user={editingUser} isSuperAdminEditor={isSuperAdminEditor}
+        profile={data.userAccessProfiles.find((item) => item.siteId === activeSiteId && (item.personName === editingUser.DisplayName || item.fullName === editingUser.DisplayName || item.username === editingUser.UserId))}
+        onClose={() => setEditingUser(null)} />}
       </>}
       </>}
 
@@ -246,6 +252,7 @@ function UserAccessMonitor({
   onToggleSiteAdmin,
   onAddUser,
   onDeleteUser,
+  onEditUser,
   expandedUser,
   setExpandedUser,
 }: {
@@ -256,6 +263,7 @@ function UserAccessMonitor({
   onToggleSiteAdmin: (personName: string, value: boolean) => void;
   onAddUser: (user: UserAccess) => void;
   onDeleteUser: (userId: string) => void;
+  onEditUser: (user: UserAccess) => void;
   expandedUser: string | null;
   setExpandedUser: (userId: string | null) => void;
 }) {
@@ -420,7 +428,14 @@ function UserAccessMonitor({
                           <ChevronDown size={18} />
                         )}
                       </button>
-                      <button className="p-1 hover:bg-gray-200 rounded text-blue-600">
+                      <button
+                        type="button"
+                        aria-label={`Edit user ${user.DisplayName}`}
+                        disabled={!canEdit}
+                        title={canEdit ? "Edit role, main/deputy roles and site access" : "Switch to Mark Meyer (SuperAdmin) or a Site Administrator to edit roles"}
+                        onClick={() => onEditUser(user)}
+                        className="p-1 hover:bg-gray-200 rounded text-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
                         <Edit2 size={18} />
                       </button>
                       <button

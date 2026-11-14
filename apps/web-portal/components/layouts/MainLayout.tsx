@@ -24,9 +24,9 @@ const NAV_ITEMS = [
     { href: "/desk-reservations", label: "Desk Reservations", icon: Settings },
   ]},
   { section: "Operations", items: [
-    { href: "/work-requests#PM", label: "Preventive Maintenance", icon: Wrench },
-    { href: "/work-requests#FJ", label: "Fast Jobs", icon: Wrench },
-    { href: "/work-requests#LJ", label: "Long Jobs", icon: Wrench },
+    { href: "/preventive-maintenance", label: "Preventive Maintenance", icon: Wrench },
+    { href: "/fast-jobs", label: "Fast Jobs", icon: Wrench },
+    { href: "/long-jobs", label: "Long Jobs", icon: Wrench },
     { href: "/smart-pm", label: "SmartPM", icon: Zap },
     { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
     { href: "/audit-assurance", label: "Audit & Assurance", icon: Clipboard },
@@ -44,13 +44,6 @@ const SITE_IDS: SiteId[] = [...PLATFORM_SITE_IDS];
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [hash, setHash] = React.useState("");
-  React.useEffect(() => {
-    const update = () => setHash(window.location.hash || "#PM");
-    update();
-    window.addEventListener("hashchange", update);
-    return () => window.removeEventListener("hashchange", update);
-  }, [pathname]);
 
   return (
     <aside className="w-64 bg-gray-900 text-white h-screen overflow-y-auto border-r border-gray-800">
@@ -83,21 +76,12 @@ export function Sidebar() {
                 </p>
                 <div className="space-y-1">
                   {item.items.map(({ href, label, icon: Icon }) => {
-                    const target = href.includes("#") ? href.slice(href.indexOf("#") + 1) : "";
-                    const route = target === "PM" ? "/preventive-maintenance" : target === "FJ" ? "/fast-jobs" : target === "LJ" ? "/long-jobs" : "";
-                    const isActive = target ? pathname === route || (pathname === "/work-requests" && hash === `#${target}`) : pathname === href || pathname.startsWith(href + "/");
-                    if (href.includes("#")) {
-                      return (
-                        <Link key={href} href={href} aria-current={isActive ? "page" : undefined} className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}>
-                          <Icon size={18} />
-                          <span className="font-medium">{label}</span>
-                        </Link>
-                      );
-                    }
+                    const isActive = pathname === href || pathname.startsWith(href + "/");
                     return (
                       <Link
                         key={href}
                         href={href}
+                        aria-current={isActive ? "page" : undefined}
                         className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${
                           isActive
                             ? "bg-blue-600 text-white"
@@ -132,8 +116,11 @@ export function TopBar() {
   const { setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
   const { activeSiteId, setActiveSiteId, activePerson, setActivePerson } = useSiteContext();
   const { data: storeData, reset } = useCafmStore();
-  const { governance } = useActiveUserPermissions();
+  const { governance, profile } = useActiveUserPermissions();
   const getSiteName = (siteId: SiteId): string => SITE_LABELS[siteId];
+  // Strict 2-SuperAdmin multi-site rule: everyone else is locked to their single assigned site.
+  const multiSite = !profile || !!profile.isSuperAdmin;
+  const visibleSites: SiteId[] = multiSite ? SITE_IDS : [profile.siteAccess?.[0] ?? profile.siteId];
   const activeAssignments: SiteRoleAssignment[] = storeData.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === activeSiteId && assignment.PersonName === activePerson);
   const people = [...new Set(["Mark", "Yvonne", "Claudia", "Bastian", "Thomas", "Draftsman", "Inventory Admin", "TeamLeader", ...storeData.siteRoleAssignments.map((item) => item.PersonName), ...storeData.userAccessProfiles.map((item) => item.personName), "SiteAdmin"])];
@@ -159,6 +146,8 @@ export function TopBar() {
           <Globe size={18} className="text-gray-600" />
           <select
             value={activeSiteId}
+            disabled={!multiSite}
+            title={multiSite ? undefined : "Single-site access · SuperAdmin required for multi-site"}
             onChange={(e) => {
               setSelectedBuilding(null);
               setSelectedFloor(null);
@@ -167,12 +156,13 @@ export function TopBar() {
             }}
             className="px-3 py-2 rounded border border-gray-300 text-sm font-medium bg-gray-50 hover:bg-gray-100 disabled:opacity-50 cursor-pointer"
           >
-            {SITE_IDS.map((site) => (
+            {(visibleSites.includes(activeSiteId) ? visibleSites : [...visibleSites, activeSiteId]).map((site) => (
               <option key={site} value={site}>
                 {getSiteName(site)} ({site})
               </option>
             ))}
           </select>
+          {!multiSite && <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600" title="Only Mark Meyer and Gregor Kovac (SuperAdmins) may view all five ESA sites.">Single-site access · SuperAdmin required for multi-site</span>}
         </div>
         <button disabled={!governance("canResetOrExportSiteData")} onClick={() => { if (governance("canResetOrExportSiteData")) reset(); }} className="px-3 py-2 border rounded text-sm disabled:opacity-40">Reset Demo Data</button>
       </div>

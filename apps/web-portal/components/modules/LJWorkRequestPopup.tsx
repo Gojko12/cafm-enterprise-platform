@@ -443,6 +443,15 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
               onClick={() => stage(percent, percent === 31 ? "On Hold for Budget" : `${track} stage ${percent}%`, { ProcessTrack: track }, ["ESA_TO", "ESA_TM", "ESA_LJM", "ESA_CCM", "TRADE_TM", "TRADE_CM"])}
               className="rounded bg-indigo-700 px-3 py-2 text-sm text-white disabled:opacity-40">{percent}% {percent === 31 ? "On Hold for Budget" : ""}</button>)}
             {track === "RFQ" && <button disabled={workRequest.Percentage !== 28} onClick={() => stage(30, "Converted RFQ to RFW", { ProcessTrack: "RFW" }, ["ESA_TO", "ESA_TM", "ESA_LJM"])} className="rounded bg-green-700 px-3 py-2 text-sm text-white disabled:opacity-40">Convert RFQ to RFW (30%)</button>}
+            {workRequest.Percentage === 29 && <button type="button" disabled={!permissions?.canReopenCancelledWR}
+              title={permissions?.canReopenCancelledWR ? "Restore this rejected Long Job back to 10% Requested." : "Your role does not include the Reopen Cancelled WR permission."}
+              onClick={() => {
+                if (!permissions?.canReopenCancelledWR) return;
+                update((wr) => ({ ...wr, Percentage: 10, WorkRequestStatus: "Requested",
+                  WorkRequestSubstatus: wr.ProcessTrack === "RFW" ? "New Request for Work" : "New Request for Quotation", IsFrozen: false }),
+                `Rejected LJ restored from 29% to 10% Requested by ${actorName}`);
+              }}
+              className="rounded border border-blue-600 bg-white px-3 py-2 text-sm font-semibold text-blue-800 disabled:opacity-40">↺ Restore to 10% Requested</button>}
           </div>
           <div className="flex items-center justify-between"><h4 className="font-medium">Quotation line items</h4><button type="button" onClick={() => update((wr) => ({ ...wr, QuotationLines: [...(wr.QuotationLines ?? []), { id: crypto.randomUUID(), description: "", quantity: 1, unitCostEur: 0 }] }), `Quotation line added by ${actorName}`)} className="rounded border px-3 py-1 text-sm">+ Add line</button></div>
           <div className="space-y-2">{(workRequest.QuotationLines ?? []).map((line) => <div key={line.id} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">

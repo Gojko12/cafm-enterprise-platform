@@ -5,6 +5,7 @@ import { pmTargetType } from "@cafm/shared-schema";
 import type { PM_ChecklistStandard, PM_Schedule, PMTargetType } from "@cafm/shared-schema";
 import type { PMPlanTarget } from "@/lib/pm-plan-targets";
 import { sharedFamilyAnchor } from "@/lib/pm-orders";
+import { isInstallationTarget } from "./PmTargetPlans";
 import { FrequencyPill } from "@/components/common/PmFrequency";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 
@@ -20,12 +21,21 @@ export function PmAssignmentModal({ initial, blueprints, targets, schedules, bus
   const [kind, setKind] = useState("All"), [trade, setTrade] = useState(""), [frequency, setFrequency] = useState("");
   const [type, setType] = useState<PMTargetType>(() => pmTargetType(targets.find((target) => initial.targetIds.includes(target.id)) ?? { targetType: "equipment" }));
   const [building, setBuilding] = useState(""), [floor, setFloor] = useState("");
+  const [showSubEquipment, setShowSubEquipment] = useState(false);
   const matching = (value: string, search: string) => value.toLowerCase().includes(search.trim().toLowerCase());
   const visible = blueprints.filter((bp) => (kind === "All" || (kind === "Families" ? bp.blueprintMode === "family_ladder" : bp.blueprintMode === "standalone")) &&
     (!trade || bp.TradeId === trade) && (!frequency || bp.frequencyCode === frequency) && matching(`${bp.ChecklistCode} ${bp.Title} ${bp.familyId} ${bp.familyName} ${bp.TradeName}`, query));
   const groups = [...new Set(visible.map((bp) => bp.blueprintMode === "family_ladder" ? bp.familyId! : `standalone:${bp.ChecklistCode}`))];
-  const filteredTargets = targets.filter((target) => pmTargetType(target) === type && (!building || target.bl_id === building) && (!floor || target.LevelName === floor) && matching(`${target.label} ${target.bl_id} ${target.LevelName} ${target.RoomCode}`, targetQuery));
+  const matchingTargets = targets.filter((target) => pmTargetType(target) === type && (!building || target.bl_id === building) && (!floor || target.LevelName === floor) && matching(`${target.label} ${target.bl_id} ${target.LevelName} ${target.RoomCode}`, targetQuery));
+  // SmartPM Tab 2 defaults to top-level Installations; SubEquipment / Components hide behind a toggle.
+  const hiddenCount = type === "equipment" ? matchingTargets.filter((target) => !isInstallationTarget(target)).length : 0;
+  const filteredTargets = matchingTargets.filter((target) => type !== "equipment" || showSubEquipment || isInstallationTarget(target) || draft.targetIds.includes(target.id));
   const toggle = (ids: string[], checked: boolean) => setDraft({ ...draft, blueprintIds: checked ? [...new Set([...draft.blueprintIds, ...ids])] : draft.blueprintIds.filter((id) => !ids.includes(id)) });
+  const confirmCreate = () => {
+    const subTargets = targets.filter((target) => draft.targetIds.includes(target.id) && pmTargetType(target) === "equipment" && !isInstallationTarget(target));
+    if (subTargets.length && !window.confirm(`⚠ ${subTargets.length} selected target(s) are SubEquipment or Components:\n${subTargets.map((target) => `· ${target.label}`).join("\n")}\n\nPM plans normally belong on the parent Installation. Assign the blueprint/PMS to these lower-level items anyway?`)) return;
+    onCreate(draft);
+  };
   const count = draft.targetIds.reduce((sum, id) => sum + draft.blueprintIds.filter((code) => !schedules.some((order) => order.IsActive && order.targetKey === id && order.ChecklistCode === code)).length, 0);
   const locked = draft.targetIds.length === 1 && draft.blueprintIds.length === 1 ?
     sharedFamilyAnchor(schedules, blueprints, draft.targetIds[0], blueprints.find((bp) => bp.ChecklistCode === draft.blueprintIds[0])!) : undefined;
@@ -53,6 +63,9 @@ export function PmAssignmentModal({ initial, blueprints, targets, schedules, bus
         <section className="flex min-h-0 flex-1 flex-col gap-2"><h3 className="font-bold">Target Equipment or Locations</h3>
           <div className="flex flex-wrap gap-1">{(["equipment", "room", "floor", "building"] as const).map((item) => <button key={item} className={`${button} ${type === item ? "border-blue-600 bg-blue-50" : ""}`} onClick={() => { setType(item); setFloor(""); }}>{item === "equipment" ? "Equipment" : `${item[0].toUpperCase()}${item.slice(1)}s`}</button>)}</div>
           <input aria-label="Search assignment targets" className={input} placeholder="Search target code or name..." value={targetQuery} onChange={(e) => setTargetQuery(e.target.value)} />
+          {type === "equipment" && <button type="button" aria-pressed={showSubEquipment} className={`${button} text-left text-xs ${showSubEquipment ? "border-blue-600 bg-blue-50" : ""}`}
+            title="PM plans normally belong on the parent Installation; SubEquipment and Components stay hidden by default."
+            onClick={() => setShowSubEquipment((value) => !value)}>{showSubEquipment ? "✓ " : ""}Show SubEquipment &amp; Components ({hiddenCount})</button>}
           <div className="flex flex-wrap gap-1"><select aria-label="Assignment building filter" className={input} value={building} onChange={(e) => { setBuilding(e.target.value); setFloor(""); }}><option value="">All Buildings</option>{[...new Set(targets.map((target) => target.bl_id!))].map((id) => <option key={id}>{id}</option>)}</select>
             <select aria-label="Assignment floor filter" className={input} value={floor} onChange={(e) => setFloor(e.target.value)}><option value="">All Floors</option>{[...new Set(targets.filter((target) => !building || target.bl_id === building).flatMap((target) => target.LevelName ? [target.LevelName] : []))].map((id) => <option key={id}>{id}</option>)}</select></div>
           <div className="flex flex-wrap items-center gap-2 text-xs"><button className={button} onClick={() => setDraft({ ...draft, targetIds: [...new Set([...draft.targetIds, ...filteredTargets.map((target) => target.id)])] })}>Select All Filtered</button><button className={button} onClick={() => setDraft({ ...draft, targetIds: [] })}>Clear</button><strong>{draft.targetIds.length} targets selected</strong></div>
@@ -60,7 +73,7 @@ export function PmAssignmentModal({ initial, blueprints, targets, schedules, bus
         </section>
       </div>
       <footer className="flex shrink-0 flex-wrap items-center gap-3 rounded-b-2xl border-t bg-slate-50 p-4"><label className="text-sm">Cycle Date (Visit #1) <DateInputDDMMYYYY className={input} required disabled={!!locked} value={locked ?? draft.anchor} onChange={(e) => setDraft({ ...draft, anchor: e.target.value })} /></label>{locked && <small>Existing family cycle date locked</small>}
-        <strong className="text-sm">Creating {count} PMS orders</strong><button className={`${button} ml-auto`} disabled={busy} onClick={onClose}>Cancel</button><button className={`${button} border-blue-600 text-blue-800`} disabled={busy || !count || !draft.anchor} onClick={() => onCreate(draft)}>Create PMS Orders</button>
+        <strong className="text-sm">Creating {count} PMS orders</strong><button className={`${button} ml-auto`} disabled={busy} onClick={onClose}>Cancel</button><button className={`${button} border-blue-600 text-blue-800`} disabled={busy || !count || !draft.anchor} onClick={confirmCreate}>Create PMS Orders</button>
       </footer>
     </div>
   </div>;

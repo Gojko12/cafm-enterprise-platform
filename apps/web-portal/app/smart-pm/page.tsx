@@ -6,7 +6,7 @@ import type { PM_ChecklistStandard, PMFrequencyCode, PM_Schedule } from "@cafm/s
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import type { DemoData } from "@/lib/cafm-data";
-import { createTargetPmOrder, nextBlueprintCode, nextFamilyId, validateBlueprintFamilies, rephasePmAssignments } from "@/lib/pm-orders";
+import { createTargetPmOrder, nextBlueprintCode, nextFamilyId, validateBlueprintFamilies, rephasePmAssignments, planPmsRemoval } from "@/lib/pm-orders";
 import { reconcileOpenPMs, resolveBlueprintSchedule } from "@/lib/pm-suppression";
 import { shiftPmSchedule } from "@/lib/pm-schedule-shift";
 import { pmPlanTargets } from "@/lib/pm-plan-targets";
@@ -20,9 +20,10 @@ import { PmTargetPlans } from "@/components/modules/PmTargetPlans";
 import { StakeholderCatalogButton } from "@/components/modules/StakeholderCatalog";
 import { PmAssignmentModal } from "@/components/modules/PmAssignmentModal";
 import type { PMAssignment } from "@/components/modules/PmAssignmentModal";
+import { PmsRemoveConfirmModal } from "@/components/modules/smart-pm/PmsRemoveConfirmModal";
 import { BlueprintChangeHistory, ChecklistChangeHistory } from "@/components/modules/BlueprintChangeHistory";
 
-const tabs = ["1. Checklist Blueprints & Families", "2. Equipment & Location PM Plans (PMS 00001+)", "3. All PM Schedules (00001+)", "4. WR Generator · Suppression & Change Audit Log"];
+const tabs = ["1. Checklist Blueprints & Families", "2. Equipment & Location PM Plans (PMS 00001+)", "3. PMS Master Overview Table", "4. WR Generator · Suppression & Change Audit Log"];
 const button = "rounded-lg border bg-white px-3 py-2 text-sm font-semibold hover:bg-sky-50 disabled:opacity-40";
 const field = "rounded-lg border bg-white p-2 text-sm";
 const codes = Object.keys(PM_FREQUENCY_RANKS) as PMFrequencyCode[];
@@ -43,6 +44,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]), [horizon, setHorizon] = useState(365);
   const [mode, setMode] = useState<"horizon" | "selected" | "single">("horizon"), [open, setOpen] = useState<string>();
+  const [removing, setRemoving] = useState<PM_Schedule>();
   const canBlueprint = !!permissions?.canDefineChecklistPM;
   const canAssign = !!permissions?.canAssignPMPToEQ && !!permissions?.canDefinePMSchedule;
   const permittedTrade = (trade: string) => !profile?.vpaTrades.length || profile.vpaTrades.some((item) => item === trade);
@@ -98,9 +100,16 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
     if (!count) throw new Error("All selected blueprints are already assigned to these targets.");
     await persist({ ...data, schedules: next }, `Created ${count} PMS orders. Existing target-family anchors were retained.`); setAssign(undefined);
   });
-  const remove = (order: PM_Schedule) => run(async () => {
-    if (!canAssign) throw new Error("Assignment permission required.");
-    await persist({ ...data, schedules: data.schedules.map((item) => item.ScheduleId === order.ScheduleId && item.SiteId === site ? { ...item, IsActive: false, UpdatedAt: new Date().toISOString() } : item) }, `PMS #${order.ScheduleId} deactivated; historical WR links retained.`);
+  const remove = (order: PM_Schedule) => {
+    if (!canAssign) { setError("Assignment permission required."); return; }
+    setError(""); setRemoving(order);
+  };
+  const removalPreview = removing ? planPmsRemoval(data, removing, actor, new Date().toISOString()) : undefined;
+  const confirmRemove = () => run(async () => {
+    if (!canAssign || !removing || !removalPreview) throw new Error("Assignment permission required.");
+    const { impact, next } = removalPreview;
+    await persist(next, `PMS #${removing.ScheduleId} removed: ${impact.downgraded.length} WR(s) downgraded via lockstep, ${impact.deleted.length} deleted, ${impact.retained.length} started/completed WR(s) retained.`);
+    setRemoving(undefined);
   });
   const shift = async (order: PM_Schedule, cycle: string, date: string, action: "move" | "keep", peak: number) => {
     setBusy(true); setError("");
@@ -128,7 +137,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
   const matching = (value: string) => value.toLowerCase().includes(query.trim().toLowerCase());
   const showBlueprint = (bp: PM_ChecklistStandard) => { setSelectedBlueprint(bp.ChecklistCode); setCreating(undefined); };
   return <div className="mx-auto max-w-[1600px] space-y-4 p-4"><h1 className="text-2xl font-bold">SmartPM · Blueprints &amp; Target Plans</h1>
-    <nav className="flex flex-wrap gap-2" aria-label="SmartPM sections">{tabs.map((name, i) => <button key={name} aria-current={tab === i ? "page" : undefined} className={`${button} ${tab === i ? "border-blue-600 bg-blue-50 text-blue-800" : ""}`} onClick={() => setTab(i)}>{name}</button>)}<a className={button} href="/work-requests?view=hub#PM">📢 Team Alignment Hub</a><StakeholderCatalogButton /></nav>
+    <nav className="flex flex-wrap gap-2" aria-label="SmartPM sections">{tabs.map((name, i) => <button key={name} aria-current={tab === i ? "page" : undefined} className={`${button} ${tab === i ? "border-blue-600 bg-blue-50 text-blue-800" : ""}`} onClick={() => setTab(i)}>{name}</button>)}<a className={button} href="/preventive-maintenance?view=hub">📢 Team Alignment Hub</a><StakeholderCatalogButton /></nav>
     {error && <p role="alert" className="rounded bg-rose-100 p-3 text-rose-900">{error}</p>}{notice && <p role="status" className="rounded bg-emerald-50 p-3">{notice}</p>}{busy && <p role="status">Saving…</p>}
     {tab === 0 && <div className="flex flex-col items-start gap-4 md:flex-row"><aside className="w-full shrink-0 space-y-3 rounded-xl border bg-white p-3 md:w-80">
       <input aria-label="Search blueprint families" className={`${field} w-full`} placeholder="Search CB, family, title or trade" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -152,7 +161,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
       {!creating && selected && <BlueprintChangeHistory entries={audits.filter((entry) => entry.blueprintCode === selected.ChecklistCode)} />}
       {creating && <button className={button} onClick={() => setCreating(undefined)}>Cancel new blueprint</button>}
     </section></div>}
-    {tab === 1 && <PmTargetPlans targets={targets} orders={orders} blueprints={blueprints} requests={data.workRequests} selected={selectedTarget} onSelect={setSelectedTarget} onAssign={(id) => openAssign([], id)} onRemove={(order) => void remove(order)} onShift={shift} busy={busy} canEdit={canAssign} error={error} />}
+    {tab === 1 && <PmTargetPlans targets={targets} orders={orders} blueprints={blueprints} requests={data.workRequests} selected={selectedTarget} onSelect={setSelectedTarget} onAssign={(id) => openAssign([], id)} onRemove={remove} onShift={shift} busy={busy} canEdit={canAssign} error={error} />}
     {tab === 2 && <PmSchedulesGrid orders={orders} blueprints={blueprints} data={data} selected={selectedOrders} onSelect={setSelectedOrders} onOpen={(order) => { setSelectedTarget(pmTargetKey(order)); setTab(1); }} />}
     {tab === 3 && <section className="space-y-4"><div className="flex flex-wrap items-end gap-3 rounded-xl border p-4"><label>Generation mode<select className={`ml-2 ${field}`} value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}><option value="horizon">All orders within horizon</option><option value="selected">Selected orders ({selectedOrders.length})</option><option value="single">Single selected order</option></select></label><label>Horizon days<input className={`${field} ml-2 w-24`} type="number" min={1} max={365} value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} /></label><button className={button} disabled={busy || !permissions?.canGeneratePM_WR} onClick={() => void generate()}>Generate PM WRs</button><button disabled={busy || !permissions?.canGeneratePM_WR} className={button} onClick={() => void reconcile()}>⚡ Reconcile &amp; Suppress Overlapping Open PMs</button></div>
       <SuppressionLog entries={(data.suppressedPmOccurrences ?? []).filter((entry) => entry.siteId === site && orders.some((order) => order.ScheduleId === entry.suppressedPmsId))} onOpen={setOpen} />
@@ -164,6 +173,7 @@ function SmartPMWorkspace({ site, actor }: { site: DemoData["sites"][number]; ac
       setCreating({ ChecklistCode: nextBlueprintCode(data.blueprints, "03M", data.blueprintHighWatermark), SiteId: site, familyId: nextFamilyId(data.blueprints), familyName: familyName.trim(), TradeId: familyTrade, blueprintMode: "family_ladder", frequencyCode: "03M" }); setFamilyDialog(false); setTab(0);
     }}><h2 className="font-bold">{nextFamilyId(data.blueprints)} · New Blueprint Family</h2>{error && <p role="alert" className="text-rose-700">{error}</p>}<input required className={field} aria-label="Family name" placeholder="Family name" value={familyName} onChange={(e) => setFamilyName(e.target.value)} /><select aria-label="Family trade" className={field} value={familyTrade} onChange={(e) => setFamilyTrade(e.target.value)}>{CLASSICAL_TRADES.filter(permittedTrade).map((trade) => <option key={trade}>{trade}</option>)}</select><div className="flex gap-2"><button className={button}>Continue to Checklist</button><button type="button" className={button} onClick={() => setFamilyDialog(false)}>Cancel</button></div></form></div>}
     {assign && <PmAssignmentModal initial={assign} blueprints={blueprints} targets={targets} schedules={data.schedules} busy={busy} error={error} onClose={() => setAssign(undefined)} onCreate={(draft) => void assignOrders(draft)} />}
+    {removing && removalPreview && <PmsRemoveConfirmModal order={removing} impact={removalPreview.impact} busy={busy} error={error} onConfirm={() => void confirmRemove()} onClose={() => setRemoving(undefined)} />}
     {currentWr?.WR_Type === "PM" && <PMWorkRequestPopup workRequest={currentWr} onClose={() => setOpen(undefined)} onNavigate={setOpen} onEscalateToLJ={() => setError("Create Long Jobs from the work request overview.")} />}
   </div>;
 }

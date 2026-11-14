@@ -10,6 +10,10 @@ export const UserGranularPermissionsSchema = z.object({
   canClaimUnassignedWR: z.boolean(),
   canCompleteWR78: z.boolean(),
   canCloseWR100: z.boolean(),
+  /** Edit Due/Margin (SLA) dates: TechnicalOfficer, SiteAdministrator and SuperAdmin only. */
+  canEditSlaDates: z.boolean(),
+  /** Restore a cancelled WR (27% -> 50% Issued / 29% -> 50%/10%): everyone except Craftperson. */
+  canReopenCancelledWR: z.boolean(),
   canDefineChecklistPM: z.boolean(),
   canDefineChecklistFJ: z.boolean(),
   canDefineChecklistLJ: z.boolean(),

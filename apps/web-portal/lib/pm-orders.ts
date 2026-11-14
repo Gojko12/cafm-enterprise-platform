@@ -1,6 +1,6 @@
-import { compileBlueprintChecklist, nextPmsOrderNumber, PM_ChecklistStandardSchema, PM_ScheduleSchema, pmTargetKey, pmTargetType, getPmCycle, addCycleInterval } from "@cafm/shared-schema";
-import type { Equipment, PMTarget, PM_ChecklistStandard, PM_Schedule, SuppressedPmOccurrence, BlueprintAuditEntry } from "@cafm/shared-schema";
-import { frequencyOf, nextTickOnOrAfter, resolveBlueprintSchedule, shiftDays } from "./pm-suppression";
+import { compileBlueprintChecklist, nextPmsOrderNumber, PM_ChecklistStandardSchema, PM_ScheduleSchema, pmTargetKey, pmTargetType, getPmCycle, addCycleInterval, PM_FREQUENCY_RANKS } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Equipment, PMTarget, PM_ChecklistStandard, PM_Schedule, SuppressedPmOccurrence, BlueprintAuditEntry, PMFrequencyCode } from "@cafm/shared-schema";
+import { frequencyOf, isUnstarted, nextTickOnOrAfter, orderedFrequencies, resolveBlueprintSchedule, sameLadder, shiftDays, tickDates, withCompiledScope } from "./pm-suppression";
 
 export { nextPmsOrderNumber };
 export function rephasePmAssignments(previous: PM_Schedule[], next: PM_Schedule[]): PM_Schedule[] {
@@ -245,8 +245,7 @@ function remapPmsReferences<T extends PmState>(state: T, mapId: (site: unknown, 
     }) };
 }
 
-export function uniquePmsOrdersAcrossSites<T extends PmState>(states: T[]): T[] {
-  const used = new Set<string>();
+export function uniquePmsOrdersAcrossSites<T extends PmState>(states: T[]): T[] {  const used = new Set<string>();
   const usedBlueprints = new Set<string>();
   const blueprintHigh = Math.max(0, ...states.flatMap((state) => state.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))));
   let high = Math.max(0, ...states.flatMap((state) => state.schedules.map((order) => Number(order.ScheduleId))));
@@ -266,4 +265,88 @@ export function uniquePmsOrdersAcrossSites<T extends PmState>(states: T[]): T[] 
         (site, id) => map.get(`${site}:${id}`) ?? id);
     return renameBlueprints(next, usedBlueprints, blueprintHigh);
   });
+}
+
+type RemovalState = { schedules: PM_Schedule[]; blueprints: PM_ChecklistStandard[]; workRequests: BaseWorkRequest[]; deletedWorkRequests?: BaseWorkRequest[] };
+export interface PmsRemovalImpact {
+  /** Unstarted WRs re-pointed (lockstep downgrade) to the next-highest frequency due on the same visit. */
+  downgraded: Array<{ wrId: string; dueDate?: string; fromFrequency?: PMFrequencyCode; toFrequency?: PMFrequencyCode; toScheduleId: string }>;
+  /** Unstarted WRs deleted because no other family frequency falls on their visit. */
+  deleted: Array<{ wrId: string; dueDate?: string }>;
+  /** Started / completed (55% / 78% / 100%) and cancelled WRs that stay untouched. */
+  retained: Array<{ wrId: string; percentage: number }>;
+  /** Remaining higher-frequency WRs whose `absorbedFrequencies` were recalculated. */
+  absorbedUpdated: string[];
+}
+
+/**
+ * Section 81 PMS removal with lockstep recalculation: deactivates the PMS order and,
+ * for every unstarted (50%, no labor, no answers) WR of the removed frequency, either
+ * downgrades it to the next-highest family frequency due on that cycle visit or — only
+ * when no other frequency falls on that visit — deletes it. Started/completed WRs are
+ * never rewritten; `absorbedFrequencies` on remaining higher-frequency WRs are refreshed.
+ */
+export function planPmsRemoval<T extends RemovalState>(state: T, order: PM_Schedule, actor: string, now: string): { impact: PmsRemovalImpact; next: T } {
+  const removedFrequency = frequencyOf(order);
+  const resolved = state.schedules.map((item) => resolveBlueprintSchedule(item, state.blueprints));
+  const removedResolved = resolved.find((item) => item.ScheduleId === order.ScheduleId && item.SiteId === order.SiteId) ?? order;
+  const remaining = resolved.map((item) => item.ScheduleId === order.ScheduleId && item.SiteId === order.SiteId ? { ...item, IsActive: false } : item);
+  const log = (wr: BaseWorkRequest, text: string): BaseWorkRequest => ({
+    ...wr, UpdatedAt: now, updatedAt: now,
+    Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: actor, actorName: actor, actorRole: "SmartPM", createdAt: now, text }],
+  });
+  const impact: PmsRemovalImpact = { downgraded: [], deleted: [], retained: [], absorbedUpdated: [] };
+  const updates = new Map<string, BaseWorkRequest>();
+  const removedIds = new Set<string>();
+
+  for (const wr of state.workRequests) {
+    if (wr.SiteId !== order.SiteId || wr.ScheduleId !== order.ScheduleId || wr.WR_Type !== "PM") continue;
+    if (wr.Percentage === 27 || !isUnstarted(wr)) { impact.retained.push({ wrId: wr.WR_ID, percentage: wr.Percentage }); continue; }
+    const equipment = wr.EquipmentCodes[0] ?? pmTargetKey(removedResolved);
+    const visitDate = wr.DueDate?.slice(0, 10);
+    const family = remaining.filter((item) => item.IsActive && sameLadder(removedResolved, item, equipment) && !!frequencyOf(item));
+    // Which remaining family frequencies still fall on this cycle visit?
+    const dueOnVisit = visitDate ? family.filter((candidate) => {
+        try { return tickDates(candidate, visitDate, visitDate, family).length > 0; } catch { return false; }
+    }) : [];
+    const winner = [...dueOnVisit].sort((a, b) => PM_FREQUENCY_RANKS[frequencyOf(b)!] - PM_FREQUENCY_RANKS[frequencyOf(a)!] || a.ScheduleId.localeCompare(b.ScheduleId))[0];
+    const duplicate = winner && state.workRequests.some((other) => other !== wr && other.SiteId === wr.SiteId && other.WR_Type === "PM" &&
+        other.ScheduleId === winner.ScheduleId && other.Percentage !== 27 && other.DueDate?.slice(0, 10) === visitDate);
+    if (winner && !duplicate) {
+        const scoped = withCompiledScope(wr, winner, remaining, state.blueprints);
+        updates.set(wr.WR_ID, log({ ...scoped, ScheduleId: winner.ScheduleId },
+          `PMS #${order.ScheduleId} (${removedFrequency}) removed by ${actor}: unstarted WR downgraded via lockstep to ${frequencyOf(winner)} PMS #${winner.ScheduleId} on the same visit.`));
+        impact.downgraded.push({ wrId: wr.WR_ID, dueDate: visitDate, fromFrequency: removedFrequency, toFrequency: frequencyOf(winner), toScheduleId: winner.ScheduleId });
+    } else {
+        removedIds.add(wr.WR_ID);
+        impact.deleted.push({ wrId: wr.WR_ID, dueDate: visitDate });
+    }
+  }
+
+  // Refresh absorbedFrequencies on remaining unstarted higher-frequency family WRs.
+  for (const wr of state.workRequests) {
+    if (wr.SiteId !== order.SiteId || wr.WR_Type !== "PM" || updates.has(wr.WR_ID) || removedIds.has(wr.WR_ID)) continue;
+    if (!removedFrequency || !wr.absorbedFrequencies?.includes(removedFrequency) || !isUnstarted(wr)) continue;
+    const schedule = remaining.find((item) => item.IsActive && item.ScheduleId === wr.ScheduleId && item.SiteId === wr.SiteId);
+    if (!schedule || !sameLadder(removedResolved, schedule, wr.EquipmentCodes[0] ?? pmTargetKey(schedule))) continue;
+    const scoped = withCompiledScope(wr, schedule, remaining, state.blueprints);
+    updates.set(wr.WR_ID, log({ ...scoped, absorbedFrequencies: orderedFrequencies(scoped.absorbedFrequencies ?? []) },
+        `Absorbed frequencies recalculated after PMS #${order.ScheduleId} (${removedFrequency}) removal by ${actor}.`));
+    impact.absorbedUpdated.push(wr.WR_ID);
+  }
+
+  const next: T = {
+    ...state,
+    schedules: state.schedules.map((item) => item.ScheduleId === order.ScheduleId && item.SiteId === order.SiteId
+        ? { ...item, IsActive: false, UpdatedAt: now } : item),
+    workRequests: state.workRequests
+        .filter((wr) => !removedIds.has(wr.WR_ID))
+        .map((wr) => updates.get(wr.WR_ID) ?? wr),
+    deletedWorkRequests: [
+        ...(state.deletedWorkRequests ?? []),
+        ...state.workRequests.filter((wr) => removedIds.has(wr.WR_ID))
+          .map((wr) => log(wr, `Unstarted WR deleted with PMS #${order.ScheduleId} (${removedFrequency}) removal by ${actor}: no other family frequency falls on this visit.`)),
+    ],
+  };
+  return { impact, next };
 }

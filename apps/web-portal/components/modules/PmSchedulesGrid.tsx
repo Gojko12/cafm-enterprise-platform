@@ -1,101 +1,84 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { pmTargetLabel, pmTargetType, formatDateDDMMYYYY, getNextUnsuppressedOccurrence } from "@cafm/shared-schema";
+import React from "react";
+import { pmTargetLabel, pmTargetType, pmTargetKey, formatDateDDMMYYYY, forecastPmCycle, getNextUnsuppressedOccurrence } from "@cafm/shared-schema";
 import type { PM_ChecklistStandard, PM_Schedule } from "@cafm/shared-schema";
 import type { DemoData } from "@/lib/cafm-data";
+import { SmartDataGrid } from "@/components/common/SmartDataGrid";
+import type { SmartGridColumn } from "@/components/common/SmartDataGrid";
 import { ScheduleBadges } from "./PmStakeholderTagging";
 
-const columns = [
-  ["id", "PMS #"], ["scope", "Target Scope"], ["target", "Equipment / Location"], ["building", "Building"],
-  ["floor", "Floor"], ["room", "Room"], ["code", "Blueprint Code"], ["title", "Blueprint Title"],
-  ["family", "Family / Mode"], ["trade", "Trade"], ["frequency", "Locked Freq"], ["anchor", "Cycle Date (Visit #1)"],
-  ["due", "Next Due"], ["technician", "Default Tech"], ["alignment", "Teams & Notices"],
-] as const;
-type Column = typeof columns[number][0];
-const ids = columns.map(([id]) => id);
-const key = "cafm_pms_table_prefs_v1";
 const button = "rounded border bg-white px-2 py-1 text-xs disabled:opacity-40";
-type Prefs = { order: Column[]; hidden: Column[] };
-function readPrefs(): Prefs {
-  const raw = localStorage.getItem(key);
-  if (!raw) return { order: [...ids], hidden: [] };
-  const value: unknown = JSON.parse(raw);
-  if (!value || typeof value !== "object" || !("order" in value) || !("hidden" in value) || !Array.isArray(value.order) || !Array.isArray(value.hidden))
-    throw new Error("Saved PMS column preferences are invalid. Use Reset Columns.");
-  const valid = (id: unknown): id is Column => ids.some((item) => item === id);
-  return { order: [...new Set([...value.order.filter(valid), ...ids])], hidden: value.hidden.filter(valid) };
-}
+
+/** `3. PMS Master Overview Table` — every PMS schedule in one `<SmartDataGrid/>`; clicking a row opens that target's cycle in Tab 2. */
 export function PmSchedulesGrid({ orders, blueprints, data, selected, onSelect, onOpen }: {
   orders: PM_Schedule[]; blueprints: PM_ChecklistStandard[]; data: DemoData; selected: string[];
   onSelect: (ids: string[]) => void; onOpen: (order: PM_Schedule) => void;
 }) {
-  const [prefs, setPrefs] = useState<Prefs>({ order: [...ids], hidden: [] });
-  const [ready, setReady] = useState(false), [error, setError] = useState("");
-  const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
-  const [teamFilter, setTeamFilter] = useState(""), [reqFilter, setReqFilter] = useState("");
-  const [sort, setSort] = useState<{ id: Column; desc: boolean }>({ id: "id", desc: false });
-  const [drag, setDrag] = useState<Column>();
-  useEffect(() => { try { setPrefs(readPrefs()); } catch (problem) { setError(String(problem)); } setReady(true); }, []);
-  const changePrefs = (next: Prefs) => {
-    setPrefs(next);
-    try { localStorage.setItem(key, JSON.stringify(next)); setError(""); }
-    catch (problem) { setError(`Could not save column preferences: ${String(problem)}`); }
+  const [teamFilter, setTeamFilter] = React.useState(""), [reqFilter, setReqFilter] = React.useState("");
+  const today = new Date().toISOString().slice(0, 10);
+  const groupKey = (order: PM_Schedule) => order.suppressionMode === "independent" ? `standalone:${order.SiteId}:${order.ScheduleId}` : `${order.SiteId}:${pmTargetKey(order)}:${order.suppressionGroupKey}`;
+  const bp = (order: PM_Schedule) => blueprints.find((item) => item.ChecklistCode === order.ChecklistCode);
+  const equipmentOf = (order: PM_Schedule) => pmTargetType(order) === "equipment"
+    ? data.equipment.find((item) => item.EquipmentCode === order.EquipmentCodes[0] && item.SiteId === order.SiteId) : undefined;
+  const wrsPerYear = (order: PM_Schedule) => {
+    const group = orders.filter((item) => groupKey(item) === groupKey(order));
+    try { return forecastPmCycle(group[0], group).annualAverage; } catch { return 0; }
   };
-  const move = (id: Column, destination: number) => {
-    if (destination < 0 || destination >= prefs.order.length) return;
-    const order = prefs.order.filter((item) => item !== id); order.splice(destination, 0, id);
-    changePrefs({ ...prefs, order });
+  const openWrs = (order: PM_Schedule) => data.workRequests.filter((wr) => wr.WR_Type === "PM" && wr.SiteId === order.SiteId &&
+    wr.ScheduleId === order.ScheduleId && wr.Percentage < 100 && wr.Percentage !== 27 && wr.Percentage !== 29).length;
+  const nextDue = (order: PM_Schedule) => {
+    try { return getNextUnsuppressedOccurrence(order, orders, today)?.date ?? ""; } catch { return ""; }
   };
-  const value = (order: PM_Schedule, id: Column): string => {
-    const bp = blueprints.find((item) => item.ChecklistCode === order.ChecklistCode);
-    switch (id) {
-      case "id": return order.ScheduleId;
-      case "scope": return pmTargetType(order);
-      case "target": return pmTargetType(order) === "equipment" ? `${order.EquipmentCodes[0]} · ${data.equipment.find((item) => item.EquipmentCode === order.EquipmentCodes[0])?.EquipmentName ?? ""}` : pmTargetLabel(order);
-      case "building": return order.bl_id ?? "";
-      case "floor": return order.LevelName ?? "";
-      case "room": return order.RoomCode ?? "";
-      case "code": return order.ChecklistCode;
-      case "title": return bp?.Title ?? "";
-      case "family": return bp?.blueprintMode === "standalone" ? "Standalone" : `${bp?.familyId} · ${bp?.familyName}`;
-      case "trade": return bp?.TradeName ?? "";
-      case "frequency": return bp?.frequencyCode ?? "";
-      case "anchor": return formatDateDDMMYYYY(order.cycleDate ?? order.anchorDate);
-      case "due": return formatDateDDMMYYYY(getNextUnsuppressedOccurrence(order, orders, new Date().toISOString().slice(0, 10))?.date);
-      case "technician": return order.defaultTechnicianNames?.join(", ") ?? "";
-      case "alignment": return [...(order.affectedTeamIds ?? []).map((tid) => data.stakeholderTeams?.find((item) => item.id === tid)?.code ?? tid), ...(order.requirementIds ?? []).map((rid) => data.coordinationRequirements?.find((item) => item.id === rid)?.code ?? rid)].join(", ");
-    }
-  };
-  const rows = orders.filter((order) => (!teamFilter || order.affectedTeamIds?.includes(teamFilter)) && (!reqFilter || order.requirementIds?.includes(reqFilter)) && ids.every((id) => !filters[id] || value(order, id).toLowerCase().includes(filters[id]!.trim().toLowerCase())))
-    .sort((a, b) => {
-      const sortValue = (order: PM_Schedule) => sort.id === "anchor" ? order.cycleDate ?? order.anchorDate ?? "" :
-        sort.id === "due" ? getNextUnsuppressedOccurrence(order, orders, new Date().toISOString().slice(0, 10))?.date ?? "" : value(order, sort.id);
-      return (sort.desc ? -1 : 1) * sortValue(a).localeCompare(sortValue(b), undefined, { numeric: true }) || a.ScheduleId.localeCompare(b.ScheduleId);
-    });
-  const visible = prefs.order.filter((id) => !prefs.hidden.includes(id));
+  const teamsLabel = (order: PM_Schedule) => [
+    ...(order.affectedTeamIds ?? []).map((id) => data.stakeholderTeams?.find((item) => item.id === id)?.code ?? id),
+    ...(order.requirementIds ?? []).map((id) => data.coordinationRequirements?.find((item) => item.id === id)?.code ?? id),
+  ].join(", ");
+
+  const columns: Array<SmartGridColumn<PM_Schedule>> = [
+    { id: "pms", label: "PMS #", value: (order) => order.ScheduleId, defaultWidth: 80 },
+    { id: "target", label: "Target Code & Name", defaultWidth: 240,
+      value: (order) => pmTargetType(order) === "equipment" ? `${order.EquipmentCodes[0]} · ${equipmentOf(order)?.EquipmentName ?? ""}` : pmTargetLabel(order),
+      render: (order) => <button type="button" className="max-w-full truncate text-blue-700 underline" onClick={() => onOpen(order)}>
+        {pmTargetType(order) === "equipment" ? `${order.EquipmentCodes[0]} · ${equipmentOf(order)?.EquipmentName ?? ""}` : pmTargetLabel(order)}</button> },
+    { id: "hierarchy", label: "Hierarchy Level", defaultWidth: 110,
+      value: (order) => pmTargetType(order) !== "equipment" ? `${pmTargetType(order)[0].toUpperCase()}${pmTargetType(order).slice(1)} scope`
+        : equipmentOf(order)?.HierarchyLevel ?? (equipmentOf(order)?.IsInstallation === false ? "SubEquipment" : "Installation") },
+    { id: "location", label: "Location", defaultWidth: 180, value: (order) => [order.bl_id, order.LevelName, order.RoomCode].filter(Boolean).join(" / ") },
+    { id: "blueprint", label: "Blueprint", defaultWidth: 220, value: (order) => `${order.ChecklistCode} · ${bp(order)?.Title ?? ""}` },
+    { id: "freq", label: "Freq", defaultWidth: 70, value: (order) => bp(order)?.frequencyCode ?? order.frequencyCode ?? "" },
+    { id: "trade", label: "Trade", defaultWidth: 110, value: (order) => bp(order)?.TradeName ?? "" },
+    { id: "next", label: "Next Occurrence", defaultWidth: 120, value: (order) => formatDateDDMMYYYY(nextDue(order)) || "No winning visits", sortValue: (order) => nextDue(order) },
+    { id: "wrsYear", label: "WRs/Year", defaultWidth: 85, value: (order) => wrsPerYear(order).toFixed(1), sortValue: (order) => wrsPerYear(order) },
+    { id: "openWrs", label: "Open WRs", defaultWidth: 85, value: (order) => String(openWrs(order)), sortValue: (order) => openWrs(order) },
+    { id: "teams", label: "Teams", defaultWidth: 180, value: teamsLabel, render: (order) => <ScheduleBadges order={order} /> },
+  ];
+
+  const rows = orders.filter((order) => (!teamFilter || order.affectedTeamIds?.includes(teamFilter)) && (!reqFilter || order.requirementIds?.includes(reqFilter)));
+  const allSelected = !!rows.length && rows.every((order) => selected.includes(order.ScheduleId));
+
   return <section className="space-y-3 rounded-xl border bg-white p-4">
-    <div className="flex flex-wrap items-start gap-2"><strong>{rows.length} / {orders.length} PMS orders</strong>
-      <button className={button} onClick={() => { setFilters({}); setTeamFilter(""); setReqFilter(""); }}>Reset Filters</button>
+    <div className="flex flex-wrap items-center gap-2">
+      <h2 className="text-lg font-bold">PMS Master Overview Table</h2>
       <select aria-label="Filter by Team" className={button} value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}><option value="">Filter by Team</option>{(data.stakeholderTeams ?? []).filter((item) => item.siteId === orders[0]?.SiteId || !orders.length).map((item) => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
       <select aria-label="Filter by Notice / Newsflash" className={button} value={reqFilter} onChange={(e) => setReqFilter(e.target.value)}><option value="">Filter by Notice / Newsflash</option>{(data.coordinationRequirements ?? []).filter((item) => item.siteId === orders[0]?.SiteId || !orders.length).map((item) => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
-      <details className="relative"><summary className={`${button} cursor-pointer`}>Columns ⚙</summary><div className="absolute left-0 z-30 w-80 space-y-1 rounded border bg-white p-3 shadow-xl">
-        <p className="text-xs">Select stays pinned first. Drag or use arrows.</p>
-        {prefs.order.map((id, index) => <div key={id} draggable onDragStart={() => setDrag(id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (drag) move(drag, index); setDrag(undefined); }} className="flex items-center gap-2 rounded border p-1">
-          <label className="flex-1 text-xs"><input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={(e) => changePrefs({ ...prefs, hidden: e.target.checked ? prefs.hidden.filter((item) => item !== id) : [...prefs.hidden, id] })} /> {columns.find(([item]) => item === id)![1]}</label>
-          <button aria-label={`Move ${id} up`} className={button} disabled={index === 0} onClick={() => move(id, index - 1)}>↑</button><button aria-label={`Move ${id} down`} className={button} disabled={index === ids.length - 1} onClick={() => move(id, index + 1)}>↓</button>
-        </div>)}
-        <button className={button} onClick={() => changePrefs({ order: [...ids], hidden: [] })}>Reset Columns</button>
-      </div></details>
+      <span className="text-xs text-slate-500">Click any row to open that target&apos;s cycle in Tab 2.</span>
     </div>
-    {error && <p role="alert" className="text-sm text-rose-700">{error} <button className={button} onClick={() => changePrefs({ order: [...ids], hidden: [] })}>Reset Columns</button></p>}
-    {ready && <div className="max-h-[70vh] overflow-auto"><table className="w-full whitespace-nowrap text-left text-sm"><thead className="sticky top-0 z-10 bg-slate-50"><tr><th className="sticky left-0 z-20 bg-slate-50 p-2">Select</th>
-      {visible.map((id) => <th key={id} className="p-2"><button onClick={() => setSort({ id, desc: sort.id === id ? !sort.desc : false })}>{columns.find(([item]) => item === id)![1]} {sort.id === id ? sort.desc ? "▼" : "▲" : ""}</button></th>)}</tr>
-      <tr><th className="sticky left-0 bg-slate-50 p-2"><input type="checkbox" aria-label="Select all filtered PMS orders" checked={!!rows.length && rows.every((order) => selected.includes(order.ScheduleId))} onChange={(e) => onSelect(e.target.checked ? [...new Set([...selected, ...rows.map((order) => order.ScheduleId)])] : selected.filter((id) => !rows.some((order) => order.ScheduleId === id)))} /></th>
-        {visible.map((id) => <th key={id} className="p-1"><input aria-label={`Filter ${columns.find(([item]) => item === id)![1]}`} className="w-full min-w-28 rounded border p-1 font-normal" value={filters[id] ?? ""} onChange={(e) => setFilters({ ...filters, [id]: e.target.value })} /></th>)}</tr></thead>
-      <tbody>{rows.map((order) => <tr key={order.ScheduleId} className="border-t hover:bg-sky-50"><td className="sticky left-0 bg-white p-2"><input type="checkbox" aria-label={`Select PMS ${order.ScheduleId}`} checked={selected.includes(order.ScheduleId)} onChange={(e) => onSelect(e.target.checked ? [...selected, order.ScheduleId] : selected.filter((id) => id !== order.ScheduleId))} /></td>
-        {visible.map((id) => <td key={id} className="max-w-sm truncate p-2" title={value(order, id)}>{id === "target" ? <button className="text-blue-700 underline" onClick={() => onOpen(order)}>{value(order, id)}</button> : id === "alignment" ? <ScheduleBadges order={order} /> : value(order, id)}</td>)}</tr>)}</tbody></table>
-      {!rows.length && <p className="p-4">No PM orders match these filters.</p>}
-    </div>}
+    <SmartDataGrid
+      tableId="smartpm-pms-overview"
+      columns={columns}
+      rows={rows}
+      rowKey={(order) => `${order.SiteId}:${order.ScheduleId}`}
+      onRowClick={onOpen}
+      countLabel="PMS schedules"
+      emptyText="No PM orders match these filters."
+      leading={{
+        width: 48,
+        header: <input type="checkbox" aria-label="Select all filtered PMS orders" checked={allSelected}
+          onChange={(e) => onSelect(e.target.checked ? [...new Set([...selected, ...rows.map((order) => order.ScheduleId)])] : selected.filter((id) => !rows.some((order) => order.ScheduleId === id)))} />,
+        cell: (order) => <input type="checkbox" aria-label={`Select PMS ${order.ScheduleId}`} checked={selected.includes(order.ScheduleId)}
+          onChange={(e) => onSelect(e.target.checked ? [...selected, order.ScheduleId] : selected.filter((id) => id !== order.ScheduleId))} />,
+      }}
+    />
   </section>;
 }

@@ -371,6 +371,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
 
   const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => {
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
+    // If a background GET sync is in flight, wait for it (up to 5s) instead of failing immediately.
+    const waitStart = Date.now();
+    while (busy.current && Date.now() - waitStart < 5000) await new Promise((resolve) => window.setTimeout(resolve, 100));
     if (busy.current) throw new Error("Synchronization is in progress. Try again.");
     const before = JSON.stringify(expected);
     if (JSON.stringify(current.current) !== before) throw new Error("Data changed since preview. Run the dry-run again.");
@@ -476,8 +479,16 @@ export function useActiveUserPermissions() {
   const { data } = useCafmStore();
   const { activeSiteId, activePerson } = useSiteContext();
   const siteProfiles = data.userAccessProfiles.filter((item) => item.siteId === activeSiteId);
-  const profile = siteProfiles.find((item) => item.personName === activePerson || item.fullName === activePerson) ??
-    (activePerson === "Gregor" ? siteProfiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined);
+  const person = activePerson.trim().toLowerCase();
+  // Resolve by personName, fullName, username — then by unambiguous first-name prefix
+  // so "Mark" -> "Mark Meyer", "Thomas" -> "Thomas Wagner", "Claudia" -> "Claudia Fischer".
+  const firstNameMatches = siteProfiles.filter((item) =>
+    item.personName.trim().split(/\s+/)[0].toLowerCase() === person || item.fullName.trim().split(/\s+/)[0].toLowerCase() === person);
+  const profile = siteProfiles.find((item) => item.personName.trim().toLowerCase() === person ||
+      item.fullName.trim().toLowerCase() === person || item.username?.trim().toLowerCase() === person) ??
+    (firstNameMatches.length === 1 ? firstNameMatches[0] : undefined) ??
+    (activePerson === "Gregor" ? siteProfiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined) ??
+    (firstNameMatches.length > 1 ? firstNameMatches[0] : undefined);
   const siteAdmin = profile?.isSiteAdmin && !profile.isSuperAdmin;
   const siteAllowed = !siteAdmin || (!!profile.managedSiteIds?.includes(activeSiteId));
   const governance = (key: keyof NonNullable<NonNullable<typeof profile>["siteAdminGovernance"]>) =>

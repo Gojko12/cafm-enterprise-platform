@@ -22,6 +22,10 @@ Official ESA sites: `01-ESTEC`, `02-ESOC` (flagship BIM & 2026 history), `03-HQ`
 - Dates are strictly `DD-MM-YYYY` in all UI and exports.
 - Modals use a `max-h-[85vh]` flex-column card so 100% browser zoom never overflows.
 - Newly created Fast Jobs start at `50%` Issued.
+- `<SmartDataGrid/>` (`apps/web-portal/components/common/SmartDataGrid.tsx`) is the default standard for data
+  tables: pass a unique `tableId` (column drag-resize, order, visibility and sort persist in `localStorage`),
+  typed columns with `value`/`render`/`sortValue`, click-to-sort headers, inline per-column filter inputs and
+  a left-anchored `Columns ⚙️` show/hide picker. Do not hand-roll new `<table>` grids.
 
 ## Modular file cap
 Keep `.ts`/`.tsx` files under ~500 lines. `node scripts/check-code-health.cjs` enforces hard limits:

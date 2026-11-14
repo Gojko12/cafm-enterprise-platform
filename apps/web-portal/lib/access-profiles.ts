@@ -16,7 +16,13 @@ export function permissionsForPreset(preset: AccessPreset): UserGranularPermissi
   const helpdesk = preset === "Helpdesk";
   return {
     canGeneratePM_WR: engineer, canOpenFollowUpFJ: craft || inspector || helpdesk, canCreateFJ: craft || helpdesk, canCreateLJ: manager,
-    canClaimUnassignedWR: craft, canCompleteWR78: craft, canCloseWR100: manager,
+    canClaimUnassignedWR: craft, canCompleteWR78: craft,
+    // Close 100%: TeamLeader, QAInspector, TechnicalOfficer, SiteAdministrator and SuperAdmin — never Craftperson.
+    canCloseWR100: manager || inspector || preset === "PMEngineer",
+    // SLA (Due / Margin) dates: TechnicalOfficer, SiteAdministrator and SuperAdmin only.
+    canEditSlaDates: preset === "FullAdmin" || preset === "PMEngineer",
+    // Restore cancelled WRs: every supervising role, never Craftperson / Helpdesk / HRAdmin.
+    canReopenCancelledWR: manager || inspector || preset === "PMEngineer",
     canDefineChecklistPM: engineer, canDefineChecklistFJ: engineer, canDefineChecklistLJ: engineer,
     canDefinePMSchedule: engineer, canAssignPMPToEQ: engineer, canManageEquipment: manager,
     auditTrades: inspector ? [...CLASSICAL_TRADES] : [], auditWRTypes: inspector ? ["PM", "FJ"] : [],
@@ -44,6 +50,7 @@ export function defaultRoleDefinitions(): RoleDefinition[] {
 }
 const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades" | "auditWRTypes">> = [
   "canGeneratePM_WR", "canOpenFollowUpFJ", "canCreateFJ", "canCreateLJ", "canClaimUnassignedWR", "canCompleteWR78", "canCloseWR100",
+  "canEditSlaDates", "canReopenCancelledWR",
   "canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ", "canDefinePMSchedule", "canAssignPMPToEQ", "canManageEquipment",
   "canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons", "canScheduleCraftperson",
   "canOverwriteLaborTime", "canManageShiftsAndLeaves", "canManageLocationFreezes",
@@ -65,6 +72,11 @@ export function normalizeChecklistRole(role: RoleDefinition): RoleDefinition {
     permissions.canAuditChooseWRs = false; permissions.canAuditDoInspection = false; permissions.canAuditReopenWR = false;
     permissions.canManageFailureReasons = false; permissions.auditTrades = []; permissions.auditWRTypes = [];
   }
+  // Section 81 permission matrix: these three flags are strictly role-determined (idempotent legacy backfill).
+  const supervising = ["TeamLeader", "QAInspector", "TechnicalOfficer", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
+  permissions.canCloseWR100 = supervising;
+  permissions.canReopenCancelledWR = supervising;
+  permissions.canEditSlaDates = ["TechnicalOfficer", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
   return { ...role, permissions };
 }
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {
@@ -103,12 +115,43 @@ export function migrateRoles(profiles: UserAccessProfile[], existing?: RoleDefin
     const updated = { ...profile, assignedRoleIds: [id] };
     return { ...updated, isQAInspector: roles.some((role) => updated.assignedRoleIds.includes(role.id) && role.baseRoleType === "QAInspector"), permissions: resolveEffectivePermissions(updated, roles) };
   });
-  return { roles, profiles: next };
+  return { roles, profiles: enforceStrictMultiSite(next, roles) };
+}
+
+/** The ONLY two people allowed to hold SuperAdmin multi-site access (`01-ESTEC`..`05-ESAC`). */
+export const isAllowedSuperAdminName = (profile: Pick<UserAccessProfile, "personName" | "fullName">) => {
+  const fullName = profile.fullName.trim().toLowerCase();
+  return fullName === "mark meyer" || fullName === "gregor kovac" ||
+    profile.personName.trim().toLowerCase() === "gregor" || fullName.split(/\s+/)[0] === "gregor";
+};
+
+/**
+ * Idempotent Section 81 governance migration: only the two SuperAdmins (Mark Meyer and
+ * Gregor Kovac / Gregor) keep multi-site access; every other profile — including Site
+ * Administrators — is strictly single-site (`siteAccess`/`managedSiteIds` = stationed site).
+ */
+export function enforceStrictMultiSite(profiles: UserAccessProfile[], roles: RoleDefinition[]): UserAccessProfile[] {
+  return profiles.map((profile) => {
+    if (profile.isSuperAdmin && isAllowedSuperAdminName(profile)) {
+      return { ...profile, siteAccess: [...ALL_SITES], managedSiteIds: [...ALL_SITES] };
+    }
+    const single = [profile.siteId];
+    const demoted = profile.isSuperAdmin || profile.primaryRole === "SuperAdmin";
+    const assignedRoleIds = demoted
+      ? [...new Set((profile.assignedRoleIds ?? []).map((id) => id === "super-admin" ? "site-admin" : id))]
+      : profile.assignedRoleIds;
+    const next: UserAccessProfile = { ...profile, isSuperAdmin: false, assignedRoleIds,
+      ...(demoted ? { primaryRole: "SiteAdministrator" as const, isSiteAdmin: true } : {}),
+      siteAccess: single, managedSiteIds: profile.isSiteAdmin || demoted ? single : [] };
+    return demoted ? { ...next, permissions: resolveEffectivePermissions(next, roles) } : next;
+  });
 }
 export function assignRoles(profile: UserAccessProfile, ids: string[], roles: RoleDefinition[]): UserAccessProfile {
   const selected = roles.filter((role) => ids.includes(role.id));
   const priority: RoleDefinition["baseRoleType"][] = ["SuperAdmin", "SiteAdministrator", "TeamLeader", "QAInspector", "TechnicalOfficer", "Helpdesk", "HRAdmin", "Craftperson"];
-  const primaryRole = priority.find((role) => selected.some((item) => item.baseRoleType === role)) ?? "Craftperson";
+  let primaryRole = priority.find((role) => selected.some((item) => item.baseRoleType === role)) ?? "Craftperson";
+  // Strict 2-SuperAdmin rule: only Mark Meyer and Gregor Kovac / Gregor may hold SuperAdmin.
+  if (primaryRole === "SuperAdmin" && !isAllowedSuperAdminName(profile)) primaryRole = "SiteAdministrator";
   const updated: UserAccessProfile = { ...profile, assignedRoleIds: ids, primaryRole,
     isSuperAdmin: primaryRole === "SuperAdmin", isSiteAdmin: primaryRole === "SuperAdmin" || primaryRole === "SiteAdministrator",
     isTeamLeader: selected.some((item) => item.baseRoleType === "TeamLeader"),
@@ -116,6 +159,7 @@ export function assignRoles(profile: UserAccessProfile, ids: string[], roles: Ro
     isCraftperson: selected.some((item) => item.baseRoleType === "Craftperson"),
     isHelpdesk: selected.some((item) => item.baseRoleType === "Helpdesk"),
     isHrAdmin: selected.some((item) => item.baseRoleType === "HRAdmin"),
+    siteAccess: primaryRole === "SuperAdmin" ? [...ALL_SITES] : [profile.siteId],
     managedSiteIds: primaryRole === "SuperAdmin" ? [...ALL_SITES] : primaryRole === "SiteAdministrator" ? [profile.siteId] : [],
     siteAdminGovernance: primaryRole === "SiteAdministrator" ? profile.siteAdminGovernance ?? { ...DEFAULT_SITE_ADMIN_GOVERNANCE } : undefined,
   };
@@ -129,7 +173,9 @@ export function directoryProfile(entry: (typeof PEOPLE_DIRECTORY)[number], siteI
   const hrAdmin = entry.preset === "HRAdmin";
   const preset: AccessPreset = superAdmin || siteAdmin ? "FullAdmin" : entry.preset;
   return { id: `${siteId}-profile-${entry.personName}`, siteId, personName: entry.personName, fullName: entry.fullName,
-    username: entry.username, email: entry.email, phone: entry.phone, department: entry.department, siteAccess: [...entry.sites],
+    username: entry.username, email: entry.email, phone: entry.phone, department: entry.department,
+    // Strict 2-SuperAdmin rule: only SuperAdmins see every site; everyone else is single-site.
+    siteAccess: superAdmin ? [...ALL_SITES] : [siteId],
     primaryRole: superAdmin ? "SuperAdmin" : siteAdmin ? "SiteAdministrator" : helpdesk ? "Helpdesk" : hrAdmin ? "HRAdmin" : preset === "QAInspector" ? "QAInspector" : preset === "TeamLeader" ? "TeamLeader" : "TechnicalOfficer",
     isSuperAdmin: superAdmin, managedSiteIds: superAdmin ? [...ALL_SITES] : siteAdmin ? [siteId] : [],
     ...(siteAdmin ? { siteAdminGovernance: { ...DEFAULT_SITE_ADMIN_GOVERNANCE } } : {}),
@@ -151,7 +197,7 @@ export function ensureDirectoryProfiles(profiles: UserAccessProfile[], sites: Si
       if (index < 0) { result.push(withRoleIds(fresh)); continue; }
       const existing = result[index];
       result[index] = { ...existing, fullName: existing.linkedCraftpersonId ? existing.fullName : entry.fullName, username: existing.username ?? entry.username, email: existing.email ?? entry.email,
-        phone: existing.phone ?? entry.phone, department: existing.department ?? entry.department, siteAccess: existing.siteAccess ?? [...entry.sites],
+        phone: existing.phone ?? entry.phone, department: existing.department ?? entry.department, siteAccess: existing.siteAccess ?? (entry.superAdmin ? [...ALL_SITES] : [siteId]),
         ...(existing.primaryRole === "Craftperson" && !existing.linkedCraftpersonId ? withRoleIds(fresh) : {}) };
     }
   }

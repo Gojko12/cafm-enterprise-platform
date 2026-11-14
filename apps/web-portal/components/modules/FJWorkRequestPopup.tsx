@@ -104,6 +104,15 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
       IsFrozen: percentage === 55,
     }), `${label} (${workRequest.Percentage}% to ${percentage}%) by ${actorName}`);
   };
+  const restoreCancelled = () => {
+    if (!permissions?.canReopenCancelledWR) { window.alert("Your role does not include the Reopen Cancelled WR permission."); return; }
+    if (workRequest.Percentage !== 27 && workRequest.Percentage !== 29) { window.alert("Only cancelled (27% / 29%) Fast Jobs can be restored."); return; }
+    const issued = WR_Statuses.find((status) => status.ESAWorkType === workRequest.ESAWorkType && status.Percentage === 50);
+    if (!issued) { window.alert(`No 50% WR_Statuses configuration exists for ${workRequest.ESAWorkType}.`); return; }
+    update((wr) => ({
+      ...wr, Percentage: 50, WorkRequestStatus: issued.WorkRequestStatus, WorkRequestSubstatus: issued.WorkRequestSubstatus, IsFrozen: false,
+    }), `Cancelled FJ restored from ${workRequest.Percentage}% to 50% Issued by ${actorName}`);
+  };
   const attach = (file: File) => {
     const reader = new FileReader();
     reader.onerror = () => window.alert(`Could not read ${file.name}.`);
@@ -209,6 +218,7 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           <div className="flex flex-wrap gap-2">{[
             ["Cancel WR (27%)", 27], ["On Hold (55%)", 55], ["Technically Completed (78%)", 78], ["Complete (100%)", 100],
           ].map(([label, percent]) => <button key={label} title={percent === 100 && !canCloseWorkRequestAt100(workRequest) ? "Complete (100%) is available only after Technically Completed (78%)." : undefined} disabled={terminalReadOnly || (percent === 78 && !permissions?.canCompleteWR78) || (percent === 100 && (!permissions?.canCloseWR100 || !canCloseWorkRequestAt100(workRequest)))} onClick={() => transition(Number(percent), String(label))} className="rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{label}</button>)}
+            {(workRequest.Percentage === 27 || workRequest.Percentage === 29) && <button type="button" disabled={!permissions?.canReopenCancelledWR} title={permissions?.canReopenCancelledWR ? "Restore this cancelled Fast Job back to 50% Issued." : "Your role does not include the Reopen Cancelled WR permission."} onClick={restoreCancelled} className="rounded border border-blue-600 bg-white px-3 py-2 text-sm font-semibold text-blue-800 disabled:opacity-40">↺ Restore to 50% Issued</button>}
             <button disabled={!permissions?.canCreateLJ} onClick={() => {
               if (!permissions?.canCreateLJ) { window.alert("Permission required to create a Long Job."); return; }
               let estimatedCost = workRequest.EstimatedCostEur ?? 0;

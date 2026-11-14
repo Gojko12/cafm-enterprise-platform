@@ -41,9 +41,7 @@ const LEGACY_BASELINES = {
   "packages/shared-schema/src/work-requests.ts": 979,
   "apps/web-portal/components/modules/long-jobs/LongJobDrawer.tsx": 806,
   "apps/web-portal/lib/ifc-cafm-bridge.ts": 782,
-  "apps/web-portal/components/modules/PMWorkRequestPopup.tsx": 772,
   "apps/mobile-app/src/App.tsx": 770,
-  "apps/web-portal/app/work-requests/page.tsx": 720,
 };
 
 // Single leading underscore marks a scratch script; Python dunder files (`__init__.py`) are legitimate.

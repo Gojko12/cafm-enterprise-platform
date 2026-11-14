@@ -1,5 +1,7 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { WorkRequestsWorkspace } from "@/components/modules/work-requests/WorkRequestsWorkspace";
 
 export default function PreventiveMaintenancePage() {
-  redirect("/work-requests#PM");
+  return <WorkRequestsWorkspace fixedType="PM" />;
 }

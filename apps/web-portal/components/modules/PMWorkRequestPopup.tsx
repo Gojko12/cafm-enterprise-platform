@@ -1,10 +1,9 @@
 "use client";
-import { FrequencyPill, PmScope } from "../common/PmFrequency";
+import { PmScope } from "../common/PmFrequency";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
-import { getChecklistFinding, getChecklistProgress, getChecklistSteps, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
+import { getChecklistProgress, getChecklistSteps, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import {
   BaseWorkRequest,
   PM_ScheduleStep,
@@ -13,45 +12,40 @@ import {
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
-import { QAAuditPanel } from "@/components/modules/QAAuditPanel";
-import { QAChecklistReview } from "@/components/modules/QAChecklistReview";
 import { completeChecklistInstances } from "@/lib/checklist-completion";
 import { ChecklistExecutor } from "@/components/modules/ChecklistExecutor";
-import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
-import { WorkRequestLabor, laborRows } from "@/components/modules/WorkRequestLabor";
+import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { assignPerson } from "@/lib/dispatch";
-import { FreezeBadge, FreezeSafetyGate } from "@/components/modules/FreezeSafetyGate";
+import { FreezeSafetyGate } from "@/components/modules/FreezeSafetyGate";
 import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "@/lib/location-freezes";
-import { ResizableHistory } from "@/components/common/ResizableHistory";
 import { newestFirst } from "@/lib/history-order";
 import { hasOpenQARework } from "@/lib/qa-settings";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
-import { PhotoCapture } from "@/components/common/PhotoCapture";
-import { PmCoordinationWorkspace } from "@/components/modules/PmCoordinationWorkspace";
 import { buildCoordinationItems } from "@/lib/pm-coordination";
 import { PmClosureRequirements } from "@/components/modules/PmClosureRequirements";
 import { applyClosureRequirements, emptyClosureDraft, hasClosureSelection, type ClosureDraft } from "@/lib/pm-closure-requirements";
 import { canUpdatePmsRequirementsFromWr } from "@/lib/pm-requirements-guard";
 import { PMDetailsPanel } from "./pm/PMDetailsPanel";
 import { PMHistoryFooter } from "./pm/PMHistoryFooter";
-import { PMKpiPanel } from "./pm/PMKpiPanel";
+import { PMKpiAndSlaPanel } from "./pm/PMKpiAndSlaPanel";
 import { PMDocumentsPanel } from "./pm/PMDocumentsPanel";
-import { PMChecklistSummaryPanel } from "./pm/PMChecklistSummaryPanel";
 import { PMIncompleteChecklistModal } from "./pm/PMIncompleteChecklistModal";
 import { PMStakeholderAlignmentSection } from "./pm/PMStakeholderAlignmentSection";
 import { PMFollowUpPanel } from "./pm/PMFollowUpPanel";
 import { PMAuditLogPanel } from "./pm/PMAuditLogPanel";
 import { PMSmartChecklistPanel } from "./pm/PMSmartChecklistPanel";
-import { allocateWorkRequestId } from "@/lib/wr-id-migration";
+import { PMStatusActionBar, type PmHoldReason } from "./pm/PMStatusActionBar";
+import { PMFreezeBanner } from "./pm/PMFreezeBanner";
+import { PMAssignCraftpersonModal } from "./pm/PMAssignCraftpersonModal";
+import { applyChecklistResult, applyChecklistFinish } from "./pm/pm-checklist-updates";
+import { createFollowUpFastJob } from "@/lib/pm-follow-up";
 import { isWrTerminal } from "./scheduler/scheduler-rules";
-import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
 
 const TABS = [
   "Work request details",
   "Labor, parts & Completion",
-  "KPI & Others",
+  "SLA, Costs & KPIs",
   "Attached Documents",
-  "Checklist",
   "PM Follow-up",
   "AuditLog",
   "Checklist - Smart PM",
@@ -147,10 +141,6 @@ export function PMWorkRequestPopup({
   }), `Freeze period safety acknowledgment confirmed by ${actorName}`);
   const linkedFastJobs = getFollowUpFJsForPM(workRequest.WR_ID, data.workRequests);
   const linkedLongJobs = data.workRequests.filter((item) => item.WR_Type === "LJ" && item.SiteId === workRequest.SiteId && item.ParentPM_WR_ID === workRequest.WR_ID);
-  const currentStatusChoice = STATUS_CHOICES.find((item) =>
-    item.percentage === workRequest.Percentage &&
-    (item.percentage !== 55 || ("reason" in item && workRequest.WorkRequestSubstatus.includes(item.reason))),
-  );
   const auditRows = useMemo(() => newestFirst([
     ...(workRequest.StepAuditLogs ?? []).map((entry) => ({
       id: entry.AuditLogId,
@@ -210,20 +200,6 @@ export function PMWorkRequestPopup({
     }));
   };
 
-  const addChecklistEntry = (
-    actionType: string,
-    details: string,
-    stepReference?: string,
-    timestamp = new Date().toISOString(),
-  ) => ({
-    id: crypto.randomUUID(),
-    timestamp,
-    performedBy: actorName,
-    actionType,
-    ...(stepReference ? { stepReference } : {}),
-    details,
-  });
-
   const canUpdatePms = canUpdatePmsRequirementsFromWr(profile, data.siteRoleAssignments, currentRole, activePerson, workRequest.SiteId);
   const [closureDraft, setClosureDraft] = useState<ClosureDraft>(emptyClosureDraft);
   const [closureMessage, setClosureMessage] = useState("");
@@ -242,9 +218,10 @@ export function PMWorkRequestPopup({
       onClose={canUpdatePms && permissions?.canCloseWR100 && workRequest.Percentage === 78 ? () => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!) : undefined} />
   ) : null;
 
-  const applyStatus = (choice: StatusChoice, skipFreezeGate = false, checklistOverride = false) => {
+  const applyStatus = (choice: StatusChoice, skipFreezeGate = false, checklistOverride = false, cancelReason?: string) => {
     if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
+    if (choice.percentage === 27 && !cancelReason?.trim()) { window.alert("A cancellation reason is mandatory."); return; }
     if (choice.percentage === 78 && !skipFreezeGate && wrFreezes.length > 0 && !workRequest.freezeAcknowledged) {
       setPendingFreezeStatus(choice);
       return;
@@ -282,6 +259,7 @@ export function PMWorkRequestPopup({
           WorkRequestSubstatus: configured!.WorkRequestSubstatus,
         };
     if (choice.percentage === 100) commitClosureDraft();
+    const closedAt = choice.percentage === 100 ? new Date().toISOString() : undefined;
     const checklistOverrideRecord = checklistOverride ? {
       overriddenAt: new Date().toISOString(),
       overriddenBy: actorName,
@@ -291,11 +269,33 @@ export function PMWorkRequestPopup({
       ...current,
       ...status,
       Percentage: choice.percentage,
+      ...(closedAt ? { ClosedAt: closedAt } : {}),
       ...(checklistOverrideRecord ? { ChecklistIncompleteOverride: checklistOverrideRecord } : {}),
       ...(checklistOverrideRecord ? { ChecklistCompleted: false } : {}),
       ...(reason ? { IsFrozen: true, FreezeReason: reason } : {}),
       ...(choice.percentage !== 55 ? { IsFrozen: false } : {}),
-    }), `WR status changed from ${workRequest.Percentage}% to ${choice.percentage}% (${choice.label}) by ${actorName}${checklistOverrideRecord ? ` with incomplete checklist override (${checklistOverrideRecord.incompleteStepIds.length} steps)` : ""}`);
+    }), `WR status changed from ${workRequest.Percentage}% to ${choice.percentage}% (${choice.label}) by ${actorName}${cancelReason ? `. Cancellation reason: ${cancelReason.trim()}` : ""}${checklistOverrideRecord ? ` with incomplete checklist override (${checklistOverrideRecord.incompleteStepIds.length} steps)` : ""}`);
+  };
+
+  const applyStatusByPercentage = (percentage: 50 | 55 | 78 | 100, holdReason?: PmHoldReason) => {
+    const choice = STATUS_CHOICES.find((item) => item.percentage === percentage &&
+      (percentage !== 55 || ("reason" in item && item.reason === holdReason)));
+    if (choice) applyStatus(choice);
+  };
+
+  const cancelWorkRequest = (cancelReason: string) => {
+    applyStatus(STATUS_CHOICES.find((item) => item.percentage === 27)!, false, false, cancelReason);
+  };
+
+  const restoreToIssued = () => {
+    if (!permissions?.canReopenCancelledWR) { window.alert("Your role does not include the Reopen Cancelled WR permission."); return; }
+    if (workRequest.Percentage !== 27) { window.alert("Only cancelled (27%) work requests can be restored."); return; }
+    const issued = WR_Statuses.find((item) => item.Percentage === 50 && item.ESAWorkType === workRequest.ESAWorkType);
+    if (!issued) { window.alert(`No 50% WR_Statuses configuration exists for ${workRequest.ESAWorkType}.`); return; }
+    updateWorkRequest((current) => ({
+      ...current, Percentage: 50, WorkRequestStatus: issued.WorkRequestStatus,
+      WorkRequestSubstatus: issued.WorkRequestSubstatus, IsFrozen: false,
+    }), `Cancelled WR restored from 27% to 50% Issued by ${actorName}`);
   };
 
   const addComment = () => {
@@ -379,60 +379,7 @@ export function PMWorkRequestPopup({
 
   const updateChecklistResult = (result: ChecklistResult | null, stepId: string) => {
     const now = new Date().toISOString();
-    updateWorkRequest((current) => {
-      const previous = current.ChecklistResults?.find((item) => item.stepId === stepId);
-      if (result && previous &&
-        JSON.stringify(previous) === JSON.stringify(result)) return current;
-      const step = checklistSteps.find((item) => item.StepId === stepId);
-      const action = result ? "Step answer updated" : "Step answer cleared";
-      const detail = result
-        ? `${step?.Title ?? stepId} answered (${result.passed ? "favourable" : "unfavourable"})`
-        : `${step?.Title ?? stepId} answer cleared`;
-      const auditValue = (value: ChecklistResult | undefined) => value && ({
-        ...value,
-        photoPaths: value.photoPaths?.map(() => "Photo attached"),
-      });
-      const audit = result ? [{
-        AuditLogId: crypto.randomUUID(),
-        StepInstanceId: `${current.WR_ID}:${stepId}`,
-        WR_ID: current.WR_ID,
-        ActorId: actorId,
-        Action: "modified" as const,
-        ...(previous ? { PreviousValue: auditValue(previous) } : {}),
-        NewValue: auditValue(result),
-        OccurredAt: now,
-      }] : [{
-        AuditLogId: crypto.randomUUID(),
-        StepInstanceId: `${current.WR_ID}:${stepId}`,
-        WR_ID: current.WR_ID,
-        ActorId: actorId,
-        Action: "reopened" as const,
-        ...(previous ? { PreviousValue: auditValue(previous) } : {}),
-        OccurredAt: now,
-      }];
-      return {
-        ...current,
-        ChecklistCompleted: false,
-        ChecklistResults: [
-          ...(current.ChecklistResults ?? []).filter((item) => item.stepId !== stepId),
-          ...(result ? [result] : []),
-        ],
-        StepAuditLogs: [...(current.StepAuditLogs ?? []), ...audit],
-        ChecklistHistory: [
-          ...(current.ChecklistHistory ?? []),
-          addChecklistEntry(action, detail, stepId, now),
-        ],
-        Activity: [...(current.Activity ?? []), {
-          id: crypto.randomUUID(),
-          kind: "log" as const,
-          actorId,
-          actorName,
-          actorRole: currentRole,
-          createdAt: now,
-          text: `${detail} by ${actorName}`,
-        }],
-      };
-    });
+    updateWorkRequest((current) => applyChecklistResult(current, result, stepId, checklistSteps, { actorId, actorName, actorRole: currentRole }, now));
   };
 
   const finishChecklist = (results: ChecklistResult[]) => {
@@ -440,159 +387,45 @@ export function PMWorkRequestPopup({
     let completedInstances = workRequest.ChecklistInstances;
     try {
       if (workRequest.ChecklistInstances) {
-        completedInstances = completeChecklistInstances(
-          workRequest.ChecklistInstances,
-          results,
-          actorId,
-          now,
-        );
+        completedInstances = completeChecklistInstances(workRequest.ChecklistInstances, results, actorId, now);
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Could not complete the checklist.");
       return false;
     }
-    updateWorkRequest((current) => ({
-      ...current,
-      ChecklistCompleted: true,
-      ChecklistResults: results,
-      ChecklistInstances: completedInstances,
-      StepAuditLogs: [
-        ...(current.StepAuditLogs ?? []),
-        ...(completedInstances ?? []).filter((step) => step.IsCompleted).map((step) => ({
-          AuditLogId: crypto.randomUUID(),
-          StepInstanceId: step.StepInstanceId,
-          WR_ID: current.WR_ID,
-          ActorId: actorId,
-          Action: "completed" as const,
-          OccurredAt: now,
-        })),
-      ],
-      ChecklistHistory: [
-        ...(current.ChecklistHistory ?? []),
-        addChecklistEntry(
-          "Checklist completed",
-          `${results.length} of ${checklistSteps.length} steps answered`,
-          undefined,
-          now,
-        ),
-      ],
-    }), `Checklist finished by ${actorName}`);
+    updateWorkRequest((current) => applyChecklistFinish(current, results, completedInstances, checklistSteps.length, { actorId, actorName, actorRole: currentRole }, now),
+      `Checklist finished by ${actorName}`);
     return true;
   };
 
   const addCraftperson = (userId: string) => {
     if (terminalReadOnly) { window.alert("Closed or cancelled work requests cannot be assigned."); return; }
+    if ((workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
     const craftperson = data.craftspeople.find((item) => item.id === userId && item.SiteId === activeSiteId);
     if (craftperson) {
-      if ((workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
       const labor = { craftpersonId: userId, hourlyRate: craftperson.HourlyRate, workingTimeMinutes: 0,
         name: craftperson.Name, lastName: craftperson.LastName };
       updateWorkRequest((current) => assignPerson(current, labor), `${currentRole} ${activePerson} assigned craftperson ${craftperson.Name} ${craftperson.LastName} (${craftperson.Trade}).`);
       setAssignModalOpen(false);
-      setCraftFilter("");
       return;
     }
     const user = data.users.find((item) => item.UserId === userId);
-    if (!user || (workRequest.AssignedCraftpersonIds ?? []).includes(userId)) return;
+    if (!user) return;
     const names = user.DisplayName.trim().split(/\s+/);
     const lastName = names.pop() ?? user.DisplayName;
-    const labor = {
-      craftpersonId: userId,
-      hourlyRate: 0,
-      workingTimeMinutes: 0,
-      name: names.join(" ") || lastName,
-      lastName,
-    };
+    const labor = { craftpersonId: userId, hourlyRate: 0, workingTimeMinutes: 0, name: names.join(" ") || lastName, lastName };
     updateWorkRequest((current) => assignPerson(current, labor), `${currentRole} ${activePerson} assigned craftperson ${user.DisplayName}.`);
     setAssignModalOpen(false);
-    setCraftFilter("");
   };
 
   const addFollowUp = () => {
     if (!permissions?.canOpenFollowUpFJ) { window.alert("Permission required to create a follow-up FJ."); return; }
-    if (!fastJobDescription.trim()) {
-      window.alert("Enter a description for the Fast Job.");
-      return;
-    }
-    const issued = WR_Statuses.find((item) =>
-      item.Percentage === 50 && item.ESAWorkType === "Corrective Maintenance",
-    );
-    if (!issued) {
-      window.alert("The 50% Corrective Maintenance status is not configured.");
-      return;
-    }
-    const now = new Date().toISOString();
-    const jobId = allocateWorkRequestId(data.workRequests, { site: workRequest.SiteId, deleted: data.deletedWorkRequests ?? [] });
-    const job: BaseWorkRequest = {
-      WR_ID: jobId,
-      JobID: `JOB-${Date.now()}`,
-      WR_Type: "FJ",
-      ESAWorkType: "Corrective Maintenance",
-      Description: fastJobDescription.trim(),
-      ProblemLocation: workRequest.ProblemLocation,
-      CreatedDate: now.slice(0, 10),
-      WorkRequestStatus: issued.WorkRequestStatus,
-      WorkRequestSubstatus: issued.WorkRequestSubstatus,
-      Percentage: issued.Percentage,
-      SiteId: workRequest.SiteId,
-      bl_id: workRequest.bl_id,
-      LevelName: workRequest.LevelName,
-      RoomCode: workRequest.RoomCode,
-      EquipmentCodes: workRequest.EquipmentCodes,
-      AssignedCraftpersonIds: [],
-      AssignedUserIds: [],
-      CreatedBy: actorId,
-      IsFrozen: false,
-      TotalTimeMinutes: 0,
-      StartDateTBD: false,
-      RequiresSAT: false,
-      RequiresDrawingUpdate: false,
-      RequiresInventoryUpdate: false,
-      AcceptanceGates: [],
-      ParentPM_WR_ID: workRequest.WR_ID,
-      ParentWR_ID: workRequest.WR_ID,
-      sourcePmWrId: workRequest.WR_ID,
-      originatingChecklistStepId: fastJobStep || undefined,
-      originatingChecklistStepLabel: checklistSteps.find((step) => step.StepId === fastJobStep)?.Title,
-      EstimatedCostEur: 0,
-      Urgency: fastJobUrgency,
-      UpdatedAt: now,
-      updatedAt: now,
-      Activity: [{
-        id: crypto.randomUUID(),
-        kind: "log",
-        actorId,
-        actorName,
-        actorRole: currentRole,
-        createdAt: now,
-        text: `Follow-up Fast Job created from ${workRequest.WR_ID} by ${actorName}`,
-      }],
-    };
-    setData((current) => ({
-      ...current,
-      workRequests: [
-        ...current.workRequests.map((item) =>
-          item.WR_ID === workRequest.WR_ID && item.SiteId === workRequest.SiteId
-            ? {
-              ...item,
-              FollowUpFJIds: [...new Set([...(item.FollowUpFJIds ?? []), job.WR_ID])],
-              UpdatedAt: now,
-              updatedAt: now,
-              Activity: [...(item.Activity ?? []), {
-                id: crypto.randomUUID(),
-                kind: "log" as const,
-                actorId,
-                actorName,
-                actorRole: currentRole,
-                createdAt: now,
-                text: `Follow-up Fast Job ${job.WR_ID} created by ${actorName}`,
-              }],
-            }
-            : item,
-        ),
-        job,
-      ],
-    }));
+    const result = createFollowUpFastJob(data, workRequest, {
+      description: fastJobDescription, urgency: fastJobUrgency, stepId: fastJobStep,
+      checklistSteps, actor: { id: actorId, name: actorName, role: currentRole },
+    });
+    if ("error" in result) { window.alert(result.error); return; }
+    setData(() => result.next);
     setFastJobDescription("");
     setFastJobStep("");
   };
@@ -684,7 +517,8 @@ export function PMWorkRequestPopup({
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <PmScope wr={workRequest} />
-          {wrFreezes.length > 0 && <div className="mb-3"><FreezeBadge freezes={wrFreezes} /></div>}          {activeTab === "Work request details" && <PMDetailsPanel workRequest={workRequest} renderGroup={renderGroup} renderField={renderField} equipment={equipment} setInstallation={setInstallation} blueprint={blueprint} />}
+          <PMFreezeBanner workRequest={workRequest} activeFreezes={wrFreezes} allFreezes={data.locationFreezes ?? []} />
+          {activeTab === "Work request details" && <PMDetailsPanel workRequest={workRequest} renderGroup={renderGroup} renderField={renderField} equipment={equipment} setInstallation={setInstallation} blueprint={blueprint} />}
 
           {activeTab === "Labor, parts & Completion" && <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -696,27 +530,8 @@ export function PMWorkRequestPopup({
               </button>
             </div>
             <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
-            <div className="grid gap-3 rounded border bg-white p-4 md:grid-cols-[1fr_2fr]">
-              <label className="text-sm font-medium">WR Statuses
-                <select aria-label="WR Statuses" disabled={terminalReadOnly} value={currentStatusChoice?.key ?? ""}
-                  onChange={(event) => {
-                    const choice = STATUS_CHOICES.find((item) => item.key === event.target.value);
-                    if (choice) applyStatus(choice);
-                  }}
-                  className="mt-1 block w-full rounded border px-3 py-2">
-                  <option value="">Select a status</option>
-                  {STATUS_CHOICES.map((item) => <option key={item.key} value={item.key} disabled={(item.percentage === 78 && !permissions?.canCompleteWR78) || (item.percentage === 100 && (!permissions?.canCloseWR100 || !canCloseWorkRequestAt100(workRequest)))}>{item.label}</option>)}
-                </select>
-              </label>
-              <div className="flex flex-wrap items-end gap-2">
-                <button type="button" disabled={terminalReadOnly} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 27)!)}
-                  className="rounded bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700">Cancel WR (27%)</button>
-                <button type="button" disabled={terminalReadOnly || !permissions?.canCompleteWR78} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 78)!)}
-                  className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Technically Completed (78%)</button>
-                <button type="button" title={!canCloseWorkRequestAt100(workRequest) ? "Complete (100%) is available only after Technically Completed (78%)." : undefined} disabled={terminalReadOnly || !permissions?.canCloseWR100 || !canCloseWorkRequestAt100(workRequest)} onClick={() => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!)}
-                  className="rounded border border-blue-700 bg-white px-4 py-2 font-semibold text-blue-800 hover:bg-blue-50">Complete (100%)</button>
-              </div>
-            </div>
+            <PMStatusActionBar workRequest={workRequest} permissions={permissions} terminalReadOnly={terminalReadOnly}
+              onApply={applyStatusByPercentage} onCancel={cancelWorkRequest} onRestore={restoreToIssued} />
             {closureBox}
             <div className="rounded border bg-white p-4">
               <label className="block text-sm font-medium">Message text
@@ -728,11 +543,9 @@ export function PMWorkRequestPopup({
             </div>
           </div>}
 
-          {activeTab === "KPI & Others" && <PMKpiPanel workRequest={workRequest} renderField={renderField} updateWorkRequest={updateWorkRequest} actorName={actorName} craftspeople={data.craftspeople} />}
+          {activeTab === "SLA, Costs & KPIs" && <PMKpiAndSlaPanel workRequest={workRequest} craftspeople={data.craftspeople} updateWorkRequest={updateWorkRequest} actorName={actorName} checklistTotal={checklistProgress.total} checklistCompleted={checklistProgress.completed} unfavourableCount={unfavourableCount} followUpCount={linkedFastJobs.length} />}
 
           {activeTab === "Attached Documents" && <PMDocumentsPanel workRequest={workRequest} updateWorkRequest={updateWorkRequest} actorName={actorName} addDocument={addDocument} removeDocument={removeDocument} documentFilter={documentFilter} setDocumentFilter={setDocumentFilter} />}
-
-          {activeTab === "Checklist" && <PMChecklistSummaryPanel workRequest={workRequest} blueprint={blueprint} checklistStandard={checklistStandard} checklistSteps={checklistSteps} />}
 
           {activeTab === "Team Alignment & Notices" && <PMStakeholderAlignmentSection coordinationItem={coordinationItem} closureBox={closureBox} />}
           {activeTab === "PM Follow-up" && <PMFollowUpPanel canOpenFollowUpFJ={permissions?.canOpenFollowUpFJ} fastJobDescription={fastJobDescription} setFastJobDescription={setFastJobDescription} fastJobUrgency={fastJobUrgency} setFastJobUrgency={setFastJobUrgency} addFollowUp={addFollowUp} followUpFilter={followUpFilter} setFollowUpFilter={setFollowUpFilter} fastJobStep={fastJobStep} setFastJobStep={setFastJobStep} checklistSteps={checklistSteps} linkedFastJobs={linkedFastJobs} linkedLongJobs={linkedLongJobs} onNavigate={onNavigate} onEscalateToLJ={onEscalateToLJ} />}
@@ -745,37 +558,8 @@ export function PMWorkRequestPopup({
         <PMHistoryFooter historyOpen={historyOpen} setHistoryOpen={setHistoryOpen} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} message={message} setMessage={setMessage} addComment={addComment} visibleHistory={visibleHistory} editingComment={editingComment} setEditingComment={setEditingComment} commentDraft={commentDraft} setCommentDraft={setCommentDraft} saveCommentEdit={saveCommentEdit} actorId={actorId} checklistHistoryOpen={checklistHistoryOpen} setChecklistHistoryOpen={setChecklistHistoryOpen} historyFilters={historyFilters} setHistoryFilters={setHistoryFilters} checklistHistory={checklistHistory} />
       </section>
 
-      {assignModalOpen && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-4">
-        <section role="dialog" aria-modal="true" aria-label="Assign Craftperson" className="w-full max-w-xl rounded-lg bg-white p-5 shadow-xl">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold">Assign Craftperson</h3>
-            <button type="button" aria-label="Close assignment dialog" onClick={() => setAssignModalOpen(false)} className="px-2 text-xl">×</button>
-          </div>
-          <input aria-label="Filter craftspeople" value={craftFilter} onChange={(event) => setCraftFilter(event.target.value)}
-            placeholder="Filter craftspeople..." className="my-3 w-full rounded border px-3 py-2" />
-          <div className="max-h-72 overflow-auto">
-            {data.craftspeople.filter((person) =>
-              person.SiteId === activeSiteId &&
-              (!workRequest.TradeId || person.Trade === workRequest.TradeId) &&
-              !workRequest.AssignedCraftpersonIds?.includes(person.id) &&
-              `${person.Name} ${person.LastName}`.toLowerCase().includes(craftFilter.toLowerCase()),
-            ).map((person) => <div key={person.id} className="flex items-center justify-between border-t py-3">
-              <span>{person.Name} {person.LastName} · {person.Trade} · {person.HourlyRate.toFixed(2)} EUR/hour</span>
-              <button type="button" disabled={terminalReadOnly} onClick={() => addCraftperson(person.id)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white disabled:opacity-40">Assign</button>
-            </div>)}
-            {data.users.filter((user) =>
-              user.AssignedSiteIds.includes(activeSiteId) &&
-              (!workRequest.TradeId || user.Trades.includes(workRequest.TradeId)) &&
-              !workRequest.AssignedCraftpersonIds?.includes(user.UserId) &&
-              user.DisplayName.toLowerCase().includes(craftFilter.toLowerCase()),
-            ).map((user) => <div key={user.UserId} className="flex items-center justify-between border-t py-3">
-              <span>{user.DisplayName}</span>
-              <button type="button" disabled={terminalReadOnly} onClick={() => addCraftperson(user.UserId)} className="rounded bg-blue-700 px-3 py-1 text-sm text-white disabled:opacity-40">Assign</button>
-            </div>)}
-          </div>
-          <p className="mt-3 text-xs text-slate-500">Assignments are recorded in the craftperson labor table; enter hourly rate and working time there.</p>
-        </section>
-      </div>}
+      {assignModalOpen && <PMAssignCraftpersonModal workRequest={workRequest} craftspeople={data.craftspeople} users={data.users}
+        activeSiteId={activeSiteId} terminalReadOnly={terminalReadOnly} onAssign={addCraftperson} onClose={() => setAssignModalOpen(false)} />}
 
       {pendingFreezeStatus && <FreezeSafetyGate freezes={wrFreezes} unlockLabel="Confirm & Set to 78%" backLabel="Cancel"
         onBack={() => setPendingFreezeStatus(null)}

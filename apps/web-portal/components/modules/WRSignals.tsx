@@ -8,7 +8,8 @@ import { FrequencyPill } from "../common/PmFrequency";
 
 export function WRSignals({ wr, onOpen }: { wr: BaseWorkRequest; onOpen: (wr: BaseWorkRequest, tab?: SignalTab) => void }) {
   const { data } = useCafmStore();
-  const count = getUnfavourableStepCount(wr, data);
+  // Unfavourable counts are execution signals: hidden for PMs in Issued (50%/55%) and Canceled (27%) queues.
+  const count = wr.WR_Type !== "PM" || isPmEligibleForExecutionSignals(wr) ? getUnfavourableStepCount(wr, data) : 0;
   const followUps = isPmEligibleForExecutionSignals(wr) ? getFollowUpFJsForPM(wr.WR_ID, data.workRequests) : [];
   const parent = getParentPM(wr, data.workRequests);
   const badge = "rounded-lg border px-2 py-1 text-left text-xs font-semibold";

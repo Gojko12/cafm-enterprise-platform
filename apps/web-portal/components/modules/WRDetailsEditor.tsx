@@ -4,16 +4,19 @@ import React, { useState } from "react";
 import { CLASSICAL_TRADES } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Building, Floor, Room } from "@cafm/shared-schema";
 import { LocationEquipmentPickerGroup } from "@/components/common/LocationEquipmentPickerGroup";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
 import { describeLocationFreeze, getActiveFreezeConflictsForWR } from "@/lib/location-freezes";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 
-export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest }) {
+export function WRDetailsEditor({ workRequest, showFreezeConflicts = true }: { workRequest: BaseWorkRequest; showFreezeConflicts?: boolean }) {
   const { data, setData } = useCafmStore();
   const { activePerson } = useSiteContext();
   const { currentRole } = useApp();
+  const { permissions } = useActiveUserPermissions();
+  const canEditSlaDates = !!permissions?.canEditSlaDates;
   const site = workRequest.SiteId;
   const buildings = data.buildings.filter((item) => item.SiteId === site);
   const floors = data.floors.filter((item) => item.SiteId === site);
@@ -26,7 +29,6 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
   const [costType, setCostType] = useState(workRequest.CostType ?? "");
   const [due, setDue] = useState(workRequest.DueDate?.slice(0, 10) ?? "");
   const [margin, setMargin] = useState(workRequest.MarginDate?.slice(0, 10) ?? "");
-  const [craft, setCraft] = useState(workRequest.AssignedCraftpersonIds);
   const [codes, setCodes] = useState(workRequest.EquipmentCodes);
   const [location, setLocation] = useState<{ building: Building | null; floor: Floor | null; room: Room | null }>({
     building: buildings.find((item) => item.bl_id === workRequest.bl_id) ?? null,
@@ -48,13 +50,14 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
     const now = new Date().toISOString();
     const next: BaseWorkRequest = { ...base, Description: description.trim(), TradeId: trade || undefined, TradeName: trade || undefined,
       EstimatedCostEur: amount, CostType: costType === "Fixed" || costType === "Ceiling" ? costType : undefined,
-      DueDate: due === base.DueDate?.slice(0, 10) ? base.DueDate : due || undefined,
-      MarginDate: margin === base.MarginDate?.slice(0, 10) ? base.MarginDate : margin || undefined,
-      AssignedCraftpersonIds: craft, CraftpersonAssignments: base.CraftpersonAssignments?.filter((item) => craft.includes(item.craftpersonId) && base.AssignedCraftpersonIds.includes(item.craftpersonId)), EquipmentCodes: codes,
+      // SLA dates may only change with the canEditSlaDates permission (TO / SiteAdmin / SuperAdmin).
+      DueDate: !canEditSlaDates || due === base.DueDate?.slice(0, 10) ? base.DueDate : due || undefined,
+      MarginDate: !canEditSlaDates || margin === base.MarginDate?.slice(0, 10) ? base.MarginDate : margin || undefined,
+      EquipmentCodes: codes,
       bl_id: location.building.bl_id, LevelName: location.floor?.LevelName, RoomCode: location.room?.RoomCode,
       ProblemLocation: [location.building.bl_id, location.floor?.LevelName, location.room?.RoomCode].filter(Boolean).join(" / "),
       UpdatedAt: now };
-    const changes = (["Description", "TradeName", "EstimatedCostEur", "CostType", "DueDate", "MarginDate", "AssignedCraftpersonIds", "EquipmentCodes", "bl_id", "LevelName", "RoomCode"] as const)
+    const changes = (["Description", "TradeName", "EstimatedCostEur", "CostType", "DueDate", "MarginDate", "EquipmentCodes", "bl_id", "LevelName", "RoomCode"] as const)
       .filter((field) => JSON.stringify(base[field]) !== JSON.stringify(next[field]))
       .map((field) => `${field}: ${JSON.stringify(base[field] ?? null)} -> ${JSON.stringify(next[field] ?? null)}`);
     if (!changes.length) { setError("No changes to save."); return; }
@@ -71,7 +74,8 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
     setError("Save requested. Close and reopen the details popup before making further changes.");
   };
   const conflicts = getActiveFreezeConflictsForWR(workRequest, data.locationFreezes);
-  return <>{conflicts.length > 0 && <div role="status" className="rounded border border-cyan-500 bg-cyan-50 p-3 text-sm"><strong>❄ Planned in Freeze Period</strong>{conflicts.map((item) => <p key={item.id}>{describeLocationFreeze(item)}</p>)}</div>}<details className="rounded border bg-white">
+  const slaLockTitle = "Locked: editing Due / Margin dates requires the Edit SLA Dates permission (Technical Officer, Site Administrator or SuperAdmin).";
+  return <>{showFreezeConflicts && conflicts.length > 0 && <div role="status" className="rounded border border-cyan-500 bg-cyan-50 p-3 text-sm"><strong>❄ Planned in Freeze Period</strong>{conflicts.map((item) => <p key={item.id}>{describeLocationFreeze(item)}</p>)}</div>}<details className="rounded border bg-white">
     <summary className="cursor-pointer bg-slate-50 p-3 font-semibold">Edit work request details</summary>
     <div className="space-y-3 p-3 text-sm">
       {error && <p role="status">{error}</p>}
@@ -80,12 +84,14 @@ export function WRDetailsEditor({ workRequest }: { workRequest: BaseWorkRequest 
         <label>Trade<select value={trade} onChange={(e) => setTrade(e.target.value)} className="block w-full rounded border p-1"><option value="">None</option>{trade && !CLASSICAL_TRADES.some((item) => item === trade) && <option>{trade}</option>}{CLASSICAL_TRADES.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label>Estimated cost EUR<input type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} className="block w-full rounded border p-1" /></label>
         <label>Cost type<select value={costType} onChange={(e) => setCostType(e.target.value)} className="block w-full rounded border p-1"><option value="">None</option><option>Fixed</option><option>Ceiling</option></select></label>
-        <label>Due date<DateInputDDMMYYYY value={due} onValueChange={setDue} className="block w-full" aria-label="Due date" /></label>
-        <label>Margin date<DateInputDDMMYYYY value={margin} onValueChange={setMargin} className="block w-full" aria-label="Margin date" /></label>
+        {canEditSlaDates ? <>
+          <label>Due date<DateInputDDMMYYYY value={due} onValueChange={setDue} className="block w-full" aria-label="Due date" /></label>
+          <label>Margin date<DateInputDDMMYYYY value={margin} onValueChange={setMargin} className="block w-full" aria-label="Margin date" /></label>
+        </> : <>
+          <div title={slaLockTitle}><span className="text-slate-500">Due date 🔒</span><p className="rounded border bg-slate-100 p-1 text-slate-600">{formatDateDDMMYYYY(workRequest.DueDate) || "—"}</p></div>
+          <div title={slaLockTitle}><span className="text-slate-500">Margin date 🔒</span><p className="rounded border bg-slate-100 p-1 text-slate-600">{formatDateDDMMYYYY(workRequest.MarginDate) || "—"}</p></div>
+        </>}
       </div>
-      <label>Assigned craftspeople<select multiple value={craft} onChange={(e) => setCraft(Array.from(e.target.selectedOptions, (option) => option.value))} className="block w-full rounded border p-1">
-        {data.craftspeople.filter((item) => item.SiteId === site).map((person) => <option key={person.id} value={person.id}>{person.Name} {person.LastName} · {person.Trade}</option>)}
-      </select></label>
       <LocationEquipmentPickerGroup buildings={buildings} floors={floors} rooms={rooms} equipment={equipment} selectedBuilding={location.building}
         selectedFloor={location.floor} selectedRoom={location.room} selectedEquipmentCodes={codes} onEquipmentChange={setCodes}
         onLocationChange={(next) => {

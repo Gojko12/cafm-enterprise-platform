@@ -15,7 +15,7 @@ interface Props {
 export function PMDetailsPanel({ workRequest, renderGroup, renderField, equipment, setInstallation, blueprint }: Props) {
   return (
 <div className="space-y-4">
-            <WRDetailsEditor workRequest={workRequest} />
+            <WRDetailsEditor workRequest={workRequest} showFreezeConflicts={false} />
             {renderGroup("Work Request",
               <>
                 {renderField("WR ID", workRequest.WR_ID)}

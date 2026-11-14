@@ -1,5 +1,7 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { WorkRequestsWorkspace } from "@/components/modules/work-requests/WorkRequestsWorkspace";
 
 export default function FastJobsPage() {
-  redirect("/work-requests#FJ");
+  return <WorkRequestsWorkspace fixedType="FJ" />;
 }

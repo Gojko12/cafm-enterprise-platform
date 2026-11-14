@@ -1,5 +1,7 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { WorkRequestsWorkspace } from "@/components/modules/work-requests/WorkRequestsWorkspace";
 
 export default function LongJobsPage() {
-  redirect("/work-requests#LJ");
+  return <WorkRequestsWorkspace fixedType="LJ" />;
 }

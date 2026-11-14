@@ -38,6 +38,16 @@ function checklistResults(blueprint: PM_ChecklistStandard) {
 
 const RESET_KEYS = ["qaTeamLeaderChallenges", "technicianFieldUpdates", "QA_AuditStatus", "QA_InspectionStatus", "AuditInspectionStatus", "QA_IssueDescription", "QA_InspectedBy", "QA_InspectedDate", "QA_SelectionMode", "QA_CompletionDate", "qaReinspectionCount", "EscalatedToLJ_WR_ID", "OriginatingFJ_WR_ID", "CraftpersonAssignments", "StartDate_DateToPerform", "PlannedFreezeText", "ChecklistResults", "ChecklistCompleted", "timeSessions", "laborEntries", "ScheduleId", "ChecklistStandardCode", "ChecklistSteps"];
 
+/** Realistic corrective repairs for Follow-Up FJs spawned by the first PM (the chiller plant inspection). */
+const FOLLOW_UP_REPAIRS = [
+  "Repair refrigerant leak found during PM inspection",
+  "Replace worn compressor drive belt and realign pulleys",
+  "Re-torque vibration mounts and rebalance fan assembly",
+  "Replace failing condenser fan bearing",
+  "Seal corroded chilled-water isolation valve connection",
+  "Recalibrate low-pressure safety cut-out switch",
+];
+
 export function expandSeededWorkRequests(seeded: Seeded, sites: SiteId[]): Seeded {
   const today = calendarDate(new Date());
   const plan = buildPlan();
@@ -61,6 +71,7 @@ export function expandSeededWorkRequests(seeded: Seeded, sites: SiteId[]): Seede
       return found;
     };
     const order: Record<Plan["type"], number> = { PM: 0, FJ: 81, LJ: 87 };
+    const parentEq = frozenInstalls[0] ?? installs[0];
     plan.forEach((entry) => {
       const key = entry.type;
       const n = counters[key] = (counters[key] ?? 0) + 1;
@@ -68,10 +79,13 @@ export function expandSeededWorkRequests(seeded: Seeded, sites: SiteId[]): Seede
       const base = template(entry.type, entry.pct);
       const seq = n - 1 + (entry.type === "PM" ? 0 : 3);
       const eqList: Equipment[] = entry.slot === "freeze" && frozenInstalls.length ? frozenInstalls : installs;
-      const eq = eqList[seq % eqList.length];
+      // Follow-Up FJs stay on the parent PM's equipment so their titles describe realistic repairs on it.
+      const eq = entry.type === "FJ" ? parentEq : eqList[seq % eqList.length];
       const eqIndex = installs.indexOf(eq);
       const blueprint = blueprints[eqIndex % blueprints.length];
-      const description = `${entry.type === "PM" ? "Scheduled inspection" : entry.type === "FJ" ? "Repair and make safe" : "Upgrade and refurbishment"}: ${eq.EquipmentName}`;
+      const description = entry.type === "FJ"
+        ? `${FOLLOW_UP_REPAIRS[(n - 1) % FOLLOW_UP_REPAIRS.length]} — ${eq.EquipmentName}`
+        : `${entry.type === "PM" ? "Scheduled inspection" : "Upgrade and refurbishment"}: ${eq.EquipmentName}`;
       const wr = JSON.parse(JSON.stringify(base).split(base.WR_ID).join(id).split(base.Description).join(description)) as BaseWorkRequest & Record<string, unknown>;
       for (const resetKey of RESET_KEYS) delete wr[resetKey];
       const trade = entry.type === "PM" ? blueprint.TradeName : (eq.PrimaryTradeId ?? "MultiTechnic");
