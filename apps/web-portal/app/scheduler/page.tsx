@@ -32,6 +32,8 @@ import type { DisputeViewMode } from "@/lib/disputes";
 import { cannotScheduleMessage, isWrSchedulable, isWrTerminal } from "@/components/modules/scheduler/scheduler-rules";
 import { finishSchedulerRequestDrag, logSchedulerDropRejected } from "@/lib/scheduler-drag";
 import { SchedulerAssignModal } from "@/components/modules/scheduler/SchedulerAssignModal";
+import { applyAutoSlotProposals, buildAutoSlotProposals } from "@/components/modules/scheduler/auto-slot-engine";
+import { AutoSlotModal } from "@/components/modules/scheduler/AutoSlotModal";
 
 type DropContext = { rawPayload: string; targetDate: string; targetHour: number; targetCraftpersonId: string };
 type Move = { id: string; from?: string; person: string; date: string; start?: string; end?: string; dropContext?: DropContext };
@@ -64,6 +66,7 @@ function SchedulerContent() {
   const [availability, setAvailability] = useState("All");
   const [types, setTypes] = useState(["PM", "FJ", "LJ", "Frozen", "Completed"]);
   const [quickAssign, setQuickAssign] = useState<string | null>(null);
+  const [autoSlotOpen, setAutoSlotOpen] = useState(false);
   const [tab, setTab] = useState<"dispatch" | "availability" | "freezes" | "pms">("dispatch");
   const [disputeMode, setDisputeMode] = useState<DisputeViewMode>("all");
   const disputeMap = useMemo(() => mapWRDisputes(data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes), [data.workRequests, data.craftspeople, data.craftpersonAbsences, data.locationFreezes]);
@@ -296,6 +299,7 @@ function SchedulerContent() {
     {isolateWrId && <div role="status" className="rounded bg-blue-100 p-2">Showing only assignments for WR {isolateWrId} <button className={button} onClick={() => { setIsolateWrId(null); const url = new URL(window.location.href); ["focusWrId", "focusCraftpersonId", "focusStart", "isolateWr"].forEach((key) => url.searchParams.delete(key)); window.history.replaceState(null, "", url); }}>Show All Calendar WRs ✕</button></div>}
     <div className="flex flex-wrap items-center gap-2 rounded border bg-white p-2">
       <button className={button} onClick={() => moveDate(-1)}>◀ Prev</button><button className={button} onClick={() => setDate(calendarDate(new Date()))}>Today</button><button className={button} onClick={() => moveDate(1)}>Next ▶</button>
+      <button className={button} disabled={!permissions?.canScheduleCraftperson} title={permissions?.canScheduleCraftperson ? "Propose conflict-free slots for unscheduled WRs" : "Permission required to schedule craftspeople."} onClick={() => setAutoSlotOpen(true)}>✨ Propose Schedule</button>
       <strong>{dates[0]} – {dates[dates.length - 1]}</strong>
       <select aria-label="Timeline" className={button} value={view} onChange={(e) => setView(e.target.value as typeof view)}><option value="day">Day</option><option value="week">Week</option><option value="two">2 Weeks</option><option value="month">Month</option></select>
       <MultiSelectFilter label="Trades" value={trades} onChange={setTrades} options={CLASSICAL_TRADES.map((item) => ({ value: item, label: item, className: `rounded border px-1 ${tradeColor(item)}` }))} />
@@ -320,6 +324,15 @@ function SchedulerContent() {
     {tab === "pms" && <PmsDefaultSchedules key={activeSiteId} onNotice={setNotice} />}
     {tab === "availability" && <CraftpersonShiftWorkspace key={activeSiteId} onNavigateToDisputeInCalendar={navigateDispute} />}
     {showChoices && (() => { const wr = siteRequests.find((item) => item.WR_ID === showChoices); return wr ? <AssignmentLocatorDialog request={wr} people={people} onSelect={(id) => locate(wr, id)} onClose={() => setShowChoices(null)} /> : null; })()}
+    {autoSlotOpen && <AutoSlotModal
+      result={buildAutoSlotProposals({ requests: siteRequests, people, absences: data.craftpersonAbsences, freezes: data.locationFreezes, siteId: activeSiteId, startDate: now ? calendarDate(now) : date })}
+      onClose={() => setAutoSlotOpen(false)}
+      onApply={(chosen) => {
+        if (!permissions?.canScheduleCraftperson) { setError("Permission required to schedule craftspeople."); return; }
+        setData((state) => ({ ...state, workRequests: applyAutoSlotProposals(state.workRequests, chosen, people, activeSiteId, activePerson, currentRole) }));
+        setNotice(`✨ ${chosen.length} proposed slot${chosen.length === 1 ? "" : "s"} confirmed on the calendar.`);
+        setAutoSlotOpen(false);
+      }} />}
     {quickAssign && (() => {
       const wr = siteRequests.find((item) => item.WR_ID === quickAssign);
       if (!wr) return null;

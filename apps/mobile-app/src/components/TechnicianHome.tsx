@@ -106,6 +106,15 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
   const orderedGroups = [...groups.entries()].sort(([a], [b]) => (a.startsWith("🚨") ? -1 : b.startsWith("🚨") ? 1 : a.startsWith("📂") ? 1 : b.startsWith("📂") ? -1 : 0));
   const isEmptyState = displayWRs.length === 0;
   const freezesFor = (wr: BaseWorkRequest) => getWorkRequestFreezes(wr, freezes, localNowIso());
+  // Section 82 smart fill-in: highlight unscheduled WRs located in a building already visited today.
+  const todayBuildings = new Set(myWRs.filter((wr) => scheduledSlot(wr, technician)?.assignedStartDateTime.slice(0, 10) === currentDate).map((wr) => wr.bl_id).filter(Boolean));
+  const sameBuildingToday = (wr: BaseWorkRequest) => !dateOf(wr) && !!wr.bl_id && todayBuildings.has(wr.bl_id);
+  const handleClaimAndStart = async (wrId: string) => {
+    if (!onClaimWR) return;
+    try { await onClaimWR(wrId); }
+    catch (error) { notify(error instanceof Error ? error.message : "Could not claim the work request."); return; }
+    onOpenWR?.(wrId);
+  };
   const compactRow = (wr: BaseWorkRequest) => {
     const slot = scheduledSlot(wr, technician);
     const late = activeTab === "my-wrs" && overdue(wr);
@@ -122,8 +131,9 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
         {!!wr.absorbedFrequencies?.length && <span className="text-xs text-violet-800">+{wr.absorbedFrequencies.join(",")}</span>}
         {wr.CraftpersonAssignments?.some((item) => item.autoScheduledFromPmsId) && <span className={`${pill} bg-violet-100 text-violet-800`}>🔁 Auto-PMS</span>}
         <span className="min-w-0 flex-1 truncate text-xs text-slate-700">{wr.Description}</span>
+        {sameBuildingToday(wr) && <span className={`${pill} bg-emerald-100 text-emerald-800`}>📍 Same Building Today</span>}
         {activeTab === "unassigned" && onClaimWR
-          ? <button type="button" aria-label={`Claim ${wr.WR_ID}`} onClick={(event) => { event.stopPropagation(); void handleClaimWR(wr.WR_ID || ""); }} className="shrink-0 rounded-lg bg-green-600 px-2 py-0.5 text-[11px] font-bold text-white">Claim</button>
+          ? <span className="flex shrink-0 gap-1"><button type="button" aria-label={`Claim ${wr.WR_ID}`} onClick={(event) => { event.stopPropagation(); void handleClaimWR(wr.WR_ID || ""); }} className="rounded-lg bg-green-600 px-2 py-0.5 text-[11px] font-bold text-white">Claim</button><button type="button" aria-label={`Claim and start ${wr.WR_ID}`} onClick={(event) => { event.stopPropagation(); void handleClaimAndStart(wr.WR_ID || ""); }} className="rounded-lg bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white">✋ Claim &amp; Start</button></span>
           : late ? <span className={`${pill} bg-rose-100 text-rose-800`}>Overdue</span>
           : frozen ? <span className={`${pill} bg-sky-100 text-sky-800`}>Freeze</span>
           : time ? <span className="shrink-0 text-[11px] font-medium text-slate-600">{time}</span> : null}
@@ -199,6 +209,7 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                 {activeTab === "my-wrs" && !overdue(wr) && dateOf(wr) && (() => { const slot = scheduledSlot(wr, technician); const today = dateOf(wr) === currentDate; const inTodaySection = today && agenda !== "all"; const range = slot ? formatPlannedRange(slot.assignedStartDateTime, slot.assignedEndDateTime, new Date(now)) : dateOf(wr); const prefix = today ? (inTodaySection ? "\ud83d\udd50 " : "\ud83d\udd50 Planned Today: ") : "\ud83d\udd50 Can start early anytime: "; return <div className="rounded-t bg-blue-50 p-2 text-sm text-blue-900">{prefix}{range}</div>; })()}
                 {wr.pmFrequency && <div className="flex flex-wrap gap-1 p-2"><FrequencyPill code={wr.pmFrequency} />{!!wr.absorbedFrequencies?.length && <span className="text-xs text-violet-800">Absorbed: {wr.absorbedFrequencies.join(" + ")}</span>}</div>}
                 {wr.CraftpersonAssignments?.some((item) => item.autoScheduledFromPmsId) && <div className="rounded-t bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-800">🔁 Auto-PMS · scheduled automatically by its PMS rule</div>}
+                {sameBuildingToday(wr) && <div className="rounded-t bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">📍 Same Building Today — smart fill-in: you are already scheduled in {wr.bl_id} today</div>}
                 <WRPreviewCard
                   wr={wr}
                   onClick={() => onOpenWR?.(wr.WR_ID || "")}
@@ -207,15 +218,24 @@ export const TechnicianHome: React.FC<TechnicianHomeProps> = ({
                 {freezesFor(wr).length > 0 && <div className="mb-2 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900"><strong>❄ Freeze Period</strong> · {freezesFor(wr)[0].title} · {formatFreezePeriodWindow(freezesFor(wr)[0].startDateTime, freezesFor(wr)[0].endDateTime, new Date(now))}</div>}
                 {(wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === technician && item.teamLeaderReply).map((item) => <p key={item.id} className="mb-2 rounded bg-blue-50 p-2 text-sm">💬 Team Leader ({item.status}): {item.teamLeaderReply}</p>)}
 
-                {/* Claim Button for Unassigned */}
+                {/* Claim Buttons for Unassigned */}
                 {activeTab === "unassigned" && onClaimWR && (
-                  <button
-                    onClick={() => void handleClaimWR(wr.WR_ID || "")}
-                    className="absolute bottom-4 right-4 px-4 py-2 bg-green-500 text-white text-xs font-bold rounded hover:bg-green-600 transition-colors"
-                    aria-label={`Claim ${wr.WR_ID}`}
-                  >
-                    Claim
-                  </button>
+                  <span className="absolute bottom-4 right-4 flex gap-1.5">
+                    <button
+                      onClick={() => void handleClaimWR(wr.WR_ID || "")}
+                      className="px-3 py-2 bg-green-500 text-white text-xs font-bold rounded hover:bg-green-600 transition-colors"
+                      aria-label={`Claim ${wr.WR_ID}`}
+                    >
+                      Claim
+                    </button>
+                    <button
+                      onClick={() => void handleClaimAndStart(wr.WR_ID || "")}
+                      className="px-3 py-2 bg-emerald-700 text-white text-xs font-bold rounded hover:bg-emerald-800 transition-colors"
+                      aria-label={`Claim and start ${wr.WR_ID}`}
+                    >
+                      ✋ Claim &amp; Start
+                    </button>
+                  </span>
                 )}
               </div>
             ))}</section>)}

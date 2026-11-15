@@ -45,7 +45,7 @@ const tradeSchema = z.enum(["Mechanical", "Electrical", "Civil", "MultiTechnic",
 const permissionsSchema = z.object({
   canGeneratePM_WR: z.boolean(), canOpenFollowUpFJ: z.boolean(), canCreateFJ: z.boolean(), canCreateLJ: z.boolean(),
   canClaimUnassignedWR: z.boolean(), canCompleteWR78: z.boolean(), canCloseWR100: z.boolean(),
-  canEditSlaDates: z.boolean().optional(), canReopenCancelledWR: z.boolean().optional(), canDefineChecklistPM: z.boolean(),
+  canEditSlaDates: z.boolean().optional(), canReopenCancelledWR: z.boolean().optional(), canChangeIssuedWRChecklist: z.boolean().optional(), canDefineChecklistPM: z.boolean(),
   canDefineChecklistFJ: z.boolean(), canDefineChecklistLJ: z.boolean(), canDefinePMSchedule: z.boolean(), canAssignPMPToEQ: z.boolean(),
   canManageEquipment: z.boolean(), auditTrades: z.array(tradeSchema), auditWRTypes: z.array(z.enum(["PM", "FJ"])),
   canAuditChooseWRs: z.boolean(), canAuditDoInspection: z.boolean(), canAuditReopenWR: z.boolean(), canManageFailureReasons: z.boolean(),

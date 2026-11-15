@@ -23,6 +23,8 @@ export function permissionsForPreset(preset: AccessPreset): UserGranularPermissi
     canEditSlaDates: preset === "FullAdmin" || preset === "PMEngineer",
     // Restore cancelled WRs: every supervising role, never Craftperson / Helpdesk / HRAdmin.
     canReopenCancelledWR: manager || inspector || preset === "PMEngineer",
+    // Replace the checklist standard on an issued WR: TeamLeader, SiteAdministrator and SuperAdmin only.
+    canChangeIssuedWRChecklist: manager,
     canDefineChecklistPM: engineer, canDefineChecklistFJ: engineer, canDefineChecklistLJ: engineer,
     canDefinePMSchedule: engineer, canAssignPMPToEQ: engineer, canManageEquipment: manager,
     auditTrades: inspector ? [...CLASSICAL_TRADES] : [], auditWRTypes: inspector ? ["PM", "FJ"] : [],
@@ -50,7 +52,7 @@ export function defaultRoleDefinitions(): RoleDefinition[] {
 }
 const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades" | "auditWRTypes">> = [
   "canGeneratePM_WR", "canOpenFollowUpFJ", "canCreateFJ", "canCreateLJ", "canClaimUnassignedWR", "canCompleteWR78", "canCloseWR100",
-  "canEditSlaDates", "canReopenCancelledWR",
+  "canEditSlaDates", "canReopenCancelledWR", "canChangeIssuedWRChecklist",
   "canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ", "canDefinePMSchedule", "canAssignPMPToEQ", "canManageEquipment",
   "canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons", "canScheduleCraftperson",
   "canOverwriteLaborTime", "canManageShiftsAndLeaves", "canManageLocationFreezes",
@@ -77,6 +79,8 @@ export function normalizeChecklistRole(role: RoleDefinition): RoleDefinition {
   permissions.canCloseWR100 = supervising;
   permissions.canReopenCancelledWR = supervising;
   permissions.canEditSlaDates = ["TechnicalOfficer", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
+  // Section 82: issued-WR checklist replacement is strictly SiteAdmin / TeamLeader / SuperAdmin.
+  permissions.canChangeIssuedWRChecklist = ["TeamLeader", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
   return { ...role, permissions };
 }
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {

@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
-import { PmScope } from "../../../web-portal/components/common/PmFrequency";
 import { PhotoCapture } from "../../../web-portal/components/common/PhotoCapture";
-import { WR_Statuses, formatDateDDMMYYYY, formatDateTimeDDMMYYYY, pmTargetLabel } from "@cafm/shared-schema";
+import { WR_Statuses, formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Equipment, LocationFreeze, PmGateResult } from "@cafm/shared-schema";
 import { laborFor, MobileExecutionTools, startTechnicianTimer, stopTechnicianTimer } from "./MobileExecutionTools";
 import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
-import { FreezeAckPanel, FreezeBadge } from "./FreezeSafetyGate";
+import { FreezeAckPanel } from "./FreezeSafetyGate";
 import { completeChecklistInstances } from "../../../web-portal/lib/checklist-completion";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
 import { formatHumanDateTimeRange, formatPlannedRange } from "../lib/human-time";
 import { getFollowUpFJsForPM, getUnfavourableStepCount } from "../../../web-portal/lib/wr-signals";
+import { canOverrideEarlyStart, cycleSpacingExplanation, earlyStartActivityText, evaluateEarlyStart, releaseFutureSlots } from "../../../web-portal/lib/pm-early-start";
+import { WrExecutionHero } from "./WrExecutionHero";
+import { EarlyStartModal } from "./EarlyStartModal";
 
 type Save = (change: (wr: BaseWorkRequest) => BaseWorkRequest, message: string) => Promise<void>;
 const timeFingerprint = (wr: BaseWorkRequest, technician: string) => JSON.stringify([
@@ -19,7 +21,7 @@ const timeFingerprint = (wr: BaseWorkRequest, technician: string) => JSON.string
   wr.CraftpersonLabor?.find((item) => item.craftpersonId === technician),
   wr.CraftpersonAssignments?.find((item) => item.craftpersonId === technician),
 ]);
-export function ExecutionHub({ wr, technician, technicianName, person, people, equipment, freezes, gate, save, back, checklist, followUp, sync, openCompletion, canComplete, now, navigationRef, report, allWorkRequests, offline }: {
+export function ExecutionHub({ wr, technician, technicianName, person, people, equipment, freezes, gate, save, back, checklist, followUp, sync, openCompletion, canComplete, now, navigationRef, report, allWorkRequests, offline, primaryRole }: {
   gate?: (wr: BaseWorkRequest) => PmGateResult | undefined;
   wr: BaseWorkRequest; technician: string; technicianName: string; equipment: Equipment[]; freezes: LocationFreeze[];
   allWorkRequests: BaseWorkRequest[];
@@ -29,6 +31,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
   now: number;
   navigationRef: React.MutableRefObject<(() => boolean) | null>;
   report: () => void;
+  primaryRole?: string;
   save: Save; back: () => void; checklist: (step?: number) => void; followUp?: () => void; sync: (workRequestId: string) => Promise<void>; offline: boolean; canComplete: boolean;
 }) {
   const [dialog, setDialog] = useState<"comments" | "completion" | null>(null);
@@ -150,7 +153,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
         return { ...existing, technicianOpinionMinutes: opinionMinutes, effectiveMinutes: existing.teamLeaderOverrideMinutes ?? opinionMinutes, addedByCoWorker: technicianName, lastModifiedBy: technicianName };
       });
       const trace = `WR set to 78% by ${technicianName}. Recorded Timer: ${primary.recordedTimerMinutes}m, Technician Opinion: ${minutes}m${enteredMinutes === undefined ? " (measured-time fallback)" : ""}.${coworkers.map((item) => { const p = people.find((person) => person.id === item.id)!; return ` Co-worker ${p.Name} ${p.LastName} added with ${item.minutes}m.`; }).join("")}${incompleteChecklistIds.length ? ` Incomplete checklist override recorded for ${incompleteChecklistIds.join(", ")}.` : ""}${summary.trim() ? ` Note: ${summary.trim()}` : ""}`;
-      return { ...current, ...configured, AssignedCraftpersonIds: [...new Set([...current.AssignedCraftpersonIds, technician, ...coworkers.map((item) => item.id)])], Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: trace }], ...(current.WR_Type === "PM" ? { ChecklistCompleted: incompleteChecklistIds.length === 0, ...(incompleteChecklistIds.length ? { ChecklistIncompleteOverride: { overriddenAt: now, overriddenBy: technicianName, incompleteStepIds: incompleteChecklistIds } } : {}), ChecklistInstances: completedInstances, StepAuditLogs: [...(current.StepAuditLogs ?? []), ...(completedInstances ?? []).filter((step) => step.IsCompleted && !current.ChecklistInstances?.find((previous) => previous.StepInstanceId === step.StepInstanceId)?.IsCompleted).map((step) => ({ AuditLogId: crypto.randomUUID(), StepInstanceId: step.StepInstanceId, WR_ID: current.WR_ID, ActorId: technician, Action: "completed" as const, OccurredAt: now }))] } : {}), laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician && !coworkers.some((coworker) => coworker.id === item.craftpersonId)), entry, ...others] };
+      return releaseFutureSlots({ ...current, ...configured, AssignedCraftpersonIds: [...new Set([...current.AssignedCraftpersonIds, technician, ...coworkers.map((item) => item.id)])], Activity: [...(current.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: now, text: trace }], ...(current.WR_Type === "PM" ? { ChecklistCompleted: incompleteChecklistIds.length === 0, ...(incompleteChecklistIds.length ? { ChecklistIncompleteOverride: { overriddenAt: now, overriddenBy: technicianName, incompleteStepIds: incompleteChecklistIds } } : {}), ChecklistInstances: completedInstances, StepAuditLogs: [...(current.StepAuditLogs ?? []), ...(completedInstances ?? []).filter((step) => step.IsCompleted && !current.ChecklistInstances?.find((previous) => previous.StepInstanceId === step.StepInstanceId)?.IsCompleted).map((step) => ({ AuditLogId: crypto.randomUUID(), StepInstanceId: step.StepInstanceId, WR_ID: current.WR_ID, ActorId: technician, Action: "completed" as const, OccurredAt: now }))] } : {}), laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician && !coworkers.some((coworker) => coworker.id === item.craftpersonId)), entry, ...others] }, localDateTime(new Date()), technician, technicianName, "MobileTechnician");
     }, "Technically completed at 78%; time and team confirmed.");
     });
     if (!saved) return;
@@ -176,23 +179,77 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
   const completed = wr.Percentage >= 78;
   const unfavourableCount = getUnfavourableStepCount(wr, { schedules: [], blueprints: [] });
   const followUpCount = wr.WR_Type === "PM" ? getFollowUpFJsForPM(wr.WR_ID, allWorkRequests).length : 0;
+  const idle = !completed && !activeTimer && sessionCount === 0 && recorded === 0;
+  const activeSession = (wr.timeSessions ?? []).find((session) => session.craftpersonId === technician && !session.endedAt);
+  const elapsedSeconds = activeSession ? Math.max(0, Math.floor((now - Date.parse(activeSession.startedAt)) / 1000)) : 0;
+  const clock = [Math.floor(elapsedSeconds / 3600), Math.floor(elapsedSeconds / 60) % 60, elapsedSeconds % 60].map((n) => String(n).padStart(2, "0")).join(":");
+  const stepRows = wr.WR_Type === "PM"
+    ? [...(steps as unknown as Array<{ StepId: string; SortOrder: number; Title: string }>)].sort((a, b) => a.SortOrder - b.SortOrder).map((step, index) => {
+      const result = wr.ChecklistResults?.find((item) => item.stepId === step.StepId);
+      const answered = result
+        ? !(typeof result.value === "string" && !result.value.trim()) && !(Array.isArray(result.value) && !result.value.length)
+        : !!wr.ChecklistInstances?.find((item) => item.StepId === step.StepId)?.IsCompleted;
+      return { id: step.StepId, title: step.Title, index, answered };
+    })
+    : [...(wr.todoSteps ?? [])].sort((a, b) => a.order - b.order).map((step, index) => ({ id: step.id, title: step.title, index, answered: step.completed }));
+  const [earlyStart, setEarlyStart] = useState<{ mode: "lead-window" | "override"; daysEarly: number; leadDays: number } | null>(null);
+  const startNow = (reason?: string, override = false) => void execute(async () => {
+    const context = earlyStart;
+    await save((current) => {
+      const started = startTechnicianTimer(current, technician, technicianName);
+      if (!reason || !context) return started;
+      return { ...started, Activity: [...(started.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: new Date().toISOString(), text: earlyStartActivityText(reason, context.daysEarly, override) }] };
+    }, "Started work timer.");
+    setEarlyStart(null);
+  });
+  // Section 82 — 3-zone early-start rule: hard freeze block, opportunistic lead window, supervisor override.
+  const attemptStart = () => {
+    if (!confirmUncleared("Start this PM")) return;
+    const zone = evaluateEarlyStart({ wr, freezes, nowLocal: localDateTime(new Date(now)), plannedStart: slot?.assignedStartDateTime ?? wr.StartDate_DateToPerform });
+    if (zone.zone === "freeze-blocked") { setError(`❄ Zone 1 — ${zone.freeze.title}: starting this ${wr.WR_Type} is blocked while an active Location Freeze disallows it. Window: ${zone.freeze.startDateTime} – ${zone.freeze.endDateTime}.`); return; }
+    if (!idle || zone.zone === "on-schedule") { startNow(); return; }
+    if (zone.zone === "lead-window") { setEarlyStart({ mode: "lead-window", daysEarly: zone.daysEarly, leadDays: zone.leadDays }); return; }
+    if (!canOverrideEarlyStart(primaryRole)) { setError(cycleSpacingExplanation(wr, zone.daysEarly, zone.leadDays)); return; }
+    setEarlyStart({ mode: "override", daysEarly: zone.daysEarly, leadDays: zone.leadDays });
+  };
+  const haltTimer = (pause: boolean) => void execute(async () => {
+    await save((current) => stopTechnicianTimer(current, technician, person), pause ? "Paused work timer; recorded minutes are kept — tap Resume to continue." : "Stopped work timer.");
+  });
+  const openStep = (index: number) => { if (!activeTimer) { setLockedNotice(true); return; } checklist(index); };
   return <div className="space-y-3 p-4 pb-24">
-    <div className="sticky top-0 z-30 mb-4 flex min-h-12 shrink-0 flex-wrap items-center gap-2 rounded border bg-white p-2 shadow-sm"><button disabled={busy} onClick={back} className="text-blue-700">← Back to WRs</button><strong>{wr.WR_ID}</strong><span className="rounded bg-blue-100 px-2">{wr.WR_Type}</span><span className="rounded bg-slate-100 px-2">{wr.Percentage}%</span></div>
-    <PmScope wr={wr} />
+    <WrExecutionHero wr={wr} equipment={equipment} planned={planned} pmGate={pmGate} freezes={activeFreezes} now={now}
+      busy={busy} running={!!activeTimer} clock={clock} idle={idle} completed={completed} stepsTotal={steps.length}
+      sessionCount={sessionCount} recordedMinutes={recorded}
+      onBack={back} onStart={attemptStart} onPause={() => haltTimer(true)} onStop={() => haltTimer(false)} />
+    {ahead && !completed && <p className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700">⚡ Starting ahead of scheduled slot: {planned}</p>}
     {completed && <section className="space-y-2 rounded-2xl border-2 border-emerald-500/40 bg-emerald-50 p-4"><h1 className="flex items-center gap-2 text-lg font-bold text-emerald-900"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="m7 12 3 3 7-7" /></svg>{wr.Percentage === 100 ? "Closed" : "Technically Completed"} · {wr.Percentage}%</h1><p className="text-sm text-emerald-900">Work completed and submitted for Team Leader / QA review</p><div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-white px-2 py-1">Recorded Time: {recorded}m across {sessionCount} sessions</span><span className="rounded-full bg-white px-2 py-1">Checklist: {done}/{steps.length} steps · {unfavourableCount} Unfavourable</span>{followUpCount > 0 && <span className="rounded-full bg-white px-2 py-1">Follow-Up FJs: {followUpCount} opened</span>}</div></section>}
     {error && <p role="alert" className="rounded bg-rose-50 p-2 text-rose-700">{error}</p>}{notice && <p role="status" className={`rounded p-2 ${offlineNotice ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-700"}`}>{notice}</p>}
     {wr.QA_AuditStatus === "QA_Failed_ActionRequired" && <div className="space-y-2 rounded bg-rose-50 p-3"><strong>⚠ QA REWORK REQUIRED</strong><p>{wr.QA_IssueDescription}</p><textarea className="w-full rounded border p-2" placeholder="Correction performed" value={correction} onChange={(e) => setCorrection(e.target.value)} /><button className="rounded bg-rose-700 px-3 py-1 text-white" disabled={busy || !correction.trim()} onClick={() => void execute(async () => { await save((current) => { if (current.QA_AuditStatus !== "QA_Failed_ActionRequired") throw new Error("This audit no longer requires correction."); return { ...current, QA_AuditStatus: "QA_Corrected", QA_CorrectionComment: correction.trim(), QA_CorrectedDate: new Date().toISOString() }; }, `QA correction submitted: ${correction.trim()}`); setCorrection(""); }, "Correction submitted for verification.")}>Submit correction</button></div>}
-    {pmGate && (uncleared
-      ? <div role="status" className="rounded-xl border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900"><strong>⚠️ Hold / Pending Clearance: {pmGate.blockers.join(", ")}</strong></div>
-      : <div role="status" className="rounded-xl border border-emerald-400 bg-emerald-50 p-3 text-sm text-emerald-900"><strong>✅ Cleared ({pmGate.cleared.join(", ")}{pmGate.cleared.length ? " · " : ""}Newsflash Sent)</strong>{pmGate.windows.map((item) => <p key={item.code} className="font-bold">{item.code}: {item.window}</p>)}</div>)}
-    {activeFreezes.length > 0 ? <FreezeBadge freezes={activeFreezes} /> : wr.IsFrozen && <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900"><strong>❄ Freeze Period</strong><p>{wr.FreezeReason || wr.ActiveFreezeName}</p></div>}
     {freezeGate && <FreezeAckPanel freezes={activeFreezes} busy={busy} confirmLabel="Confirm & Continue to 78%" backLabel="Cancel" onBack={() => setFreezeGate(false)} onConfirm={() => void execute(async () => { await save((current) => ({ ...current, freezeAcknowledged: buildFreezeAcknowledgment(activeFreezes, technicianName) }), `Freeze period safety acknowledgment confirmed by ${technicianName}`); setFreezeGate(false); await beginCompletion(true); })} />}
-    <section className="space-y-1 rounded border bg-white p-4"><h1 className="text-lg font-bold">{wr.Description}</h1><p>{wr.bl_id} / {wr.LevelName ?? "—"} / {wr.RoomCode ?? "—"}</p><p>Target: {pmTargetLabel(wr)} {wr.EquipmentCodes.map((code) => equipment.find((item) => item.EquipmentCode === code)?.EquipmentName ?? "").join(", ")}</p><p>Trade: {wr.TradeName ?? wr.TradeId ?? "—"} · Priority: {wr.Urgency ?? "—"}</p><p>Due: {wr.DueDate ? formatDateDDMMYYYY(wr.DueDate) : "—"} · Margin: {wr.MarginDate ? formatDateDDMMYYYY(wr.MarginDate) : "—"}</p><p>Schedule: {planned}</p></section>
-    {!completed && <div className="rounded bg-blue-50 p-3 text-sm"><p>Planned Schedule: {planned}</p><p>Recorded Timer: {recorded}m · Technician Opinion: {wr.laborEntries?.find((item) => item.craftpersonId === technician)?.technicianOpinionMinutes === undefined ? "Not provided" : `${wr.laborEntries.find((item) => item.craftpersonId === technician)!.technicianOpinionMinutes}m`}</p>{ahead && <p className="font-semibold text-emerald-700">⚡ Starting ahead of scheduled slot: {planned}</p>}</div>}
     {(wr.technicianFieldUpdates ?? []).filter((item) => item.craftpersonId === technician && item.teamLeaderReply).map((item) => <p key={item.id} className="rounded bg-blue-50 p-2">💬 Team Leader ({item.status}): {item.teamLeaderReply}</p>)}
-    {!completed && <button disabled={busy} className="rounded border border-amber-400 bg-amber-50 p-2" onClick={report}>🚩 Report Delay / Ask Team Leader</button>}
-    <MobileExecutionTools wr={wr} technician={technician} technicianName={technicianName} person={person} save={save} now={now} confirmStart={() => confirmUncleared("Start this PM")} />
-    {completed ? <div className="grid gap-2"><button type="button" disabled={busy} className="rounded-xl border border-emerald-400 bg-white p-3 font-semibold text-emerald-900" onClick={() => checklist()}>📋 Review Completed Checklist ({done} / {steps.length} steps)</button><button type="button" className="rounded-xl border bg-white p-3" onClick={() => setDialog("comments")}>💬 Comments &amp; Photos</button></div> : <div className="grid gap-2"><button disabled={busy} aria-disabled={!activeTimer} className={`rounded p-3 ${activeTimer ? "bg-blue-700 text-white" : "bg-amber-100 text-amber-900"}`} onClick={() => { if (!activeTimer) { setLockedNotice(true); return; } checklist(); }}>{activeTimer ? `📋 Open Checklist / To-Do Steps (${done} / ${steps.length} completed)` : `🔒 Start Timing First to Open Checklist (${done} / ${steps.length} steps)`}</button>{lockedNotice && !activeTimer && <div role="status" className="rounded bg-amber-50 p-3"><p>You must start timing on this Work Request before opening the checklist.</p><button disabled={busy} className="mt-2 rounded bg-emerald-700 p-2 text-white" onClick={() => void execute(async () => { if (!confirmUncleared("Start this PM")) return; await save((current) => startTechnicianTimer(current, technician, technicianName), "Started work timer."); checklist(); })}>▶ Start Timing &amp; Open Checklist</button></div>}<button disabled={busy} className="rounded border bg-white p-3" onClick={() => setDialog("comments")}>💬 Comments &amp; Photos</button>{canComplete && <button disabled={busy} className="rounded bg-blue-800 p-3 text-white" onClick={() => void beginCompletion()}>✓ Complete Work — Set to 78% Technically Completed</button>}</div>}
+    {completed ? <>
+      <MobileExecutionTools wr={wr} technician={technician} technicianName={technicianName} person={person} save={save} now={now} />
+      <div className="grid gap-2"><button type="button" disabled={busy} className="rounded-xl border border-emerald-400 bg-white p-3 font-semibold text-emerald-900" onClick={() => checklist()}>📋 Review Completed Checklist ({done} / {steps.length} steps)</button><button type="button" className="rounded-xl border bg-white p-3" onClick={() => setDialog("comments")}>💬 Comments &amp; Photos</button></div>
+    </> : <>
+      {!idle && <section className="overflow-hidden rounded-2xl border bg-white">
+        <header className="flex items-center justify-between border-b bg-slate-50 px-3 py-2"><h2 className="text-sm font-bold">📋 Checklist / To-Do Steps</h2><span className="text-xs font-semibold text-slate-600">{done} / {steps.length} completed</span></header>
+        {!activeTimer && <p className="border-b border-amber-100 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">⏸ Timer not running — resume timing to answer steps.</p>}
+        <ul>
+          {stepRows.map((row) => <li key={row.id}><button type="button" disabled={busy} onClick={() => openStep(row.index)} className="flex w-full items-center gap-2.5 border-b border-slate-100 px-3 py-2.5 text-left text-sm hover:bg-slate-50">
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${row.answered ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700"}`}>{row.answered ? "✓" : row.index + 1}</span>
+            <span className="min-w-0 flex-1 truncate">{row.title}</span>
+          </button></li>)}
+          {!stepRows.length && <li className="px-3 py-3 text-sm text-slate-500">No checklist steps are assigned.</li>}
+        </ul>
+      </section>}
+      {lockedNotice && !activeTimer && <div role="status" className="rounded bg-amber-50 p-3"><p>You must start timing on this Work Request before answering the checklist.</p><button disabled={busy} className="mt-2 rounded bg-emerald-700 p-2 text-white" onClick={() => { setLockedNotice(false); attemptStart(); }}>▶ Resume Timing to Unlock</button></div>}
+      {canComplete && !idle && <button disabled={busy} className="w-full rounded bg-blue-800 p-3 text-white" onClick={() => void beginCompletion()}>✓ Complete Work — Set to 78% Technically Completed</button>}
+      <div className="grid grid-cols-3 gap-2">
+        <button type="button" disabled={busy} className="rounded-xl border border-amber-400 bg-amber-50 p-2 text-xs font-semibold text-amber-900 disabled:opacity-50" onClick={report}>🚩 Delay / Ask TL</button>
+        <button type="button" disabled={busy} className="rounded-xl border border-slate-200 bg-white p-2 text-xs font-semibold text-slate-700 disabled:opacity-50" onClick={() => setDialog("comments")}>💬 Notes &amp; Photos</button>
+        <button type="button" disabled={busy || !followUp} className="rounded-xl border border-indigo-200 bg-indigo-50 p-2 text-xs font-semibold text-indigo-900 disabled:opacity-40" onClick={followUp}>⚡ + Follow-Up FJ</button>
+      </div>
+    </>}
     {precheck && precheck.length > 0 && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" role="presentation">
       <section role="dialog" aria-modal="true" aria-labelledby="mobile-checklist-warning" className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-xl">
         <header className="border-b p-4"><h2 id="mobile-checklist-warning" className="font-semibold text-amber-900">Checklist incomplete</h2><p className="mt-1 text-sm text-slate-700">{precheck.length} of {requiredStepCount} required steps are incomplete. Choose an explicit override to continue to 78%; the override will be recorded in the work request audit.</p></header>
@@ -204,7 +261,9 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
         </footer>
       </section>
     </div>}
-    {followUp && <div className="text-center"><button type="button" disabled={busy} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50" onClick={followUp}>+ Report Follow-Up Fast Job</button></div>}
+    {completed && followUp && <div className="text-center"><button type="button" disabled={busy} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50" onClick={followUp}>+ Report Follow-Up Fast Job</button></div>}
+    {earlyStart && <EarlyStartModal wr={wr} daysEarly={earlyStart.daysEarly} leadDays={earlyStart.leadDays} mode={earlyStart.mode}
+      plannedLabel={planned} busy={busy} onClose={() => setEarlyStart(null)} onConfirm={(reason, override) => startNow(reason, override)} />}
     {dialog && <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => { if (!busy) closeDialog(); }}><div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
       <div className="flex items-start justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-base font-bold">{dialog === "completion" ? "Complete Work Request (78%)" : "Comments & Photos"}</h2>{dialog === "completion" && <p className="text-xs text-slate-500">Time &amp; Team Confirmation</p>}</div><button type="button" disabled={busy} aria-label="Close" className="text-lg leading-none text-slate-500" onClick={closeDialog}>✕</button></div>
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">

@@ -30,7 +30,14 @@ export function stopTechnicianTimer(current: BaseWorkRequest, technician: string
   const previous = laborFor(current, current.timeSessions ?? [], technician, new Date(end).toISOString(), person);
   const entry = { ...laborFor(current, sessions, technician, new Date(end).toISOString(), person), recordedTimerMinutes: previous.recordedTimerMinutes + minutes };
   entry.effectiveMinutes = entry.teamLeaderOverrideMinutes ?? entry.technicianOpinionMinutes ?? entry.recordedTimerMinutes;
-  return { ...current, timeSessions: sessions, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), entry], TotalTimeMinutes: current.TotalTimeMinutes + minutes };
+  // Section 82: stamp the actual session interval onto unscheduled WRs so the Scheduler calendar gains visibility of the fill-in work.
+  const assignments = scheduledSlot(current, technician) ? current.CraftpersonAssignments : [...(current.CraftpersonAssignments ?? []), {
+    craftpersonId: technician,
+    assignedStartDateTime: localDateTime(new Date(startTime)),
+    assignedEndDateTime: localDateTime(new Date(Math.max(end, startTime + 60000))),
+    ...(person ? { name: person.Name, lastName: person.LastName, hourlyRate: person.HourlyRate } : {}),
+  }];
+  return { ...current, timeSessions: sessions, CraftpersonAssignments: assignments, laborEntries: [...(current.laborEntries ?? []).filter((item) => item.craftpersonId !== technician), entry], TotalTimeMinutes: current.TotalTimeMinutes + minutes };
 }
 
 export function startTechnicianTimer(current: BaseWorkRequest, technician: string, technicianName: string): BaseWorkRequest {

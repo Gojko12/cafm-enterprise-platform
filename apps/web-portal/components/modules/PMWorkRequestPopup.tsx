@@ -18,6 +18,7 @@ import { WorkRequestLabor } from "@/components/modules/WorkRequestLabor";
 import { assignPerson } from "@/lib/dispatch";
 import { FreezeSafetyGate } from "@/components/modules/FreezeSafetyGate";
 import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "@/lib/location-freezes";
+import { releaseFutureSlots } from "@/lib/pm-early-start";
 import { newestFirst } from "@/lib/history-order";
 import { hasOpenQARework } from "@/lib/qa-settings";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
@@ -265,7 +266,8 @@ export function PMWorkRequestPopup({
       overriddenBy: actorName,
       incompleteStepIds: checklistProgress.incomplete.map((step) => "StepId" in step ? step.StepId : step.id),
     } : undefined;
-    updateWorkRequest((current) => ({
+    updateWorkRequest((current) => {
+      const next = {
       ...current,
       ...status,
       Percentage: choice.percentage,
@@ -274,7 +276,10 @@ export function PMWorkRequestPopup({
       ...(checklistOverrideRecord ? { ChecklistCompleted: false } : {}),
       ...(reason ? { IsFrozen: true, FreezeReason: reason } : {}),
       ...(choice.percentage !== 55 ? { IsFrozen: false } : {}),
-    }), `WR status changed from ${workRequest.Percentage}% to ${choice.percentage}% (${choice.label}) by ${actorName}${cancelReason ? `. Cancellation reason: ${cancelReason.trim()}` : ""}${checklistOverrideRecord ? ` with incomplete checklist override (${checklistOverrideRecord.incompleteStepIds.length} steps)` : ""}`);
+      };
+      // Section 82: reaching 78% early releases any still-scheduled future calendar slots.
+      return choice.percentage === 78 ? releaseFutureSlots(next, localNowIso(), actorId, actorName, currentRole) : next;
+    }, `WR status changed from ${workRequest.Percentage}% to ${choice.percentage}% (${choice.label}) by ${actorName}${cancelReason ? `. Cancellation reason: ${cancelReason.trim()}` : ""}${checklistOverrideRecord ? ` with incomplete checklist override (${checklistOverrideRecord.incompleteStepIds.length} steps)` : ""}`);
   };
 
   const applyStatusByPercentage = (percentage: 50 | 55 | 78 | 100, holdReason?: PmHoldReason) => {
@@ -361,20 +366,6 @@ export function PMWorkRequestPopup({
       ...current,
       Attachments: (current.Attachments ?? []).filter((item) => item.id !== documentId),
     }), `Document '${documentName}' was deleted by ${actorName}`);
-  };
-
-  const chooseChecklist = (code: string) => {
-    if (!permissions?.canDefineChecklistPM) { window.alert("Only authorized team leaders, engineers or administrators can define a checklist."); return; }
-    const selected = data.blueprints.find((item) =>
-      item.ChecklistCode === code && (!item.SiteId || item.SiteId === workRequest.SiteId),
-    );
-    if (!selected) return;
-    updateWorkRequest((current) => ({
-      ...current,
-      ChecklistStandardCode: selected.ChecklistCode,
-      ChecklistSteps: selected.Steps,
-    }),
-      `Checklist standard ${selected.Title} selected by ${actorName}`);
   };
 
   const updateChecklistResult = (result: ChecklistResult | null, stepId: string) => {
@@ -552,7 +543,7 @@ export function PMWorkRequestPopup({
 
           {activeTab === "AuditLog" && <PMAuditLogPanel workRequest={workRequest} auditRows={auditRows} />}
 
-          {activeTab === "Checklist - Smart PM" && <PMSmartChecklistPanel canDefineChecklistPM={permissions?.canDefineChecklistPM} checklistStandard={checklistStandard} chooseChecklist={chooseChecklist} blueprints={data.blueprints} workRequest={workRequest} blueprint={blueprint} checklistSteps={checklistSteps} setExecutorOpen={setExecutorOpen} stepFilter={stepFilter} setStepFilter={setStepFilter} stepCompletionFilter={stepCompletionFilter} setStepCompletionFilter={setStepCompletionFilter} />}
+          {activeTab === "Checklist - Smart PM" && <PMSmartChecklistPanel canChangeIssuedWRChecklist={permissions?.canChangeIssuedWRChecklist} isSiteAdmin={!!profile?.isSiteAdmin || !!profile?.isSuperAdmin} actorName={actorName} checklistStandard={checklistStandard} updateWorkRequest={updateWorkRequest} blueprints={data.blueprints} workRequest={workRequest} blueprint={blueprint} checklistSteps={checklistSteps} setExecutorOpen={setExecutorOpen} stepFilter={stepFilter} setStepFilter={setStepFilter} stepCompletionFilter={stepCompletionFilter} setStepCompletionFilter={setStepCompletionFilter} />}
         </main>
 
         <PMHistoryFooter historyOpen={historyOpen} setHistoryOpen={setHistoryOpen} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} message={message} setMessage={setMessage} addComment={addComment} visibleHistory={visibleHistory} editingComment={editingComment} setEditingComment={setEditingComment} commentDraft={commentDraft} setCommentDraft={setCommentDraft} saveCommentEdit={saveCommentEdit} actorId={actorId} checklistHistoryOpen={checklistHistoryOpen} setChecklistHistoryOpen={setChecklistHistoryOpen} historyFilters={historyFilters} setHistoryFilters={setHistoryFilters} checklistHistory={checklistHistory} />

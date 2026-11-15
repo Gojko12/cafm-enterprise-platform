@@ -1,12 +1,16 @@
-import React from "react";
+import React, { useState } from "react";
 import type { BaseWorkRequest, PM_ChecklistStandard, PM_ScheduleStep } from "@cafm/shared-schema";
 import { FrequencyPill } from "@/components/common/PmFrequency";
 import { getChecklistFinding } from "@/lib/wr-signals";
+import { ChangeChecklistStandardModal } from "./ChangeChecklistStandardModal";
+import { answeredChecklistCount, applyChecklistStandardChange, checklistChangeLogText, checklistChangeTier } from "./checklist-standard-change";
 
 interface Props {
-  canDefineChecklistPM: boolean | undefined;
+  canChangeIssuedWRChecklist: boolean | undefined;
+  isSiteAdmin: boolean;
+  actorName: string;
   checklistStandard: string;
-  chooseChecklist: (code: string) => void;
+  updateWorkRequest: (change: (current: BaseWorkRequest) => BaseWorkRequest, logText?: string) => void;
   blueprints: PM_ChecklistStandard[];
   workRequest: BaseWorkRequest;
   blueprint: PM_ChecklistStandard | undefined;
@@ -18,20 +22,43 @@ interface Props {
   setStepCompletionFilter: (value: string) => void;
 }
 
-export function PMSmartChecklistPanel({ canDefineChecklistPM, checklistStandard, chooseChecklist, blueprints, workRequest, blueprint, checklistSteps, setExecutorOpen, stepFilter, setStepFilter, stepCompletionFilter, setStepCompletionFilter }: Props) {
+export function PMSmartChecklistPanel({ canChangeIssuedWRChecklist, isSiteAdmin, actorName, checklistStandard, updateWorkRequest, blueprints, workRequest, blueprint, checklistSteps, setExecutorOpen, stepFilter, setStepFilter, stepCompletionFilter, setStepCompletionFilter }: Props) {
+  const [changeOpen, setChangeOpen] = useState(false);
+  const cancelled = workRequest.Percentage === 27 || workRequest.Percentage === 29;
+  const closed = workRequest.Percentage === 100;
+  const tier = checklistChangeTier(workRequest);
+  const currentTitle = blueprint ? `${blueprint.ChecklistCode} · ${blueprint.Title}` : checklistStandard || "No standard selected";
+  const changeDisabledReason = cancelled ? "Cancelled Work Requests cannot be modified"
+    : !canChangeIssuedWRChecklist ? "Only a Site Administrator or Team Leader can change the checklist standard on an issued Work Request"
+      : closed && !isSiteAdmin ? "100% Closed Work Requests are sealed. Only a Site Administrator can override and reopen a 100% Closed checklist."
+        : !tier ? `A ${workRequest.Percentage}% Work Request does not support checklist standard changes.` : "";
+  const executeDisabledReason = closed || cancelled ? "Cannot execute checklist on a Closed or Cancelled Work Request." : "";
+  const answered = answeredChecklistCount(workRequest);
+  const confirmChange = (selected: PM_ChecklistStandard, reason: string) => {
+    if (!tier) return;
+    updateWorkRequest((current) => applyChecklistStandardChange(current, selected, {
+      tier, reason, actorName, previousTitle: currentTitle, answered, total: checklistSteps.length,
+    }), checklistChangeLogText(tier, currentTitle, selected, reason, answered, checklistSteps.length));
+    setChangeOpen(false);
+  };
   return (
 <section className="space-y-4 rounded border bg-white p-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
-              {canDefineChecklistPM ? <label className="block text-sm font-medium">Checklist Standard
-                <select aria-label="Checklist Standard" value={checklistStandard}
-                  onChange={(event) => chooseChecklist(event.target.value)}
-                  className="mt-1 block min-w-64 rounded border px-3 py-2">
-                  <option value="">Select checklist standard</option>
-                  {blueprints.filter((item) => !item.SiteId || item.SiteId === workRequest.SiteId)
-                    .map((item) => <option key={item.ChecklistCode} value={item.ChecklistCode}>{item.Title}</option>)}
-                </select>
-              </label> : <p className="text-sm">Checklist Standard: {blueprint?.Title ?? checklistStandard ?? "Not selected"}</p>}
-              <button type="button" disabled={!checklistSteps.length}
+              <div className="min-w-64 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Checklist Standard</p>
+                <p className="text-sm font-semibold text-slate-900">{currentTitle}</p>
+                <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-600">
+                  {blueprint?.frequencyCode && <FrequencyPill code={blueprint.frequencyCode} />}{checklistSteps.length} steps
+                </p>
+                <button type="button" disabled={!!changeDisabledReason} title={changeDisabledReason || undefined}
+                  aria-label={closed && isSiteAdmin ? "Override Closed Checklist" : "Change Standard"}
+                  onClick={() => setChangeOpen(true)}
+                  className={`mt-2 rounded border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${closed && isSiteAdmin && !changeDisabledReason ? "border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}>
+                  {closed && isSiteAdmin ? "Override Closed Checklist..." : "Change Standard..."}
+                </button>
+              </div>
+              <button type="button" disabled={!checklistSteps.length || !!executeDisabledReason}
+                title={executeDisabledReason || undefined}
                 onClick={() => setExecutorOpen(true)}
                 className="rounded bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-50">Execute Checklist</button>
             </div>
@@ -78,6 +105,9 @@ export function PMSmartChecklistPanel({ canDefineChecklistPM, checklistStandard,
                 {!checklistSteps.length && <tr><td colSpan={7} className="p-5 text-center text-slate-500">No checklist steps are available.</td></tr>}
               </tbody></table>
             </div>
+            {changeOpen && <ChangeChecklistStandardModal workRequest={workRequest} blueprints={blueprints}
+              currentBlueprint={blueprint} currentTitle={currentTitle} currentStepCount={checklistSteps.length}
+              answeredCount={answered} onClose={() => setChangeOpen(false)} onConfirm={confirmChange} />}
           </section>
   );
 }

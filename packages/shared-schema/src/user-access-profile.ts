@@ -14,6 +14,8 @@ export const UserGranularPermissionsSchema = z.object({
   canEditSlaDates: z.boolean(),
   /** Restore a cancelled WR (27% -> 50% Issued / 29% -> 50%/10%): everyone except Craftperson. */
   canReopenCancelledWR: z.boolean(),
+  /** Replace the checklist standard on an issued WR: TeamLeader, SiteAdministrator and SuperAdmin only. */
+  canChangeIssuedWRChecklist: z.boolean(),
   canDefineChecklistPM: z.boolean(),
   canDefineChecklistFJ: z.boolean(),
   canDefineChecklistLJ: z.boolean(),
