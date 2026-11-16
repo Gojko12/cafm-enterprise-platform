@@ -3,7 +3,7 @@ import { PhotoCapture } from "../../../web-portal/components/common/PhotoCapture
 import { WR_Statuses, formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Equipment, LocationFreeze, PmGateResult } from "@cafm/shared-schema";
 import { laborFor, MobileExecutionTools, startTechnicianTimer, stopTechnicianTimer } from "./MobileExecutionTools";
-import { buildFreezeAcknowledgment, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
+import { buildFreezeAcknowledgment, getCurrentLocationFreezes, getWorkRequestFreezes, localNowIso } from "../../../web-portal/lib/location-freezes";
 import { FreezeAckPanel } from "./FreezeSafetyGate";
 import { completeChecklistInstances } from "../../../web-portal/lib/checklist-completion";
 import { localDateTime, scheduledSlot } from "../../../web-portal/lib/field-updates";
@@ -192,25 +192,40 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
       return { id: step.StepId, title: step.Title, index, answered };
     })
     : [...(wr.todoSteps ?? [])].sort((a, b) => a.order - b.order).map((step, index) => ({ id: step.id, title: step.title, index, answered: step.completed }));
-  const [earlyStart, setEarlyStart] = useState<{ mode: "lead-window" | "override"; daysEarly: number; leadDays: number } | null>(null);
-  const startNow = (reason?: string, override = false) => void execute(async () => {
+  const [earlyStart, setEarlyStart] = useState<{ mode: "lead-window" | "override"; daysEarly: number; leadDays: number; freezeOverrides: LocationFreeze[] } | null>(null);
+  const startNow = (reason?: string, override = false, freezeOverrides: LocationFreeze[] = []) => void execute(async () => {
     const context = earlyStart;
     await save((current) => {
-      const started = startTechnicianTimer(current, technician, technicianName);
+      if (current.WR_Type === "PM") {
+        const blocking = getCurrentLocationFreezes(current, freezes, localNowIso()).filter((freeze) => !freeze.allowPM);
+        if (blocking.some((freeze) => !freezeOverrides.some((confirmed) => JSON.stringify(confirmed) === JSON.stringify(freeze)))) {
+          throw new Error("The active Location Freeze changed. Review and confirm the override before starting.");
+        }
+      }
+      let started = startTechnicianTimer(current, technician, technicianName);
+      if (freezeOverrides.length) started = { ...started, Activity: [...(started.Activity ?? []), ...freezeOverrides.map((freeze) => ({
+        id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician",
+        createdAt: new Date().toISOString(), text: `Location Freeze override confirmed to start PM: ${freeze.title} (${formatDateTimeDDMMYYYY(freeze.startDateTime)} – ${formatDateTimeDDMMYYYY(freeze.endDateTime)}).`,
+      }))] };
       if (!reason || !context) return started;
       return { ...started, Activity: [...(started.Activity ?? []), { id: crypto.randomUUID(), kind: "log" as const, actorId: technician, actorName: technicianName, actorRole: "MobileTechnician", createdAt: new Date().toISOString(), text: earlyStartActivityText(reason, context.daysEarly, override) }] };
     }, "Started work timer.");
     setEarlyStart(null);
   });
-  // Section 82 — 3-zone early-start rule: hard freeze block, opportunistic lead window, supervisor override.
   const attemptStart = () => {
     if (!confirmUncleared("Start this PM")) return;
-    const zone = evaluateEarlyStart({ wr, freezes, nowLocal: localDateTime(new Date(now)), plannedStart: slot?.assignedStartDateTime ?? wr.StartDate_DateToPerform });
+    const nowLocal = localDateTime(new Date(now));
+    const freezeOverrides = wr.WR_Type === "PM" ? getCurrentLocationFreezes(wr, freezes, nowLocal).filter((freeze) => !freeze.allowPM) : [];
+    for (const freeze of freezeOverrides) {
+      if (!window.confirm(`Active Location Freeze (${freeze.title}: ${formatDateTimeDDMMYYYY(freeze.startDateTime)} – ${formatDateTimeDDMMYYYY(freeze.endDateTime)}) disallows routine PMs. Override freeze and start this PM anyway?`)) return;
+    }
+    if (freezeOverrides.length) setError("");
+    const zone = evaluateEarlyStart({ wr, freezes: freezes.filter((freeze) => !freezeOverrides.includes(freeze)), nowLocal, plannedStart: slot?.assignedStartDateTime ?? wr.StartDate_DateToPerform });
     if (zone.zone === "freeze-blocked") { setError(`❄ Zone 1 — ${zone.freeze.title}: starting this ${wr.WR_Type} is blocked while an active Location Freeze disallows it. Window: ${zone.freeze.startDateTime} – ${zone.freeze.endDateTime}.`); return; }
-    if (!idle || zone.zone === "on-schedule") { startNow(); return; }
-    if (zone.zone === "lead-window") { setEarlyStart({ mode: "lead-window", daysEarly: zone.daysEarly, leadDays: zone.leadDays }); return; }
+    if (!idle || zone.zone === "on-schedule") { startNow(undefined, false, freezeOverrides); return; }
+    if (zone.zone === "lead-window") { setEarlyStart({ mode: "lead-window", daysEarly: zone.daysEarly, leadDays: zone.leadDays, freezeOverrides }); return; }
     if (!canOverrideEarlyStart(primaryRole)) { setError(cycleSpacingExplanation(wr, zone.daysEarly, zone.leadDays)); return; }
-    setEarlyStart({ mode: "override", daysEarly: zone.daysEarly, leadDays: zone.leadDays });
+    setEarlyStart({ mode: "override", daysEarly: zone.daysEarly, leadDays: zone.leadDays, freezeOverrides });
   };
   const haltTimer = (pause: boolean) => void execute(async () => {
     await save((current) => stopTechnicianTimer(current, technician, person), pause ? "Paused work timer; recorded minutes are kept — tap Resume to continue." : "Stopped work timer.");
@@ -263,7 +278,7 @@ export function ExecutionHub({ wr, technician, technicianName, person, people, e
     </div>}
     {completed && followUp && <div className="text-center"><button type="button" disabled={busy} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50" onClick={followUp}>+ Report Follow-Up Fast Job</button></div>}
     {earlyStart && <EarlyStartModal wr={wr} daysEarly={earlyStart.daysEarly} leadDays={earlyStart.leadDays} mode={earlyStart.mode}
-      plannedLabel={planned} busy={busy} onClose={() => setEarlyStart(null)} onConfirm={(reason, override) => startNow(reason, override)} />}
+      plannedLabel={planned} busy={busy} onClose={() => setEarlyStart(null)} onConfirm={(reason, override) => startNow(reason, override, earlyStart.freezeOverrides)} />}
     {dialog && <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => { if (!busy) closeDialog(); }}><div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
       <div className="flex items-start justify-between gap-3 border-b px-4 py-3"><div><h2 className="text-base font-bold">{dialog === "completion" ? "Complete Work Request (78%)" : "Comments & Photos"}</h2>{dialog === "completion" && <p className="text-xs text-slate-500">Time &amp; Team Confirmation</p>}</div><button type="button" disabled={busy} aria-label="Close" className="text-lg leading-none text-slate-500" onClick={closeDialog}>✕</button></div>
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">

@@ -29,20 +29,32 @@ function normalizeServerState(state: DemoData, site: SiteId): DemoData {
     userAccessProfiles: "userAccessProfiles" in state ? state.userAccessProfiles : undefined } as DemoData;
   return ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site));
 }
-function safeStorageSet(key: string, value: string): boolean {
-  const storage = window.localStorage;
+function pruneLegacyBackups(storage: Storage) {
   for (let index = storage.length - 1; index >= 0; index--) {
-    const candidate = storage.key(index);
-    // Remove outdated baselines (including v1 full-state snapshots) for every site to reclaim quota.
-    if (candidate?.startsWith("cafm-demo-base-") && !candidate.startsWith(`${BASE_KEY}:`)) storage.removeItem(candidate);
+    const key = storage.key(index);
+    if (key && /^cafm[-_]/i.test(key) && (/backup|prev/i.test(key) || key.startsWith("cafm-demo-legacy-pending:") ||
+      key.startsWith("cafm-demo-base-") && !key.startsWith(`${BASE_KEY}:`))) storage.removeItem(key);
   }
+}
+
+function safeStorageSet(key: string, value: string, site: SiteId): boolean {
+  const storage = window.localStorage;
   try { storage.setItem(key, value); return true; }
   catch (error) {
-    if (error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
-      console.warn("Browser storage quota exceeded; the disk sync remains active.", key);
+    if (!(error instanceof DOMException) || (error.name !== "QuotaExceededError" && error.name !== "NS_ERROR_DOM_QUOTA_REACHED")) throw error;
+    pruneLegacyBackups(storage);
+    for (let index = storage.length - 1; index >= 0; index--) {
+      const candidate = storage.key(index);
+      const match = candidate?.match(/^cafm-demo-data-v\d+:(.+)$/);
+      if (candidate && match && match[1] !== site && match[1] !== LEGACY_SITE_ALIAS[site] &&
+          !storage.getItem(`${PENDING_KEY}:${match[1]}`)) storage.removeItem(candidate);
+    }
+    try { storage.setItem(key, value); return true; }
+    catch (retryError) {
+      if (!(retryError instanceof DOMException) || (retryError.name !== "QuotaExceededError" && retryError.name !== "NS_ERROR_DOM_QUOTA_REACHED")) throw retryError;
+      console.warn("Browser storage quota exceeded after cleanup; server sync remains active.", key);
       return false;
     }
-    throw error;
   }
 }
 export async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
@@ -92,6 +104,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const [ready, setReady] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [legacyBackup, setLegacyBackup] = useState(false);
+  const [cacheWarning, setCacheWarning] = useState(false);
+  const legacyPendingSnapshot = useRef<{ snapshot: string; pending: unknown; base: string | null } | null>(null);
+  const previousSnapshot = useRef<DemoData | null>(null);
+  const cachedSnapshot = useRef("");
   const revision = useRef(0);
   const acknowledged = useRef("");
   const current = useRef(data);
@@ -104,7 +120,6 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const dirtyWrIdsRef = useRef(new Set<string>());
   const dirtyFieldsRef = useRef(new Set<string>());
   const hasUnsavedUserEditsRef = useRef(false);
-  const legacyCacheProtected = useRef(false);
   const editVersion = useRef(0);
   const pushTimer = useRef<number | null>(null);
   const schedulePush = useRef<(delay?: number) => void>(() => {});
@@ -115,6 +130,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     async function initialize() {
       let savedKey: string | undefined;
       try {
+      pruneLegacyBackups(localStorage);
       const legacySite = LEGACY_SITE_ALIAS[site];
       const candidates = [storageKey, ...LEGACY_STORAGE_KEYS.flatMap((key) => [`${key}:${site}`, ...(legacySite ? [`${key}:${legacySite}`] : []), key])];
       let saved: string | null = null;
@@ -168,15 +184,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       const savedPendingText = localStorage.getItem(pendingKey);
       const savedPending: unknown = savedPendingText ? JSON.parse(savedPendingText) : null;
       if (saved && savedPending && typeof savedPending === "object" && !("userEdits" in savedPending)) {
-        try {
-          localStorage.setItem(`cafm-demo-legacy-pending:${site}:${Date.now()}`, JSON.stringify({ snapshot: JSON.parse(saved), pending: savedPending, base: baseText }));
-          localStorage.removeItem(pendingKey);
-          setLegacyBackup(true);
-        } catch (error) {
-          legacyCacheProtected.current = true;
-          console.error("Could not preserve legacy pending data", error);
-          setSyncError("The previous local snapshot could not be backed up. Free browser storage before editing.");
-        }
+        legacyPendingSnapshot.current = { snapshot: saved, pending: savedPending, base: baseText };
+        localStorage.removeItem(pendingKey);
+        setLegacyBackup(true);
       }
       if (savedPending && typeof savedPending === "object" && "userEdits" in savedPending && savedPending.userEdits === true) {
         if (!("revision" in savedPending) || typeof savedPending.revision !== "number" || !Number.isInteger(savedPending.revision) || savedPending.revision < 0 ||
@@ -218,7 +228,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           acknowledged.current = JSON.stringify(initial);
         }
         connected.current = true;
-        if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
+        if (!blocked.current) safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }), site);
       } catch (error) {
         setSyncError(error instanceof Error ? error.message : "Could not load server state.");
       }
@@ -264,19 +274,20 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   useEffect(() => {
     if (!ready) return;
     try {
-      if (legacyCacheProtected.current) {
-        setSyncError("The previous local snapshot could not be backed up. Free browser storage before editing.");
-        return;
-      }
-      const saved = safeStorageSet(storageKey, JSON.stringify(data));
+      const serialized = JSON.stringify(data);
+      const saved = safeStorageSet(storageKey, serialized, site);
+      cachedSnapshot.current = saved ? serialized : "";
+      let pendingSaved = true;
       if (saved && hasUnsavedUserEditsRef.current) {
-        safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }));
+        pendingSaved = safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }), site);
       }
+      if (!saved || !pendingSaved) localStorage.removeItem(pendingKey);
+      setCacheWarning(!saved || !pendingSaved);
     } catch (error) {
       console.error("Could not save demo data", error);
       setSyncError("Could not save demo data to local storage.");
     }
-  }, [data, ready, storageKey, pendingKey]);
+  }, [data, ready, storageKey, pendingKey, site]);
 
   useEffect(() => {
     if (!ready) return;
@@ -322,7 +333,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (active) setData(next);
           }
           connected.current = true;
-          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
+          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }), site);
         }
         const snapshot = ensureFjSurveys(migrateWorkRequestIdsTo10Digits(reconcileAssurance(current.current)));
         const sentVersion = editVersion.current;
@@ -366,9 +377,16 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             dirtyFieldsRef.current.clear();
             dirtyWrIdsRef.current.clear();
           }
-          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
+          safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }), site);
           if (!hasUnsavedUserEditsRef.current) localStorage.removeItem(pendingKey);
-          else safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }));
+          else if (cachedSnapshot.current === JSON.stringify(current.current)) {
+            if (!safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }), site)) {
+              localStorage.removeItem(pendingKey);
+              if (active) setCacheWarning(true);
+            }
+          } else {
+            localStorage.removeItem(pendingKey);
+          }
         } else {
           if (hasUnsavedUserEditsRef.current && serialized === acknowledged.current) {
             hasUnsavedUserEditsRef.current = false;
@@ -382,12 +400,12 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             const next = normalizeServerState(result.state as DemoData, site);
             revision.current = result.revision;
             acknowledged.current = JSON.stringify(next);
-            safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
+            safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }), site);
             current.current = next;
             if (active) setData(next);
           }
         }
-        if (active && !legacyCacheProtected.current) setSyncError(null);
+        if (active) setSyncError(null);
       } catch (error) {
         if (error instanceof StateRequestError && (error.status === 503 || error.status === 409 && /state (has )?changed/i.test(error.message))) {
           await new Promise((resolve) => window.setTimeout(resolve, 200));
@@ -427,7 +445,6 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   }, [ready, site, pendingKey, baseKey]);
 
   const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => {
-    if (legacyCacheProtected.current) throw new Error("The previous local snapshot could not be backed up. Free browser storage before editing.");
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
     // If a background GET sync is in flight, wait for it (up to 5s) instead of failing immediately.
     const waitStart = Date.now();
@@ -444,6 +461,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     busy.current = true;
     let committed = false;
     if (optimistic) {
+      previousSnapshot.current = expected;
       current.current = next;
       setData(next);
     }
@@ -465,8 +483,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       hasUnsavedUserEditsRef.current = false;
       let cacheError: string | null = null;
       try {
-        safeStorageSet(storageKey, acknowledged.current);
-        safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
+        const saved = safeStorageSet(storageKey, acknowledged.current, site);
+        cachedSnapshot.current = saved ? acknowledged.current : "";
+        safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }), site);
+        setCacheWarning(!saved);
         localStorage.removeItem(pendingKey);
       } catch (error) {
         blocked.current = true;
@@ -477,8 +497,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     } catch (error) {
       if (optimistic && !committed) {
         if (JSON.stringify(current.current) === after) {
-          current.current = expected;
-          setData(expected);
+          current.current = previousSnapshot.current ?? expected;
+          setData(current.current);
         } else {
           blocked.current = true;
           setSyncError("The QA update could not be saved and local data changed during the request. Local edits were retained; resolve the conflict.");
@@ -486,6 +506,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       }
       throw error;
     } finally {
+      previousSnapshot.current = null;
       busy.current = false;
     }
   };
@@ -502,10 +523,6 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const setUserData: React.Dispatch<React.SetStateAction<DemoData>> = (update) => {
-    if (legacyCacheProtected.current) {
-      setSyncError("The previous local snapshot could not be backed up. Free browser storage before editing.");
-      return;
-    }
     hasUnsavedUserEditsRef.current = true;
     editVersion.current++;
     if (!connected.current) offlineEdits.current = true;
@@ -534,7 +551,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
     {!!data.pmMigrationNotes?.length && <details className="bg-amber-50 p-2 text-sm text-amber-900"><summary>PM assignment migration notes ({data.pmMigrationNotes.length})</summary>{data.pmMigrationNotes.map((note) => <p key={note}>{note}</p>)}</details>}
     {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}
-    {legacyBackup && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900">An older pending local snapshot was backed up in browser storage and was not automatically synchronized.</div>}
+    {cacheWarning && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900">Browser storage is full. Edits remain in memory and will sync to the server, but may be lost if the page closes before synchronization.</div>}
+    {legacyBackup && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900">An older pending local snapshot is held in memory only and was not automatically synchronized. It will be lost when the site changes or this page closes.</div>}
     {ready ? children : <div>Loading saved CAFM data...</div>}
   </StoreContext.Provider>;
 }
