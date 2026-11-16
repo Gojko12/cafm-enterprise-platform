@@ -15,7 +15,6 @@ import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 import { migrateWorkRequestIdsTo10Digits } from "@/lib/wr-id-migration";
 import { sanitizeStateForSite } from "@/lib/site-state-sanitize";
-import { acquireWriteLock } from "@/lib/state-write-lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -405,7 +404,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const site = scope(request);
   if (!authorize(request)) return reply(request, { error: "Local demo sync is disabled or the token is invalid." }, 401);
-  let releaseLock: (() => Promise<void>) | undefined;
+  let lock: Awaited<ReturnType<typeof open>> | undefined;
+  let lockFile: string | undefined;
   let temporary: string | undefined;
   try {
     const text = await request.text();
@@ -419,8 +419,15 @@ export async function POST(request: Request) {
     if (invalidField) return reply(request, { error: `State validation failed: ${invalidField}` }, 400);
     const storage = await backend();
     if (storage.kind !== "supabase") {
-      releaseLock = (await acquireWriteLock(storage.lockFile)) ?? undefined;
-      if (!releaseLock) return reply(request, { error: "Another state write is in progress." }, 503);
+      lockFile = storage.lockFile;
+      try {
+        lock = await open(lockFile, "wx", 0o600);
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+          return reply(request, { error: "Another state write is in progress." }, 503);
+        }
+        throw error;
+      }
     }
     const { database, version } = await load(storage);
     const current = database.sites[site];
@@ -479,9 +486,10 @@ export async function POST(request: Request) {
     return reply(request, { error: persistenceError(error) }, 500);
   } finally {
     if (temporary) await unlink(temporary).catch((error) => console.error("Could not remove temporary state file", error));
-    if (releaseLock) {
+    if (lock && lockFile) {
       try {
-        await releaseLock();
+        await lock.close();
+        await unlink(lockFile);
       } catch (error) {
         console.error("Could not release CAFM state write lock", error);
       }

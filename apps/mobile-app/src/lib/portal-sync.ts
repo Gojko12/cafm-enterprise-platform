@@ -230,26 +230,7 @@ function replaceRequest(state: State, wr: BaseWorkRequest, previous?: BaseWorkRe
 
 export async function synchronizePortal(
   db: IDBPDatabase<MobileAppDB>, site: SiteId, person: string,
-  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal,
-) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await synchronizePortalOnce(db, site, person, queued, photos, signal);
-    } catch (error) {
-      if (!(error instanceof SyncRequestError) || ![409, 503].includes(error.status) || attempt >= 4 || signal?.aborted) throw error;
-      await new Promise<void>((resolve, reject) => {
-        const abort = () => { clearTimeout(timer); reject(signal?.reason ?? new Error("Synchronization aborted.")); };
-        const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, 250 * (attempt + 1));
-        signal?.addEventListener("abort", abort, { once: true });
-        if (signal?.aborted) abort();
-      });
-    }
-  }
-}
-
-async function synchronizePortalOnce(
-  db: IDBPDatabase<MobileAppDB>, site: SiteId, person: string,
-  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal,
+  queued: SyncQueueEntry[], photos: OfflinePhotoQueueEntry[], signal?: AbortSignal, conflictRetry = 0,
 ) {
   let response = await request(site, person, "GET", undefined, signal);
   if (!response.state) {
@@ -479,7 +460,13 @@ async function synchronizePortalOnce(
   const changed = [...applied].some((id) => !serverMutationIds.has(id));
   state.mobileMutationIds = [...applied];
   if (changed) {
-    await request(site, person, "POST", { revision: response.revision, state }, signal);
+    try { await request(site, person, "POST", { revision: response.revision, state }, signal); }
+    catch (error) {
+      if (error instanceof SyncRequestError && error.status === 409 && conflictRetry < 2) {
+        return synchronizePortal(db, site, person, queued, photos, signal, conflictRetry + 1);
+      }
+      throw error;
+    }
   }
 
   const syncedAt = new Date().toISOString();

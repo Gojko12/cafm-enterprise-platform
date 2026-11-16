@@ -57,10 +57,9 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
   const saved = useRef(JSON.stringify(values));
   const baseline = useRef(values);
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const pendingSaves = useRef(0);
-  const flush = async (snapshot = latest.current) => {
+  const flush = async () => {
+    const snapshot = latest.current;
     const serialized = JSON.stringify(snapshot);
-    pendingSaves.current++;
     setSaving(true);
     const pending = queue.current.catch(() => undefined).then(async () => {
       if (serialized !== saved.current) {
@@ -72,15 +71,18 @@ export function MobileChecklist({ wr, steps, save, exit, followUp, complete, tod
     queue.current = pending;
     try { await pending; setError(""); }
     catch (problem) { setError(problem instanceof Error ? problem.message : "Could not save checklist progress."); throw problem; }
-    finally { if (--pendingSaves.current === 0) setSaving(false); }
+    finally { setSaving(false); }
   };
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void flush().catch(() => undefined); }, 600);
+    return () => window.clearTimeout(timer);
+  }, [values]);
   const change = (step: PM_StepDefinition, patch: Partial<Result>) => {
     if (!editable) { setError("Unlock the completed checklist or start timing before changing answers."); return; }
     const previous = latest.current.find((item) => item.stepId === step.StepId);
     const next: Result = { stepId: step.StepId, value: "", passed: true, ...previous, ...patch, completedAt: patch.value !== undefined && JSON.stringify(patch.value) !== JSON.stringify(previous?.value) ? new Date().toISOString() : previous?.completedAt ?? new Date().toISOString() };
     const updated = [...latest.current.filter((item) => item.stepId !== step.StepId), next];
     latest.current = updated; setValues(updated);
-    void flush(updated).catch(() => undefined);
   };
   const leaveSafely = (destination: () => void, stays = false) => {
     if (readingRef.current) { setError("Wait for the photo to finish loading before leaving."); return; }

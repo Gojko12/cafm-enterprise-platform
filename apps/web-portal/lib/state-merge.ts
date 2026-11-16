@@ -44,36 +44,6 @@ export function mergeRemoteState<T extends object>(local: T, remote: unknown, di
   return next as T;
 }
 
-export function mergeUserEdits<T extends { workRequests: { WR_ID: string }[] }>(
-  local: T, remote: T, dirtyIds: ReadonlySet<string>, dirtyFields: ReadonlySet<string>, baseline?: T,
-): T {
-  const next = { ...remote };
-  for (const field of dirtyFields) {
-    if (field === "workRequests") continue;
-    const key = field as keyof T;
-    if (baseline && JSON.stringify(baseline[key]) !== JSON.stringify(remote[key]) &&
-        JSON.stringify(local[key]) !== JSON.stringify(remote[key])) {
-      throw new Error(`Concurrent changes to ${field} require conflict resolution; local edits are retained.`);
-    }
-    next[key] = local[key];
-  }
-  const localById = new Map(local.workRequests.map((wr) => [wr.WR_ID, wr]));
-  const baseById = new Map(baseline?.workRequests.map((wr) => [wr.WR_ID, wr]) ?? []);
-  const serverById = new Map(remote.workRequests.map((wr) => [wr.WR_ID, wr]));
-  for (const id of dirtyIds) {
-    const edited = localById.get(id);
-    const server = serverById.get(id);
-    if (baseline && JSON.stringify(baseById.get(id)) !== JSON.stringify(server) &&
-        JSON.stringify(edited) !== JSON.stringify(server)) {
-      throw new Error(`Work request ${id} changed elsewhere; local edits are retained for conflict resolution.`);
-    }
-    if (edited) serverById.set(id, edited);
-    else serverById.delete(id);
-  }
-  next.workRequests = [...serverById.values()];
-  return next;
-}
-
 export function stampChangedWorkRequests<T extends { WR_ID: string }>(previous: T[], next: T[]): T[] {
   const before = new Map(previous.map((wr) => [wr.WR_ID, wr]));
   const now = new Date().toISOString();
