@@ -10,7 +10,7 @@ import { seedAccessProfiles, resolveEffectivePermissions } from "./access-profil
 import { ahuTemplate } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 import { migratePmState } from "./pm-orders";
-import { mergeRemoteState, recordStamp, stampChangedWorkRequests } from "./state-merge";
+import { mergeRemoteState, mergeUserEdits, stampChangedWorkRequests } from "./state-merge";
 import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
@@ -28,13 +28,6 @@ function normalizeServerState(state: DemoData, site: SiteId): DemoData {
     roleDefinitions: "roleDefinitions" in state ? state.roleDefinitions : undefined,
     userAccessProfiles: "userAccessProfiles" in state ? state.userAccessProfiles : undefined } as DemoData;
   return ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(withAccessProfileDefaults(remoteData, site)), site));
-}
-function trackNewerLocalWorkRequests(local: DemoData, remote: DemoData | null, dirtyIds: Set<string>) {
-  const serverById = new Map((remote?.workRequests ?? []).map((wr) => [wr.WR_ID, wr]));
-  for (const wr of local.workRequests) {
-    const server = serverById.get(wr.WR_ID);
-    if (!server || recordStamp(wr) > recordStamp(server)) dirtyIds.add(wr.WR_ID);
-  }
 }
 function safeStorageSet(key: string, value: string): boolean {
   const storage = window.localStorage;
@@ -63,7 +56,7 @@ export async function stateRequest(site: SiteId, person: string, method: "GET" |
   const result: unknown = await response.json();
   if (!response.ok) {
     const message = result && typeof result === "object" && "error" in result ? String(result.error) : `HTTP ${response.status}`;
-    throw new Error(message);
+    throw new StateRequestError(message, response.status);
   }
   if (!result || typeof result !== "object" || !("revision" in result) || typeof result.revision !== "number" || !("state" in result)) {
     throw new Error("Invalid state response.");
@@ -71,6 +64,9 @@ export async function stateRequest(site: SiteId, person: string, method: "GET" |
   return { revision: result.revision, state: result.state };
 }
 
+class StateRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 
 interface Store {
   data: DemoData;
@@ -95,6 +91,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const baseKey = `${BASE_KEY}:${site}`;
   const [ready, setReady] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [legacyBackup, setLegacyBackup] = useState(false);
   const revision = useRef(0);
   const acknowledged = useRef("");
   const current = useRef(data);
@@ -105,6 +102,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const offlineEdits = useRef(false);
   const knownRevision = useRef(false);
   const dirtyWrIdsRef = useRef(new Set<string>());
+  const dirtyFieldsRef = useRef(new Set<string>());
+  const hasUnsavedUserEditsRef = useRef(false);
+  const legacyCacheProtected = useRef(false);
+  const editVersion = useRef(0);
   const pushTimer = useRef<number | null>(null);
   const schedulePush = useRef<(delay?: number) => void>(() => {});
   current.current = data;
@@ -158,6 +159,28 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           craftspeople: savedData.craftspeople ?? defaults.craftspeople,
           userAccessProfiles: savedData.userAccessProfiles ?? seedAccessProfiles([site], savedData.craftspeople ?? defaults.craftspeople, savedData.users ?? defaults.users) } as DemoData, site)), site);
       }
+      const savedPendingText = localStorage.getItem(pendingKey);
+      const savedPending: unknown = savedPendingText ? JSON.parse(savedPendingText) : null;
+      if (saved && savedPending && typeof savedPending === "object" && !("userEdits" in savedPending)) {
+        try {
+          localStorage.setItem(`cafm-demo-legacy-pending:${site}:${Date.now()}`, JSON.stringify({ snapshot: JSON.parse(saved), pending: savedPending, base: baseText }));
+          localStorage.removeItem(pendingKey);
+          setLegacyBackup(true);
+        } catch (error) {
+          legacyCacheProtected.current = true;
+          console.error("Could not preserve legacy pending data", error);
+          setSyncError("The previous local snapshot could not be backed up. Free browser storage before editing.");
+        }
+      }
+      if (savedPending && typeof savedPending === "object" && "userEdits" in savedPending && savedPending.userEdits === true) {
+        if (!("dirtyWrIds" in savedPending) || !Array.isArray(savedPending.dirtyWrIds) || !savedPending.dirtyWrIds.every((id: unknown) => typeof id === "string") ||
+            !("dirtyFields" in savedPending) || !Array.isArray(savedPending.dirtyFields) || !savedPending.dirtyFields.every((field: unknown) => typeof field === "string")) {
+          throw new Error("Stored pending synchronization data has an invalid format.");
+        }
+        dirtyWrIdsRef.current = new Set(savedPending.dirtyWrIds);
+        dirtyFieldsRef.current = new Set(savedPending.dirtyFields);
+        hasUnsavedUserEditsRef.current = true;
+      }
       try {
         const remote = await stateRequest(site, personRef.current, "GET");
         if (remote.state !== null && (!remote.state || typeof remote.state !== "object" ||
@@ -172,15 +195,13 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         }
         revision.current = remote.revision;
         knownRevision.current = true;
-        if (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
+        if (hasUnsavedUserEditsRef.current && pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) {
           // Keep local edits but merge newer server records; the next sync pushes the merged result.
           const normalizedRemote = remote.state ? normalizeServerState(remote.state as DemoData, site) : null;
-          trackNewerLocalWorkRequests(initial, normalizedRemote, dirtyWrIdsRef.current);
-          initial = ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(initial, normalizedRemote, dirtyWrIdsRef.current)), site));
+          if (normalizedRemote) initial = mergeUserEdits(initial, normalizedRemote, dirtyWrIdsRef.current, dirtyFieldsRef.current);
           acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
-        } else if (pending && typeof pending === "object" && "revision" in pending && pending.revision === remote.revision) {
+        } else if (hasUnsavedUserEditsRef.current && pending && typeof pending === "object" && "revision" in pending && pending.revision === remote.revision) {
           const normalizedRemote = remote.state ? normalizeServerState(remote.state as DemoData, site) : null;
-          trackNewerLocalWorkRequests(initial, normalizedRemote, dirtyWrIdsRef.current);
           acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
         } else if (remote.state !== null) {
           if (!remote.state || typeof remote.state !== "object" || !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests)) {
@@ -230,9 +251,13 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   useEffect(() => {
     if (!ready) return;
     try {
+      if (legacyCacheProtected.current) {
+        setSyncError("The previous local snapshot could not be backed up. Free browser storage before editing.");
+        return;
+      }
       const saved = safeStorageSet(storageKey, JSON.stringify(data));
-      if (saved && JSON.stringify(data) !== acknowledged.current) {
-        safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
+      if (saved && hasUnsavedUserEditsRef.current) {
+        safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }));
       }
     } catch (error) {
       console.error("Could not save demo data", error);
@@ -262,18 +287,17 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             pending = null;
           }
           const normalizedRemote = remote.state ? normalizeServerState(remote.state as DemoData, site) : null;
-          if (pending || offlineEdits.current) trackNewerLocalWorkRequests(current.current, normalizedRemote, dirtyWrIdsRef.current);
-          const diverged = (pending && typeof pending === "object" && "revision" in pending && pending.revision !== remote.revision) ||
+          const diverged = (hasUnsavedUserEditsRef.current && revision.current !== remote.revision) ||
             (offlineEdits.current && (!knownRevision.current || revision.current !== remote.revision));
           if (diverged && normalizedRemote) {
             // Auto-heal: keep local edits, merge newer server records, and let the next push publish the result.
-            const merged = ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, normalizedRemote, dirtyWrIdsRef.current)), site));
+            const merged = mergeUserEdits(current.current, normalizedRemote, dirtyWrIdsRef.current, dirtyFieldsRef.current, acknowledged.current ? JSON.parse(acknowledged.current) as DemoData : undefined);
             current.current = merged;
             if (active) setData(merged);
           }
           revision.current = remote.revision;
           knownRevision.current = true;
-          if (pending || offlineEdits.current) {
+          if (hasUnsavedUserEditsRef.current || offlineEdits.current) {
             acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
           } else if (normalizedRemote) {
             // Never drop locally created or edited WRs that the server does not have yet.
@@ -288,16 +312,20 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
         }
         const snapshot = ensureFjSurveys(migrateWorkRequestIdsTo10Digits(reconcileAssurance(current.current)));
+        const sentVersion = editVersion.current;
         if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
         let outgoing = snapshot;
         let serialized = JSON.stringify(outgoing);
-        if (serialized !== acknowledged.current) {
+        if (hasUnsavedUserEditsRef.current && serialized !== acknowledged.current) {
           // Merge newer server records before pushing so stale local copies never overwrite them.
           const latest = await stateRequest(site, personRef.current, "GET");
+          if (sentVersion !== editVersion.current) { schedulePush.current(); return; }
           if (latest.state && latest.revision !== revision.current) {
-            outgoing = ensureFjSurveys(migrateWorkRequestIdsTo10Digits(mergeRemoteState(snapshot, latest.state, dirtyWrIdsRef.current)));
+            const remote = normalizeServerState(latest.state as DemoData, site);
+            outgoing = mergeUserEdits(snapshot, remote, dirtyWrIdsRef.current, dirtyFieldsRef.current, acknowledged.current ? JSON.parse(acknowledged.current) as DemoData : undefined);
             serialized = JSON.stringify(outgoing);
             revision.current = latest.revision;
+            acknowledged.current = JSON.stringify(remote);
             if (JSON.stringify(current.current) === JSON.stringify(snapshot)) { current.current = outgoing; if (active) setData(outgoing); }
           }
           outgoing = scopeData(migrateWorkRequestIdsTo10Digits(outgoing), site);
@@ -312,7 +340,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           offlineEdits.current = false;
           const unchangedDuringSync = JSON.stringify(current.current) === serialized;
           const next = unchangedDuringSync ? savedState :
-            ensureFjSurveys(scopeData(migrateWorkRequestIdsTo10Digits(mergeRemoteState(current.current, savedState, dirtyWrIdsRef.current)), site));
+            mergeUserEdits(current.current, savedState, dirtyWrIdsRef.current, dirtyFieldsRef.current);
           current.current = next;
           if (active) setData(next);
           const savedById = new Map(savedState.workRequests.map((wr) => [wr.WR_ID, wr]));
@@ -320,12 +348,23 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           for (const id of dirtyWrIdsRef.current) {
             if (JSON.stringify(currentById.get(id) ?? null) === JSON.stringify(savedById.get(id) ?? null)) dirtyWrIdsRef.current.delete(id);
           }
+          if (sentVersion === editVersion.current) {
+            hasUnsavedUserEditsRef.current = false;
+            dirtyFieldsRef.current.clear();
+            dirtyWrIdsRef.current.clear();
+          }
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }));
-          if (JSON.stringify(next) === acknowledged.current) localStorage.removeItem(pendingKey);
-          else safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current }));
+          if (!hasUnsavedUserEditsRef.current) localStorage.removeItem(pendingKey);
+          else safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }));
         } else {
+          if (hasUnsavedUserEditsRef.current && serialized === acknowledged.current) {
+            hasUnsavedUserEditsRef.current = false;
+            dirtyFieldsRef.current.clear();
+            dirtyWrIdsRef.current.clear();
+            localStorage.removeItem(pendingKey);
+          }
           const result = await stateRequest(site, personRef.current, "GET");
-          if (result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
+          if (!hasUnsavedUserEditsRef.current && result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
             const next = normalizeServerState(result.state as DemoData, site);
             revision.current = result.revision;
@@ -335,11 +374,16 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             if (active) setData(next);
           }
         }
-        if (active) setSyncError(null);
+        if (active && !legacyCacheProtected.current) setSyncError(null);
       } catch (error) {
+        if (error instanceof StateRequestError && (error.status === 503 || error.status === 409 && /state (has )?changed/i.test(error.message))) {
+          await new Promise((resolve) => window.setTimeout(resolve, 200));
+          connected.current = false;
+          if (active) { setSyncError(null); schedulePush.current(0); }
+          return;
+        }
         console.error("CAFM state sync failed", error);
         const message = error instanceof Error ? error.message : "State sync failed.";
-        if (message.includes("changed") && connected.current) blocked.current = true;
         if (active) setSyncError(message);
       } finally {
         busy.current = false;
@@ -370,6 +414,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   }, [ready, site, pendingKey, baseKey]);
 
   const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => {
+    if (legacyCacheProtected.current) throw new Error("The previous local snapshot could not be backed up. Free browser storage before editing.");
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
     // If a background GET sync is in flight, wait for it (up to 5s) instead of failing immediately.
     const waitStart = Date.now();
@@ -403,6 +448,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       current.current = savedState;
       setData(savedState);
       dirtyWrIdsRef.current.clear();
+      dirtyFieldsRef.current.clear();
+      hasUnsavedUserEditsRef.current = false;
       let cacheError: string | null = null;
       try {
         safeStorageSet(storageKey, acknowledged.current);
@@ -442,6 +489,12 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const setUserData: React.Dispatch<React.SetStateAction<DemoData>> = (update) => {
+    if (legacyCacheProtected.current) {
+      setSyncError("The previous local snapshot could not be backed up. Free browser storage before editing.");
+      return;
+    }
+    hasUnsavedUserEditsRef.current = true;
+    editVersion.current++;
     if (!connected.current) offlineEdits.current = true;
     setData((previous) => {
       let next = reconcileAssurance(typeof update === "function" ? update(previous) : update);
@@ -451,6 +504,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         return old && old !== wr ? logChecklistCorrections(old, wr, personRef.current, now) : wr;
       }) };
       const workRequests = stampChangedWorkRequests(previous.workRequests, next.workRequests);
+      for (const key of Object.keys(next) as (keyof DemoData)[]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) dirtyFieldsRef.current.add(key);
+      }
       const previousById = new Map(previous.workRequests.map((wr) => [wr.WR_ID, wr]));
       for (const wr of next.workRequests) {
         const old = previousById.get(wr.WR_ID);
@@ -465,6 +521,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
     {!!data.pmMigrationNotes?.length && <details className="bg-amber-50 p-2 text-sm text-amber-900"><summary>PM assignment migration notes ({data.pmMigrationNotes.length})</summary>{data.pmMigrationNotes.map((note) => <p key={note}>{note}</p>)}</details>}
     {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}
+    {legacyBackup && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900">An older pending local snapshot was backed up in browser storage and was not automatically synchronized.</div>}
     {ready ? children : <div>Loading saved CAFM data...</div>}
   </StoreContext.Provider>;
 }

@@ -319,6 +319,7 @@ export default function App() {
     void refreshData().catch((error) => console.error("Could not load offline data:", error));
     if (isSimulatedOffline) return;
     const sync = () => {
+      if (checklistSyncTimer.current !== null || savingWR.current) return;
       void engine.syncNow().then((status) => { lastBackgroundError.current = ""; window.dispatchEvent(new Event("cafm-sync-success")); if (status.synced || resumedSync.current) { setSyncNotice(`Synchronization complete. ${status.synced} changes sent; ${status.pending} remain queued.`); resumedSync.current = false; } return refreshData(); }).catch((error: unknown) => { const message = error instanceof Error ? error.message : "Background sync failed."; if (message.includes("already in progress") || message.includes("aborted")) return; console.error("Background sync failed:", error); if (lastBackgroundError.current !== message) { lastBackgroundError.current = message; notify(message); } });
     };
     sync();
@@ -512,7 +513,7 @@ export default function App() {
           console.error("Checklist progress sync failed:", error);
           notify(`Checklist progress is saved on this device but has not synchronized: ${error instanceof Error ? error.message : "Retry Sync Now."}`);
         });
-      }, 300);
+      }, 700);
     }
     } finally { savingWR.current = false; }
   };
