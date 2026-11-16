@@ -5,6 +5,15 @@ type WrRecord = Record<string, unknown>;
 export { isStrictWorkRequestId };
 
 const WATERMARK_PREFIX = "cafm-wr-watermark";
+const MAX_NORMAL_SEQUENCE = 989999;
+const MAX_SEQUENCE = 999999;
+
+export function sanitizeSequenceWatermark(raw: unknown): number {
+  const number = typeof raw === "number" || typeof raw === "string" ? Number(raw) : 0;
+  if (!Number.isFinite(number) || number <= 0) return 0;
+  const sequence = number >= 2026000000 && number <= 2026999999 ? number - 2026000000 : number;
+  return Number.isInteger(sequence) && sequence <= MAX_NORMAL_SEQUENCE ? sequence : 0;
+}
 
 function collectSequences(items: Iterable<unknown> | undefined, sequences: Set<number>) {
   if (!items) return;
@@ -24,25 +33,36 @@ export interface WorkRequestIdContext {
 }
 
 /**
- * Monotonic 10-digit WR ID high-watermark allocator (Section 80): the next ID is always
- * above the highest sequence across live WRs, deleted WRs and the per-site localStorage
- * watermark, so a `2026xxxxxx` ID is NEVER reused even across rapid creations or deletions.
+ * Allocate above the normal high-watermark, wrapping to unused IDs when necessary.
+ * Synthetic IDs remain reserved but do not advance the normal high-watermark.
  */
 export function allocateWorkRequestId(existing: Iterable<unknown>, context?: WorkRequestIdContext): string {
   const sequences = new Set<number>();
   collectSequences(existing, sequences);
   collectSequences(context?.deleted, sequences);
   let watermark = 0;
-  for (const sequence of sequences) if (sequence > watermark) watermark = sequence;
+  for (const sequence of sequences) if (sequence <= MAX_NORMAL_SEQUENCE && sequence > watermark) watermark = sequence;
   const storageKey = context?.site ? `${WATERMARK_PREFIX}:${context.site}` : undefined;
   if (storageKey && typeof window !== "undefined") {
-    const stored = Number(window.localStorage.getItem(storageKey));
-    if (Number.isInteger(stored) && stored > watermark) watermark = stored;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      const stored = sanitizeSequenceWatermark(raw);
+      if (stored > watermark) watermark = stored;
+      if (raw !== null && raw !== String(stored)) window.localStorage.setItem(storageKey, String(stored));
+    } catch (error) {
+      console.warn("Could not read or sanitize work request ID watermark.", error);
+    }
   }
-  const sequence = watermark + 1;
-  if (sequence > 999999) throw new Error("No unused 2026 work request IDs remain.");
+  let sequence = watermark + 1;
+  while (sequence <= MAX_NORMAL_SEQUENCE && sequences.has(sequence)) sequence++;
+  if (sequence > MAX_NORMAL_SEQUENCE) {
+    sequence = 1;
+    while (sequence <= MAX_SEQUENCE && sequences.has(sequence)) sequence++;
+  }
+  if (sequence > MAX_SEQUENCE) throw new Error("No unused 2026 work request IDs remain.");
   if (storageKey && typeof window !== "undefined") {
-    try { window.localStorage.setItem(storageKey, String(sequence)); } catch { /* quota exhausted: the in-state watermark still applies */ }
+    try { window.localStorage.setItem(storageKey, String(sanitizeSequenceWatermark(sequence))); }
+    catch (error) { console.warn("Could not save work request ID watermark.", error); }
   }
   return `2026${String(sequence).padStart(6, "0")}`;
 }
@@ -117,15 +137,15 @@ export function migrateWorkRequestIdsTo10Digits<T>(input: T): T {
   const mappings = new Map<string, string>();
   const requestReplacements = new Map<WrRecord, string>();
   const byOldId = new Map<string, Set<string>>();
+  let sequence = 1;
   for (const request of invalid) {
     const oldId = typeof request.WR_ID === "string" ? request.WR_ID : "";
     const site = recordSite(request);
     const key = `${site}\u0000${oldId}`;
-    let sequence = 1;
     let next = `2026${String(sequence).padStart(6, "0")}`;
     while (used.has(next)) {
       sequence++;
-      if (sequence > 999999) throw new Error("No unused 2026 work request IDs remain.");
+      if (sequence > MAX_SEQUENCE) throw new Error("No unused 2026 work request IDs remain.");
       next = `2026${String(sequence).padStart(6, "0")}`;
     }
     used.add(next);
