@@ -28,11 +28,10 @@ export function PMSmartChecklistPanel({ canChangeIssuedWRChecklist, isSiteAdmin,
   const closed = workRequest.Percentage === 100;
   const tier = checklistChangeTier(workRequest);
   const currentTitle = blueprint ? `${blueprint.ChecklistCode} · ${blueprint.Title}` : checklistStandard || "No standard selected";
-  const changeDisabledReason = cancelled ? "Cancelled Work Requests cannot be modified"
+  const changeDisabledReason = cancelled || closed || workRequest.Percentage === 78 ? "Technically completed, closed or cancelled checklists are read-only"
     : !canChangeIssuedWRChecklist ? "Only a Site Administrator or Team Leader can change the checklist standard on an issued Work Request"
-      : closed && !isSiteAdmin ? "100% Closed Work Requests are sealed. Only a Site Administrator can override and reopen a 100% Closed checklist."
-        : !tier ? `A ${workRequest.Percentage}% Work Request does not support checklist standard changes.` : "";
-  const executeDisabledReason = closed || cancelled ? "Cannot execute checklist on a Closed or Cancelled Work Request." : "";
+      : !tier ? `A ${workRequest.Percentage}% Work Request does not support checklist standard changes.` : "";
+  const executeDisabledReason = closed || cancelled || workRequest.Percentage === 78 ? "Cannot execute checklist on a technically completed, closed or cancelled Work Request." : "";
   const answered = answeredChecklistCount(workRequest);
   const confirmChange = (selected: PM_ChecklistStandard, reason: string) => {
     if (!tier) return;

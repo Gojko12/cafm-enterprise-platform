@@ -22,6 +22,7 @@ import { withPmChecklistEnrichment } from "./pm-checklist-enrichment";
 import { usernameForRole } from "./people-directory";
 import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 import { sanitizeStateForSite } from "./site-state-sanitize";
+import { migrateFeatureMatrix } from "./feature-migration";
 import { ahuTemplate, calculateEquipmentInspectionSummary, completeEquipmentInspection, defaultKmisConfig, withStandardCheckpointTemplates, type CheckpointResult, type EquipmentInspectionSheet } from "./equipment-inspection";
 
 export const ASSIGNMENT_ROLES = ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"] as const;
@@ -35,6 +36,7 @@ export const ROLE_LABELS: Record<AssignmentRole, string> = {
 };
 export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
   const site = normalizeSiteId(requestedSite) ?? requestedSite;
+  data = migrateFeatureMatrix(data);
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
   data = withManufacturerSeed(withOnboardingSeed(withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(withEquipmentRegistryMigration(withPmChecklistEnrichment(migratePmState(migrateLegacySiteIds(migrateWorkRequestIdsTo10Digits(data))))))))))));

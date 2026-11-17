@@ -61,6 +61,7 @@ export interface DemoData {
   pmCoordination?: PmCoordinationRecord[];
   ljStageMatrix?: Record<string, "act" | "notify" | "none" | "P" | "O">;
   featurePermissionOverrides?: Record<string, boolean>;
+  featureMatrixVersion?: number;
   siteSlaConfig?: SiteSlaConfig;
   cifmPeople?: CifmPerson[];
   onboardingRequests?: import("@cafm/shared-schema").OnboardingRequest[];

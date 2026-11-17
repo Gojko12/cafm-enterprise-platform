@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import type { Permission, UserRole } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import {
   FEATURE_GROUPS, FEATURE_ROLES, LJ_ROLE_DISPLAY, LJ_STAGES, LJ_STAGE_ROLES, defaultStageMatrix, featureKey, nextStageAccess,
-  resolveStageMatrix, roleHasPermission, stageKey, type StageAccess,
+  resolveStageMatrix, roleHasPermission, stageKey, HARD_LOCKED_FEATURES, type StageAccess,
 } from "@/lib/rbac-matrix";
 
 const ACCESS_PILL: Record<StageAccess, { label: string; className: string }> = {
@@ -14,9 +14,9 @@ const ACCESS_PILL: Record<StageAccess, { label: string; className: string }> = {
   none: { label: "—", className: "bg-gray-100 text-gray-400" },
 };
 
-function RoleHeader({ role }: { role: string }) {
+function RoleHeader({ role, sticky = false }: { role: string; sticky?: boolean }) {
   return (
-    <th className="text-center px-2 py-2 font-semibold text-gray-700 min-w-[96px]">
+    <th className={`text-center px-2 py-2 font-semibold text-gray-700 min-w-[96px] ${sticky ? "sticky top-0 z-20 border-b bg-gray-50" : ""}`}>
       <div className="leading-tight">{LJ_ROLE_DISPLAY[role] ?? role}</div>
       <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-gray-200 text-[10px] font-mono text-gray-700">{role}</span>
     </th>
@@ -112,9 +112,10 @@ export function LJRoleActionMatrix({ canEdit }: { canEdit: boolean }) {
 export function FeaturePermissionMatrix({ canEdit }: { canEdit: boolean }) {
   const { data, setData } = useCafmStore();
   const overrides = data.featurePermissionOverrides;
+  const [collapsed, setCollapsed] = useState<string[]>([]);
 
   const toggle = (role: UserRole, permission: Permission) => {
-    if (!canEdit) return;
+    if (!canEdit || (HARD_LOCKED_FEATURES as readonly string[]).includes(permission)) return;
     const key = featureKey(role, permission);
     setData((current) => {
       const allowed = roleHasPermission(role, permission, current.featurePermissionOverrides);
@@ -132,6 +133,9 @@ export function FeaturePermissionMatrix({ canEdit }: { canEdit: boolean }) {
           </p>
           <LockNote canEdit={canEdit} />
         </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setCollapsed(FEATURE_GROUPS.map((group) => group.title))} className="px-3 py-2 text-sm border rounded-lg hover:bg-gray-50">Collapse All</button>
+          <button type="button" onClick={() => setCollapsed([])} className="px-3 py-2 text-sm border rounded-lg hover:bg-gray-50">Expand All</button>
         {canEdit && (
           <button
             onClick={() => setData((current) => ({ ...current, featurePermissionOverrides: {} }))}
@@ -140,37 +144,44 @@ export function FeaturePermissionMatrix({ canEdit }: { canEdit: boolean }) {
             ↺ Reset Matrix to Defaults
           </button>
         )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="max-h-[calc(100vh-220px)] overflow-auto">
         <table className="w-full text-xs">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="text-left px-4 py-2 font-semibold text-gray-700">Feature</th>
-              {FEATURE_ROLES.map((role) => <RoleHeader key={role} role={role} />)}
+              <th className="sticky top-0 left-0 z-30 bg-gray-50 border-b text-left px-4 py-2 font-semibold text-gray-700">Feature</th>
+              {FEATURE_ROLES.map((role) => <RoleHeader key={role} role={role} sticky />)}
             </tr>
           </thead>
           <tbody>
             {FEATURE_GROUPS.map((group) => (
               <React.Fragment key={group.title}>
-                <tr className="bg-gray-100">
-                  <td colSpan={FEATURE_ROLES.length + 1} className="px-4 py-1.5 font-semibold text-gray-700 uppercase tracking-wide">{group.title}</td>
+                <tr className="cursor-pointer bg-gray-100"
+                  onClick={() => setCollapsed((current) => current.includes(group.title) ? current.filter((title) => title !== group.title) : [...current, group.title])}>
+                  <td colSpan={FEATURE_ROLES.length + 1} className="bg-gray-100 px-4 py-1.5 font-semibold text-gray-700 uppercase tracking-wide">
+                    <button type="button" aria-expanded={!collapsed.includes(group.title)}>
+                      {collapsed.includes(group.title) ? "▸" : "▾"} {group.title} ({group.items.length})
+                    </button>
+                  </td>
                 </tr>
-                {group.items.map(([permission, label]) => (
+                {!collapsed.includes(group.title) && group.items.map(([permission, label]) => (
                   <tr key={permission} className="border-b border-gray-200 hover:bg-gray-50">
-                    <td className="text-left px-4 py-2 font-medium text-gray-900">{label}</td>
+                    <td className="sticky left-0 z-10 bg-white text-left px-4 py-2 font-medium text-gray-900">{label}</td>
                     {FEATURE_ROLES.map((role) => {
                       const allowed = roleHasPermission(role, permission, overrides);
                       const changed = overrides?.[featureKey(role, permission)] !== undefined;
+                      const locked = (HARD_LOCKED_FEATURES as readonly string[]).includes(permission);
                       return (
                         <td key={role} className="text-center px-1 py-1.5">
                           <button
                             type="button"
-                            disabled={!canEdit}
+                            disabled={!canEdit || locked}
                             onClick={() => toggle(role, permission)}
                             className={`inline-block px-2 py-1 rounded font-medium whitespace-nowrap ${allowed ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-400"} ${changed ? "ring-1 ring-blue-400" : ""} ${canEdit ? "cursor-pointer hover:ring-2 hover:ring-blue-300" : "cursor-default"}`}
                           >
-                            {allowed ? "✓ Allowed" : "✕ Restricted"}
+                            {locked && role !== "SiteAdministrator" ? "Locked" : allowed ? "✓ Allowed" : "✕ Restricted"}
                           </button>
                         </td>
                       );

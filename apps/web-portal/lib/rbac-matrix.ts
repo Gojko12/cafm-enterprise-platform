@@ -71,7 +71,7 @@ export function resolveStageMatrix(saved: Record<string, string> | undefined): S
 export const nextStageAccess = (value: StageAccess): StageAccess => value === "act" ? "notify" : value === "notify" ? "none" : "act";
 
 // ESA_LongJobManager duplicates ESA_LJM; the *_LONG_JOB roles duplicate ESA_LJM / TRADE_TM.
-export const HIDDEN_FEATURE_ROLES: UserRole[] = ["ESA_LongJobManager", "ESA_LONG_JOB", "TRADE_LONG_JOB"];
+export const HIDDEN_FEATURE_ROLES: UserRole[] = ["SuperAdmin", "ESA_LongJobManager", "ESA_LONG_JOB", "TRADE_LONG_JOB"];
 export const FEATURE_ROLES = (Object.keys(ROLE_PERMISSIONS) as UserRole[]).filter((role) => !HIDDEN_FEATURE_ROLES.includes(role));
 
 export const FEATURE_GROUPS: Array<{ title: string; items: Array<[Permission, string]> }> = [
@@ -88,6 +88,9 @@ export const FEATURE_GROUPS: Array<{ title: string; items: Array<[Permission, st
     ["workRequests.manageFreezes", "Configure Location Freezes"], ["workRequests.approve", "Approve & Close Work Requests"],
   ] },
   { title: "SmartPM & Checklists", items: [
+    ["pmWorkRequests.complete", "Complete PM Work Requests (100%)"],
+    ["pmWorkRequests.cancel", "Cancel PM Work Requests (27%)"],
+    ["pmWorkRequests.reactivate", "Reactivate Closed/Cancelled PMs (Admin)"],
     ["pmSchedules.read", "View PM Schedules"], ["pmSchedules.write", "Define & Edit PM Schedules"], ["pmSchedules.generate", "Generate PM Work Requests"],
     ["pmSchedules.updateRequirementsFromWr", "Update SmartPM Teams & Notices on PM Closure"],
     ["checklists.execute", "Execute Checklists"], ["checklists.manage", "Manage Checklist Blueprints"], ["workSessions.manageOwn", "Record Own Work Time"],
@@ -97,13 +100,19 @@ export const FEATURE_GROUPS: Array<{ title: string; items: Array<[Permission, st
     ["deskReservations.manageOwn", "Reserve Own Desk"], ["deskReservations.manageAll", "Manage All Desk Reservations"], ["analytics.read", "View Analytics"],
   ] },
   { title: "Long Jobs", items: [
+    ["longJobs.overrideStage", "Override Long Job Stage (Admin)"],
     ["longJobs.manageRFQ", "Create & Manage RFQ Quotes (0%–25%)"], ["longJobs.manageRFW", "Manage RFW Execution (30%–50%)"],
-    ["longJobs.approveAcceptanceGates", "Approve SAT & Final Acceptance Gates (78%–94%)"], ["longJobs.manageSiteContext", "Configure Site Settings & Freezes"],
+    ["longJobs.approveAcceptanceGates", "Approve SAT & Final Acceptance Gates (78%–94%)"],
   ] },
 ];
 
 export const featureKey = (role: string, permission: string) => `${role}|${permission}`;
+export const HARD_LOCKED_FEATURES = ["pmWorkRequests.reactivate", "longJobs.overrideStage"] as const;
 export function roleHasPermission(role: UserRole, permission: string, overrides?: FeatureOverrides): boolean {
+  if (role === "SuperAdmin") return true;
+  if ((HARD_LOCKED_FEATURES as readonly string[]).includes(permission)) return role === "SiteAdministrator";
   const override = overrides?.[featureKey(role, permission)];
-  return override ?? (ROLE_PERMISSIONS[role] as readonly string[]).includes(permission);
+  const allowed = override ?? (ROLE_PERMISSIONS[role] as readonly string[]).includes(permission);
+  return allowed || (permission === "workRequests.readAssigned" && roleHasPermission(role, "workRequests.readAll", overrides)) ||
+    (permission === "workRequests.updateAssigned" && roleHasPermission(role, "workRequests.update", overrides));
 }

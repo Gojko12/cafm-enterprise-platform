@@ -41,6 +41,10 @@ import { PMAssignCraftpersonModal } from "./pm/PMAssignCraftpersonModal";
 import { applyChecklistResult, applyChecklistFinish } from "./pm/pm-checklist-updates";
 import { createFollowUpFastJob } from "@/lib/pm-follow-up";
 import { isWrTerminal } from "./scheduler/scheduler-rules";
+import { actorCanPmAction, resolveGovernanceActor } from "@/lib/governance-actor";
+import { appendGovernanceLog } from "@/lib/wr-admin-actions";
+import type { GovernanceProof } from "@/lib/wr-governance-types";
+import { AdminOverrideControls } from "./pm/AdminOverrideControls";
 
 const TABS = [
   "Work request details",
@@ -81,11 +85,15 @@ export function PMWorkRequestPopup({
   onEscalateToLJ,
   initialTab = TABS[0],
 }: PMWorkRequestPopupProps) {
-  const { data, setData } = useCafmStore();
+  const { data, setData, commitSnapshot } = useCafmStore();
   const { permissions, profile } = useActiveUserPermissions();
-  const { activeSiteId, activePerson, currentUser } = useSiteContext();
+  const { activeSiteId, activePerson } = useSiteContext();
   const { currentRole } = useApp();
   const terminalReadOnly = isWrTerminal(workRequest);
+  const statusReadOnly = workRequest.Percentage === 27 || workRequest.Percentage === 100;
+  const governanceActor = workRequest.SiteId === activeSiteId ? resolveGovernanceActor(data, activeSiteId, activePerson) : null;
+  const canCompletePm = actorCanPmAction(governanceActor, "pmWorkRequests.complete", data.featurePermissionOverrides);
+  const canCancelPm = actorCanPmAction(governanceActor, "pmWorkRequests.cancel", data.featurePermissionOverrides);
   const coordinationItem = useMemo(() => buildCoordinationItems(data, 0).find((entry) => entry.wrId === workRequest.WR_ID), [data, workRequest.WR_ID]);
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>(initialTab);
   useEffect(() => { setActiveTab(initialTab); }, [initialTab, workRequest.WR_ID]);
@@ -116,8 +124,8 @@ export function PMWorkRequestPopup({
   const [fastJobUrgency, setFastJobUrgency] = useState("Normal");
   const [fastJobStep, setFastJobStep] = useState("");
 
-  const actorId = currentUser?.UserId ?? "current-user";
-  const actorName = currentUser?.DisplayName ?? "Current user";
+  const actorId = governanceActor?.id ?? activePerson;
+  const actorName = governanceActor?.name ?? activePerson;
   const schedule = data.schedules.find((item) =>
     item.ScheduleId === workRequest.ScheduleId && item.SiteId === workRequest.SiteId,
   );
@@ -176,6 +184,7 @@ export function PMWorkRequestPopup({
     change: (current: BaseWorkRequest) => BaseWorkRequest,
     logText?: string,
   ) => {
+    if (statusReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     const now = new Date().toISOString();
     setData((current) => ({
       ...current,
@@ -205,7 +214,7 @@ export function PMWorkRequestPopup({
   const [closureDraft, setClosureDraft] = useState<ClosureDraft>(emptyClosureDraft);
   const [closureMessage, setClosureMessage] = useState("");
   const commitClosureDraft = () => {
-    if (!canUpdatePms || !hasClosureSelection(closureDraft)) return false;
+    if (statusReadOnly || !canUpdatePms || !hasClosureSelection(closureDraft)) return false;
     setData((current) => applyClosureRequirements(current, workRequest, closureDraft, actorName, true));
     setClosureDraft(emptyClosureDraft());
     return true;
@@ -216,12 +225,13 @@ export function PMWorkRequestPopup({
   const closureBox = workRequest.WR_Type === "PM" && workRequest.Percentage !== 27 ? (
     <PmClosureRequirements workRequest={workRequest} draft={closureDraft} setDraft={setClosureDraft} canEdit={canUpdatePms}
       onSave={saveClosureDraft} message={closureMessage}
-      onClose={canUpdatePms && permissions?.canCloseWR100 && workRequest.Percentage === 78 ? () => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!) : undefined} />
+      onClose={canUpdatePms && canCompletePm && workRequest.Percentage === 78 ? () => applyStatus(STATUS_CHOICES.find((item) => item.percentage === 100)!) : undefined} />
   ) : null;
 
   const applyStatus = (choice: StatusChoice, skipFreezeGate = false, checklistOverride = false, cancelReason?: string) => {
-    if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
-    if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
+    if (statusReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
+    if (workRequest.Percentage === 78 && (choice.percentage === 50 || choice.percentage === 55) && !permissions?.canCompleteWR78) { window.alert("You do not have permission for this status transition."); return; }
+    if ((choice.percentage === 78 && !permissions?.canCompleteWR78) || (choice.percentage === 100 && !canCompletePm) || (choice.percentage === 27 && !canCancelPm)) { window.alert("You do not have permission for this status transition."); return; }
     if (choice.percentage === 27 && !cancelReason?.trim()) { window.alert("A cancellation reason is mandatory."); return; }
     if (choice.percentage === 78 && !skipFreezeGate && wrFreezes.length > 0 && !workRequest.freezeAcknowledged) {
       setPendingFreezeStatus(choice);
@@ -292,15 +302,24 @@ export function PMWorkRequestPopup({
     applyStatus(STATUS_CHOICES.find((item) => item.percentage === 27)!, false, false, cancelReason);
   };
 
-  const restoreToIssued = () => {
-    if (!permissions?.canReopenCancelledWR) { window.alert("Your role does not include the Reopen Cancelled WR permission."); return; }
-    if (workRequest.Percentage !== 27) { window.alert("Only cancelled (27%) work requests can be restored."); return; }
-    const issued = WR_Statuses.find((item) => item.Percentage === 50 && item.ESAWorkType === workRequest.ESAWorkType);
-    if (!issued) { window.alert(`No 50% WR_Statuses configuration exists for ${workRequest.ESAWorkType}.`); return; }
-    updateWorkRequest((current) => ({
-      ...current, Percentage: 50, WorkRequestStatus: issued.WorkRequestStatus,
-      WorkRequestSubstatus: issued.WorkRequestSubstatus, IsFrozen: false,
-    }), `Cancelled WR restored from 27% to 50% Issued by ${actorName}`);
+  const reactivate = async (target: number, proof: GovernanceProof) => {
+    if (!governanceActor?.isAdmin || !statusReadOnly || ![50, 55, 78].includes(target)) throw new Error("Reactivation is not permitted.");
+    const configured = target === 55 ? undefined : WR_Statuses.find((item) => item.Percentage === target && item.ESAWorkType === workRequest.ESAWorkType);
+    if (target !== 55 && !configured) throw new Error(`No WR_Statuses configuration exists for ${target}% ${workRequest.ESAWorkType}.`);
+    const now = new Date().toISOString();
+    const role = governanceActor.roles.includes("SuperAdmin") ? "SuperAdmin" : "SiteAdministrator";
+    const text = `[Admin Reactivation] PM reactivated from ${workRequest.Percentage}% to ${target}% by ${governanceActor.name} (${role}). Reason: ${proof.reason}`;
+    const next = appendGovernanceLog({ ...workRequest, Percentage: target,
+      WorkRequestStatus: target === 55 ? "On Hold" : configured!.WorkRequestStatus,
+      WorkRequestSubstatus: target === 55 ? "On Hold for Access" : configured!.WorkRequestSubstatus,
+      ClosedAt: undefined, CompletedAt: target === 78 ? workRequest.CompletedAt : undefined,
+      IsFrozen: target === 55, FreezeReason: target === 55 ? "Access" : undefined,
+      ActiveFreezeName: undefined, PlannedFreezeText: undefined, FreezeStartedAt: target === 55 ? now : undefined, FreezeEndedAt: undefined,
+      ReopenCount: (workRequest.ReopenCount ?? 0) + 1,
+      ReopenedHistory: [...(workRequest.ReopenedHistory ?? []), { reopenedAt: now, fromPercentage: workRequest.Percentage, toPercentage: target, reason: proof.reason, actor: governanceActor.name }],
+    }, governanceActor, text, now);
+    await commitSnapshot(data, { ...data, workRequests: data.workRequests.map((item) =>
+      item.WR_ID === workRequest.WR_ID && item.SiteId === workRequest.SiteId ? next : item) }, { governanceProof: proof });
   };
 
   const addComment = () => {
@@ -410,6 +429,7 @@ export function PMWorkRequestPopup({
   };
 
   const addFollowUp = () => {
+    if (statusReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     if (!permissions?.canOpenFollowUpFJ) { window.alert("Permission required to create a follow-up FJ."); return; }
     const result = createFollowUpFastJob(data, workRequest, {
       description: fastJobDescription, urgency: fastJobUrgency, stepId: fastJobStep,
@@ -422,6 +442,7 @@ export function PMWorkRequestPopup({
   };
 
   const setInstallation = (equipmentCode: string, isInstallation: boolean) => {
+    if (statusReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
     const now = new Date().toISOString();
     setData((current) => ({
       ...current,
@@ -508,6 +529,8 @@ export function PMWorkRequestPopup({
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <PmScope wr={workRequest} />
+          {statusReadOnly && governanceActor?.isAdmin ? <AdminOverrideControls title="Reactivate PM (Admin)" kind="pm-reactivation" wrId={workRequest.WR_ID}
+            current={workRequest.Percentage} choices={[[50, "Issued"], [55, "On Hold for Access"], [78, "Technically Completed"]]} onSubmit={reactivate} /> : null}
           <PMFreezeBanner workRequest={workRequest} activeFreezes={wrFreezes} allFreezes={data.locationFreezes ?? []} />
           {activeTab === "Work request details" && <PMDetailsPanel workRequest={workRequest} renderGroup={renderGroup} renderField={renderField} equipment={equipment} setInstallation={setInstallation} blueprint={blueprint} />}
 
@@ -520,9 +543,9 @@ export function PMWorkRequestPopup({
                 Assign Craftperson
               </button>
             </div>
-            <WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} />
-            <PMStatusActionBar workRequest={workRequest} permissions={permissions} terminalReadOnly={terminalReadOnly}
-              onApply={applyStatusByPercentage} onCancel={cancelWorkRequest} onRestore={restoreToIssued} />
+            <fieldset disabled={terminalReadOnly}><WorkRequestLabor wr={workRequest} people={data.craftspeople} absences={data.craftpersonAbsences} freezes={data.locationFreezes} update={updateWorkRequest} onClose={onClose} activePerson={activePerson} actorRole={currentRole} canOverride={!!permissions?.canOverwriteLaborTime} /></fieldset>
+            <PMStatusActionBar workRequest={workRequest} permissions={permissions} terminalReadOnly={statusReadOnly} canCompletePm={canCompletePm} canCancelPm={canCancelPm}
+              onApply={applyStatusByPercentage} onCancel={cancelWorkRequest} />
             {closureBox}
             <div className="rounded border bg-white p-4">
               <label className="block text-sm font-medium">Message text

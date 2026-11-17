@@ -3,6 +3,7 @@ import { SiteIdSchema, SiteId } from "./locations.js";
 import { LJRole } from "./work-requests.js";
 
 export const UserRole = z.enum([
+  "SuperAdmin",
   "SiteAdministrator",
   "ESA_TO",
   "ESA_TM",
@@ -54,6 +55,10 @@ export const UserAccessSchema = z.object({
 export type UserAccess = z.infer<typeof UserAccessSchema>;
 
 export const Permission = z.enum([
+  "pmWorkRequests.complete",
+  "pmWorkRequests.cancel",
+  "pmWorkRequests.reactivate",
+  "longJobs.overrideStage",
   "pmSchedules.updateRequirementsFromWr",
   "system.configure",
   "users.manageRoles",
@@ -92,7 +97,12 @@ export const Permission = z.enum([
 export type Permission = z.infer<typeof Permission>;
 
 export const ROLE_PERMISSIONS = {
+  SuperAdmin: Permission.options,
   SiteAdministrator: [
+    "pmWorkRequests.complete",
+    "pmWorkRequests.cancel",
+    "pmWorkRequests.reactivate",
+    "longJobs.overrideStage",
     "pmSchedules.updateRequirementsFromWr",
     "system.configure",
     "users.manageRoles",
@@ -103,8 +113,10 @@ export const ROLE_PERMISSIONS = {
     "equipment.write",
     "trades.write",
     "workRequests.readAll",
+    "workRequests.readAssigned",
     "workRequests.create",
     "workRequests.update",
+    "workRequests.updateAssigned",
     "workRequests.assign",
     "workRequests.manageFreezes",
     "workRequests.approve",
@@ -126,6 +138,8 @@ export const ROLE_PERMISSIONS = {
     "people.onboardNonFm",
   ],
   ESA_TO: [
+    "deskReservations.manageOwn",
+    "technicalAudits.write",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -142,6 +156,8 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   ESA_TM: [
+    "deskReservations.manageOwn",
+    "technicalAudits.write",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -159,6 +175,8 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   ESA_LJM: [
+    "deskReservations.manageOwn",
+    "longJobs.approveAcceptanceGates",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -175,6 +193,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageRFW",
   ],
   ESA_CCM: [
+    "deskReservations.manageOwn",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -186,6 +205,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   ESA_DO: [
+    "deskReservations.manageOwn",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -193,6 +213,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   ESA_IM: [
+    "deskReservations.manageOwn",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -200,6 +221,11 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   TRADE_CM: [
+    "deskReservations.manageOwn",
+    "workRequests.readAll",
+    "workRequests.assign",
+    "workSessions.manageOwn",
+    "checklists.execute",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -210,6 +236,11 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageRFW",
   ],
   TRADE_TM: [
+    "deskReservations.manageOwn",
+    "workRequests.readAll",
+    "workRequests.assign",
+    "workSessions.manageOwn",
+    "technicalAudits.read",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -222,6 +253,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.manageRFW",
   ],
   ESA_LONG_JOB: [
+    "deskReservations.manageOwn",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -237,6 +269,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
   ],
   TRADE_LONG_JOB: [
+    "deskReservations.manageOwn",
     "locations.read",
     "equipment.read",
     "workRequests.readAssigned",
@@ -249,6 +282,7 @@ export const ROLE_PERMISSIONS = {
   ],
   // Legacy roles for backward compatibility
   ESA_LongJobManager: [
+    "deskReservations.manageOwn",
     "locations.read",
     "equipment.read",
     "workRequests.readAll",
@@ -265,6 +299,8 @@ export const ROLE_PERMISSIONS = {
     "analytics.read",
   ],
   PM_Planner: [
+    "deskReservations.manageOwn",
+    "workSessions.manageOwn",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -279,6 +315,9 @@ export const ROLE_PERMISSIONS = {
     "analytics.read",
   ],
   QA_Inspector: [
+    "deskReservations.manageOwn",
+    "workSessions.manageOwn",
+    "checklists.execute",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -287,6 +326,13 @@ export const ROLE_PERMISSIONS = {
     "technicalAudits.write",
   ],
   TeamLeader: [
+    "pmWorkRequests.complete",
+    "pmWorkRequests.cancel",
+    "deskReservations.manageOwn",
+    "workSessions.manageOwn",
+    "technicalAudits.read",
+    "workRequests.readAssigned",
+    "workRequests.updateAssigned",
     "pmSchedules.updateRequirementsFromWr",
     "locations.read",
     "equipment.read",
@@ -296,6 +342,7 @@ export const ROLE_PERMISSIONS = {
     "checklists.execute",
   ],
   MobileTechnician: [
+    "technicalAudits.read",
     "locations.read",
     "equipment.read",
     "workRequests.readAssigned",
@@ -334,5 +381,9 @@ export const RolePermissionMatrixSchema = z.record(
 );
 
 export function hasPermission(role: UserRole, permission: Permission): boolean {
-  return ROLE_PERMISSIONS[role].some((assignedPermission) => assignedPermission === permission);
+  if (role === "SuperAdmin") return true;
+  const permissions: readonly Permission[] = ROLE_PERMISSIONS[role];
+  return permissions.includes(permission) ||
+    (permission === "workRequests.readAssigned" && permissions.includes("workRequests.readAll")) ||
+    (permission === "workRequests.updateAssigned" && permissions.includes("workRequests.update"));
 }

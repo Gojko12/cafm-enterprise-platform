@@ -84,6 +84,7 @@ export function normalizeChecklistRole(role: RoleDefinition): RoleDefinition {
   return { ...role, permissions };
 }
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {
+  if (profile.isSuperAdmin || profile.primaryRole === "SuperAdmin") return permissionsForPreset("FullAdmin");
   const result = permissionsForPreset("Craftperson");
   for (const key of permissionFlags) result[key] = false;
   result.auditTrades = []; result.auditWRTypes = [];

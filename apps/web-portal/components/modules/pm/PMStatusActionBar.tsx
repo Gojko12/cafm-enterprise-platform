@@ -9,12 +9,12 @@ interface Props {
   workRequest: BaseWorkRequest;
   permissions: UserGranularPermissions | undefined;
   terminalReadOnly: boolean;
+  canCompletePm: boolean;
+  canCancelPm: boolean;
   /** Applies a validated status transition (50/55/78/100/27). */
   onApply: (percentage: 50 | 55 | 78 | 100, holdReason?: PmHoldReason) => void;
   /** Cancels the WR at 27% with a mandatory reason. */
   onCancel: (reason: string) => void;
-  /** Restores a cancelled (27%) WR back to 50% Issued. */
-  onRestore: () => void;
 }
 
 const primary = "rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
@@ -23,7 +23,7 @@ const primary = "rounded bg-slate-700 px-3 py-2 text-sm font-semibold text-white
  * FJ-style status button bar for the PM WR Details Popup: every unavailable
  * transition stays visible but grayed out with a `title` tooltip explaining why.
  */
-export function PMStatusActionBar({ workRequest, permissions, terminalReadOnly, onApply, onCancel, onRestore }: Props) {
+export function PMStatusActionBar({ workRequest, permissions, terminalReadOnly, canCompletePm, canCancelPm, onApply, onCancel }: Props) {
   const [holdOpen, setHoldOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -35,7 +35,8 @@ export function PMStatusActionBar({ workRequest, permissions, terminalReadOnly, 
 
   const holdDisabled = reason([
     [terminalReadOnly, "Closed or cancelled work requests are read-only."],
-    [pct !== 50 && pct !== 55, `On Hold (55%) is available only from 50% Issued (currently ${pct}%).`],
+    [pct !== 50 && pct !== 55 && pct !== 78, `On Hold (55%) is unavailable at ${pct}%.`],
+    [pct === 78 && !permissions?.canCompleteWR78, "Your role does not include the status transition permission."],
   ]);
   const completed78Disabled = reason([
     [terminalReadOnly, "Closed or cancelled work requests are read-only."],
@@ -43,15 +44,12 @@ export function PMStatusActionBar({ workRequest, permissions, terminalReadOnly, 
     [pct !== 50 && pct !== 55, `Technically Completed (78%) is available only from 50% Issued or 55% On Hold (currently ${pct}%).`],
   ]);
   const completed100Disabled = reason([
-    [!permissions?.canCloseWR100, "Your role does not include the Close 100% permission (Craftpersons cannot close WRs)."],
+    [terminalReadOnly, "Closed or cancelled work requests are read-only."],
     [pct !== 78, `Complete (100%) is available only after Technically Completed (78%) — currently ${pct}%.`],
   ]);
   const cancelDisabled = reason([
     [cancelled, "This work request is already cancelled."],
     [pct === 100, "Closed work requests cannot be cancelled."],
-  ]);
-  const restoreDisabled = reason([
-    [!permissions?.canReopenCancelledWR, "Your role does not include the Reopen Cancelled WR permission."],
   ]);
 
   return <div className="rounded border bg-white p-4">
@@ -67,14 +65,13 @@ export function PMStatusActionBar({ workRequest, permissions, terminalReadOnly, 
       </span>
       <button type="button" title={completed78Disabled} disabled={!!completed78Disabled}
         onClick={() => onApply(78)} className={primary}>Technically Completed (78%)</button>
-      <button type="button" title={completed100Disabled} disabled={!!completed100Disabled}
-        onClick={() => onApply(100)} className={primary}>Complete (100%)</button>
-      <button type="button" title={cancelDisabled ?? "Cancelling requires a mandatory reason."} disabled={!!cancelDisabled}
+      {pct === 78 && <button type="button" disabled={!permissions?.canCompleteWR78}
+        onClick={() => onApply(50)} className={primary}>Return to Issued (50%)</button>}
+      {canCompletePm && <button type="button" title={completed100Disabled} disabled={!!completed100Disabled}
+        onClick={() => onApply(100)} className={primary}>Complete (100%)</button>}
+      {canCancelPm && <button type="button" title={cancelDisabled ?? "Cancelling requires a mandatory reason."} disabled={!!cancelDisabled}
         onClick={() => { setCancelReason(""); setCancelOpen(true); }}
-        className="rounded border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">Cancel WR (27%)</button>
-      {cancelled && <button type="button" title={restoreDisabled ?? "Restore this cancelled PM back to 50% Issued."} disabled={!!restoreDisabled}
-        onClick={onRestore}
-        className="rounded border border-blue-600 bg-white px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40">↺ Restore to 50% Issued</button>}
+        className="rounded border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40">Cancel WR (27%)</button>}
     </div>
 
     {cancelOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4">

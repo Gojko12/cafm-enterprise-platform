@@ -6,12 +6,16 @@ import { logChecklistCorrections, LEGACY_SITE_ALIAS } from "@cafm/shared-schema"
 import type { SiteId } from "@cafm/shared-schema";
 import { ensureFjSurveys } from "./fj-satisfaction";
 import type { DemoData } from "./cafm-data";
-import { seedAccessProfiles, resolveEffectivePermissions } from "./access-profiles";
+import { seedAccessProfiles, resolveEffectivePermissions, permissionsForPreset } from "./access-profiles";
 import { ahuTemplate } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 import { migratePmState } from "./pm-orders";
 import { mergeRemoteState, mergeUserEdits, stampChangedWorkRequests } from "./state-merge";
 import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
+import type { GovernanceProof } from "./wr-governance-types";
+import { stateRequest, StateRequestError } from "./cafm-state-request";
+import { resolveGovernanceActor } from "./governance-actor";
+export { stateRequest } from "./cafm-state-request";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -57,34 +61,11 @@ function safeStorageSet(key: string, value: string, site: SiteId): boolean {
     }
   }
 }
-export async function stateRequest(site: SiteId, person: string, method: "GET" | "POST", body?: unknown) {
-  const token = process.env.NEXT_PUBLIC_CAFM_SYNC_TOKEN;
-  const response = await fetch("/api/cafm-state", {
-    method,
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "X-CAFM-Site-Id": site, "X-CAFM-Person": person, ...(body ? { "Content-Type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-  });
-  const result: unknown = await response.json();
-  if (!response.ok) {
-    const message = result && typeof result === "object" && "error" in result ? String(result.error) : `HTTP ${response.status}`;
-    throw new StateRequestError(message, response.status);
-  }
-  if (!result || typeof result !== "object" || !("revision" in result) || typeof result.revision !== "number" || !("state" in result)) {
-    throw new Error("Invalid state response.");
-  }
-  return { revision: result.revision, state: result.state };
-}
-
-class StateRequestError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
-}
-
 interface Store {
   data: DemoData;
   setData: React.Dispatch<React.SetStateAction<DemoData>>;
   reset: () => void;
-  commitSnapshot: (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => Promise<void>;
+  commitSnapshot: (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean; governanceProof?: GovernanceProof }) => Promise<void>;
 }
 
 const StoreContext = createContext<Store | null>(null);
@@ -98,6 +79,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const [data, setData] = useState<DemoData>(() => scopeData(seedData(), site));
   const personRef = useRef(person);
   personRef.current = person;
+  const actorIdRef = useRef(person);
+  actorIdRef.current = resolveGovernanceActor(data, site, person)?.id ?? person;
   const storageKey = `${STORAGE_KEY}:${site}`;
   const pendingKey = `${PENDING_KEY}:${site}`;
   const baseKey = `${BASE_KEY}:${site}`;
@@ -120,6 +103,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const dirtyWrIdsRef = useRef(new Set<string>());
   const dirtyFieldsRef = useRef(new Set<string>());
   const hasUnsavedUserEditsRef = useRef(false);
+  const pendingActor = useRef<string | null>(null);
   const editVersion = useRef(0);
   const pushTimer = useRef<number | null>(null);
   const schedulePush = useRef<(delay?: number) => void>(() => {});
@@ -197,6 +181,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         dirtyWrIdsRef.current = new Set(savedPending.dirtyWrIds);
         dirtyFieldsRef.current = new Set(savedPending.dirtyFields);
         hasUnsavedUserEditsRef.current = true;
+        pendingActor.current = "actorId" in savedPending && typeof savedPending.actorId === "string" ? savedPending.actorId : actorIdRef.current;
       }
       try {
         const remote = await stateRequest(site, personRef.current, "GET");
@@ -279,7 +264,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       cachedSnapshot.current = saved ? serialized : "";
       let pendingSaved = true;
       if (saved && hasUnsavedUserEditsRef.current) {
-        pendingSaved = safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }), site);
+        pendingSaved = safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, actorId: pendingActor.current, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }), site);
       }
       if (!saved || !pendingSaved) localStorage.removeItem(pendingKey);
       setCacheWarning(!saved || !pendingSaved);
@@ -354,7 +339,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           }
           outgoing = scopeData(migrateWorkRequestIdsTo10Digits(outgoing), site);
           serialized = JSON.stringify(outgoing);
-          const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: outgoing });
+          const result = await stateRequest(site, pendingActor.current ?? personRef.current, "POST", { revision: revision.current, state: outgoing }, pendingActor.current ?? actorIdRef.current);
           revision.current = result.revision;
           if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) {
             throw new Error("Server returned an invalid saved state.");
@@ -374,13 +359,14 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           }
           if (sentVersion === editVersion.current) {
             hasUnsavedUserEditsRef.current = false;
+            pendingActor.current = null;
             dirtyFieldsRef.current.clear();
             dirtyWrIdsRef.current.clear();
           }
           safeStorageSet(baseKey, JSON.stringify({ revision: revision.current }), site);
           if (!hasUnsavedUserEditsRef.current) localStorage.removeItem(pendingKey);
           else if (cachedSnapshot.current === JSON.stringify(current.current)) {
-            if (!safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }), site)) {
+            if (!safeStorageSet(pendingKey, JSON.stringify({ revision: revision.current, userEdits: true, actorId: pendingActor.current, dirtyWrIds: [...dirtyWrIdsRef.current], dirtyFields: [...dirtyFieldsRef.current] }), site)) {
               localStorage.removeItem(pendingKey);
               if (active) setCacheWarning(true);
             }
@@ -390,6 +376,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         } else {
           if (hasUnsavedUserEditsRef.current && serialized === acknowledged.current) {
             hasUnsavedUserEditsRef.current = false;
+            pendingActor.current = null;
             dirtyFieldsRef.current.clear();
             dirtyWrIdsRef.current.clear();
             localStorage.removeItem(pendingKey);
@@ -444,8 +431,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     };
   }, [ready, site, pendingKey, baseKey]);
 
-  const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean }) => {
+  const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean; governanceProof?: GovernanceProof }) => {
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
+    if (pendingActor.current && pendingActor.current !== actorIdRef.current) throw new Error("Wait for the previous person's pending changes to sync.");
     // If a background GET sync is in flight, wait for it (up to 5s) instead of failing immediately.
     const waitStart = Date.now();
     while (busy.current && Date.now() - waitStart < 5000) await new Promise((resolve) => window.setTimeout(resolve, 100));
@@ -466,7 +454,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       setData(next);
     }
     try {
-      const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next, ...(options?.forceReset ? { forceReset: true } : {}) });
+      const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next, ...(options?.forceReset ? { forceReset: true } : {}), ...(options?.governanceProof ? { governanceProof: options.governanceProof } : {}) }, actorIdRef.current);
       committed = true;
       revision.current = result.revision;
       if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Server returned an invalid saved state.");
@@ -481,6 +469,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       dirtyWrIdsRef.current.clear();
       dirtyFieldsRef.current.clear();
       hasUnsavedUserEditsRef.current = false;
+      pendingActor.current = null;
       let cacheError: string | null = null;
       try {
         const saved = safeStorageSet(storageKey, acknowledged.current, site);
@@ -523,6 +512,11 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
 
   const setUserData: React.Dispatch<React.SetStateAction<DemoData>> = (update) => {
+    if (pendingActor.current && pendingActor.current !== actorIdRef.current) {
+      setSyncError("Wait for the previous person's pending changes to sync before editing.");
+      return;
+    }
+    pendingActor.current = actorIdRef.current;
     hasUnsavedUserEditsRef.current = true;
     editVersion.current++;
     if (!connected.current) offlineEdits.current = true;
@@ -577,11 +571,12 @@ export function useActiveUserPermissions() {
     (firstNameMatches.length === 1 ? firstNameMatches[0] : undefined) ??
     (activePerson === "Gregor" ? siteProfiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined) ??
     (firstNameMatches.length > 1 ? firstNameMatches[0] : undefined);
-  const siteAdmin = profile?.isSiteAdmin && !profile.isSuperAdmin;
+  const superAdmin = resolveGovernanceActor(data, activeSiteId, activePerson)?.roles.includes("SuperAdmin");
+  const siteAdmin = profile?.isSiteAdmin && !superAdmin && !profile.isSuperAdmin;
   const siteAllowed = !siteAdmin || (!!profile.managedSiteIds?.includes(activeSiteId));
   const governance = (key: keyof NonNullable<NonNullable<typeof profile>["siteAdminGovernance"]>) =>
     !siteAdmin || (siteAllowed && profile.siteAdminGovernance?.[key] === true);
-  const resolved = profile && resolveEffectivePermissions(profile, data.roleDefinitions);
+  const resolved = superAdmin ? permissionsForPreset("FullAdmin") : profile && resolveEffectivePermissions(profile, data.roleDefinitions);
   const permissions = resolved && {
     ...resolved,
     canManageShiftsAndLeaves: resolved.canManageShiftsAndLeaves && governance("canManageFreezesAndShifts"),

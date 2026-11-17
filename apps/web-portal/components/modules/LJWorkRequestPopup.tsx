@@ -20,7 +20,11 @@ import { useApp } from "@/lib/hooks/useApp";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { PhotoCapture } from "@/components/common/PhotoCapture";
 import { isWrTerminal } from "./scheduler/scheduler-rules";
-import { canCloseWorkRequestAt100 } from "@/lib/wr-transition-rules";
+import { resolveGovernanceActor } from "@/lib/governance-actor";
+import { isNormalLjShortcut, isNormalLjTransition, LJ_OVERRIDE_STAGES, ljStatus } from "@/lib/lj-governance";
+import { appendGovernanceLog } from "@/lib/wr-admin-actions";
+import type { GovernanceProof } from "@/lib/wr-governance-types";
+import { AdminOverrideControls } from "./pm/AdminOverrideControls";
 
 const TABS = [
   "Work request details & Roles",
@@ -90,11 +94,14 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
   onClose: () => void;
   onNavigate: (id: string) => void;
 }) {
-  const { data, setData } = useCafmStore();
+  const { data, setData, commitSnapshot } = useCafmStore();
   const { permissions } = useActiveUserPermissions();
-  const { currentUser, activePerson } = useSiteContext();
+  const { activePerson, activeSiteId } = useSiteContext();
   const { currentRole } = useApp();
   const terminalReadOnly = isWrTerminal(workRequest);
+  const statusReadOnly = workRequest.Percentage === 27 || workRequest.Percentage === 100;
+  const governanceActor = workRequest.SiteId === activeSiteId ? resolveGovernanceActor(data, workRequest.SiteId, activePerson) : null;
+  const tradeActor = workRequest.SiteId === activeSiteId ? resolveGovernanceActor(data, workRequest.SiteId, activePerson, workRequest.TradeName ?? workRequest.TradeId ?? "") : null;
   const [tab, setTab] = useState<Tab>(initialTab);
   useEffect(() => { setTab(initialTab); }, [initialTab, workRequest.WR_ID]);
   const unfavourableCount = getUnfavourableStepCount(workRequest, data);
@@ -105,19 +112,19 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const actorId = currentUser?.UserId ?? activePerson;
-  const actorName = activePerson === "SiteAdmin" ? "SiteAdmin" : activePerson;
+  const actorId = governanceActor?.id ?? activePerson;
+  const actorName = governanceActor?.name ?? activePerson;
   const track = workRequest.ProcessTrack ?? (workRequest.Percentage >= 30 ? "RFW" : "RFQ");
   const activeAssignments = data.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === workRequest.SiteId &&
-    assignment.PersonName === activePerson &&
+    assignment.PersonName === (governanceActor?.name ?? activePerson) &&
     (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)) &&
     (assignment.AssignmentLevel === "Main" || assignment.AssignmentLevel === "Deputy"));
-  const role = activePerson === "SiteAdmin" ? "SiteAdministrator" : activeAssignments.map((assignment) => assignment.RoleCode).join(", ") || "Unassigned";
+  const role = governanceActor?.roles.includes("SuperAdmin") ? "SuperAdmin" : governanceActor?.isAdmin ? "SiteAdministrator" : activeAssignments.map((assignment) => assignment.RoleCode).join(", ") || "Unassigned";
   const ljAssignments = data.siteRoleAssignments.filter((assignment) =>
     assignment.SiteId === workRequest.SiteId &&
     (assignment.Trade === "All" || assignment.Trade === (workRequest.TradeName ?? workRequest.TradeId)));
-  const hasPermission = (allowedRoles: readonly LJRole[]) => activePerson === "SiteAdmin" ||
+  const hasPermission = (allowedRoles: readonly LJRole[]) => !!governanceActor?.isAdmin ||
     allowedRoles.some((allowedRole) => activeAssignments.some((assignment) => assignment.RoleCode === allowedRole));
 
   const update = (change: (wr: BaseWorkRequest) => BaseWorkRequest, log?: string) => {
@@ -131,12 +138,12 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
     }) }));
   };
   const stage = (percentage: number, description: string, extra: Partial<BaseWorkRequest> = {}, allowedRoles?: LJRole[], allowBackward = false) => {
-    if (terminalReadOnly) { window.alert("Closed or cancelled work requests are read-only."); return; }
-    if (percentage === 100 && workRequest.Percentage !== 100 && !canCloseWorkRequestAt100(workRequest)) {
-      window.alert("Complete (100%) is available only after Technically Completed (78%).");
-      return;
+    const archive = workRequest.Percentage === 100 && percentage === 100 && description === "100% archived" && !workRequest.ArchivedAt;
+    if (statusReadOnly && !archive) { window.alert("Closed or cancelled work requests are read-only."); return; }
+    if (percentage !== workRequest.Percentage && (!tradeActor || !(isNormalLjTransition(workRequest.Percentage, percentage, track, tradeActor.roles, tradeActor.isAdmin) ||
+      isNormalLjShortcut(workRequest.Percentage, percentage, track, description, tradeActor.roles, tradeActor.isAdmin)))) {
+      window.alert("This stage transition is not available for your role or the current stage."); return;
     }
-    if (((percentage === 78 || (percentage === 94 && workRequest.Percentage < 78)) && !permissions?.canCompleteWR78) || (percentage === 100 && !permissions?.canCloseWR100)) { window.alert("You do not have permission for this status transition."); return; }
     if (percentage < 0 || percentage > 100) return;
     if (allowedRoles && !hasPermission(allowedRoles)) {
       window.alert(`This stage requires an assigned role: ${allowedRoles.join(", ")}.`);
@@ -252,9 +259,10 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
     }
     const next = [...gates.filter((item) => item.GateType !== type), { GateType: type, IsRequired: true, Status: status as "ReviewRequested" | "InvitationSent" }];
     const percentage = status === "InvitationSent" ? 80 : Math.max(78, workRequest.Percentage);
-    stage(percentage, `${type}: ${status}`, { AcceptanceGates: next }, assignees[type]);
+    stage(percentage, `${type}: ${status}`, { AcceptanceGates: next }, assignees[type], percentage < workRequest.Percentage);
   };
   const canUseAction = (action: MendixAction) => {
+    if (statusReadOnly && action.handler !== "save" && action.handler !== "archive") return false;
     if (action.handler === "preSat" && !workRequest.RequiresSAT) return false;
     if (action.handler === "preSat" && workRequest.PreSATApproved) return false;
     if (action.handler === "approveSat" && !workRequest.RequiresSAT) return false;
@@ -315,7 +323,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
     const roles = action.id === "technical-complete" && workRequest.Percentage !== 50
       ? action.roles.filter((item) => item !== "ESA_IM")
       : action.roles;
-    stage(target, action.substatus, {
+    stage(target, action.id === "technical-complete" && !required ? "All acceptance gates waived" : action.substatus, {
       ProcessTrack: targetTrack,
       ...(action.handler === "archive" ? { ArchivedAt: new Date().toISOString() } : {}),
       ...(target === 55 ? { IsFrozen: true, FreezeStartedAt: new Date().toISOString() } : {}),
@@ -325,6 +333,21 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
   const visibleActions = showAllActions
     ? LJ_ACTIONS
     : LJ_ACTIONS.filter((action) => canUseAction(action));
+  const overrideStage = async (target: number, proof: GovernanceProof) => {
+    if (!governanceActor?.isAdmin || target === workRequest.Percentage) throw new Error("Stage override is not permitted.");
+    const choice = LJ_OVERRIDE_STAGES.find(([percentage]) => percentage === target);
+    if (!choice) throw new Error("Invalid Long Job stage.");
+    const now = new Date().toISOString();
+    const actorRole = governanceActor.roles.includes("SuperAdmin") ? "SuperAdmin" : "SiteAdministrator";
+    const text = `[Site Admin Override] Stage pushed from ${workRequest.Percentage}% to ${target}% by ${governanceActor.name} (${actorRole}). Reason: ${proof.reason}`;
+    const next = appendGovernanceLog({ ...workRequest, Percentage: target, WorkRequestStatus: ljStatus(target),
+      WorkRequestSubstatus: choice[1], IsFrozen: target === 55,
+      ClosedAt: target === 100 || target === 27 ? now : undefined,
+      ProcessTrack: target === 27 || target === 29 ? track : target >= 30 ? "RFW" : "RFQ",
+    }, governanceActor, text, now);
+    await commitSnapshot(data, { ...data, workRequests: data.workRequests.map((item) =>
+      item.WR_ID === workRequest.WR_ID && item.SiteId === workRequest.SiteId ? next : item) }, { governanceProof: proof });
+  };
   const roles = ASSIGNMENT_ROLES.filter((item) => ["ESA_TM", "ESA_CCM", "TRADE_TM", "TRADE_CM", "ESA_TO", "ESA_LJM", "ESA_DO", "ESA_IM"].includes(item));
   const printYellowPage = () => {
     const printWindow = window.open("", "_blank");
@@ -370,6 +393,8 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
           className={`flex min-w-0 flex-1 items-center justify-center gap-1 rounded-t-md border px-3 py-2 text-xs font-medium whitespace-nowrap ${tab === item ? "border-blue-600 bg-blue-50 font-semibold text-blue-800" : "border-transparent text-slate-600 hover:bg-slate-50"}`}><span className="min-w-0 truncate">{item}</span>{item === "Checklist - Smart PM" && unfavourableCount > 0 && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 text-rose-900">{unfavourableCount}</span>}</button>)}
       </nav>
       <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        {governanceActor?.isAdmin ? <AdminOverrideControls title="Site Admin Stage Override" kind="lj-override" wrId={workRequest.WR_ID}
+          current={workRequest.Percentage} choices={LJ_OVERRIDE_STAGES} onSubmit={overrideStage} /> : null}
         {tab === "Checklist - Smart PM" && <WRChecklistReview wr={workRequest} />}
         {(() => { const frozen = getWorkRequestFreezes(workRequest, data.locationFreezes ?? [], localNowIso()); return frozen.length > 0 ? <div className="mb-3"><FreezeBadge freezes={frozen} /></div> : null; })()}        {tab === TABS[0] && <div className="space-y-4">
           <WRDetailsEditor workRequest={workRequest} />
@@ -406,6 +431,10 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
               {showAllActions && <p className="text-xs text-slate-500">Disabled buttons are not available at this stage or the active person lacks a matching Main/Deputy assignment.</p>}
             </div>}
           </section>
+          <details className="rounded border bg-white p-4"><summary className="font-semibold">AuditLog</summary>
+            {(workRequest.ChecklistHistory ?? []).filter((entry) => entry.details.startsWith("[Site Admin Override]")).map((entry) =>
+              <p key={entry.id} className="mt-2 text-sm">{formatDateTimeDDMMYYYY(entry.timestamp)} · {entry.details}</p>)}
+          </details>
           {group("Long Job Core", <>
             {field("WR ID", workRequest.WR_ID)}{field("Process (RFQ/RFW)", track)}{field("Work request status", workRequest.WorkRequestStatus)}
             {field("Current Substatus", `${workRequest.Percentage}% ${workRequest.WorkRequestSubstatus}`)}{field("Substatus Description", workRequest.WorkRequestSubstatus)}
@@ -443,15 +472,6 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
               onClick={() => stage(percent, percent === 31 ? "On Hold for Budget" : `${track} stage ${percent}%`, { ProcessTrack: track }, ["ESA_TO", "ESA_TM", "ESA_LJM", "ESA_CCM", "TRADE_TM", "TRADE_CM"])}
               className="rounded bg-indigo-700 px-3 py-2 text-sm text-white disabled:opacity-40">{percent}% {percent === 31 ? "On Hold for Budget" : ""}</button>)}
             {track === "RFQ" && <button disabled={workRequest.Percentage !== 28} onClick={() => stage(30, "Converted RFQ to RFW", { ProcessTrack: "RFW" }, ["ESA_TO", "ESA_TM", "ESA_LJM"])} className="rounded bg-green-700 px-3 py-2 text-sm text-white disabled:opacity-40">Convert RFQ to RFW (30%)</button>}
-            {workRequest.Percentage === 29 && <button type="button" disabled={!permissions?.canReopenCancelledWR}
-              title={permissions?.canReopenCancelledWR ? "Restore this rejected Long Job back to 10% Requested." : "Your role does not include the Reopen Cancelled WR permission."}
-              onClick={() => {
-                if (!permissions?.canReopenCancelledWR) return;
-                update((wr) => ({ ...wr, Percentage: 10, WorkRequestStatus: "Requested",
-                  WorkRequestSubstatus: wr.ProcessTrack === "RFW" ? "New Request for Work" : "New Request for Quotation", IsFrozen: false }),
-                `Rejected LJ restored from 29% to 10% Requested by ${actorName}`);
-              }}
-              className="rounded border border-blue-600 bg-white px-3 py-2 text-sm font-semibold text-blue-800 disabled:opacity-40">↺ Restore to 10% Requested</button>}
           </div>
           <div className="flex items-center justify-between"><h4 className="font-medium">Quotation line items</h4><button type="button" onClick={() => update((wr) => ({ ...wr, QuotationLines: [...(wr.QuotationLines ?? []), { id: crypto.randomUUID(), description: "", quantity: 1, unitCostEur: 0 }] }), `Quotation line added by ${actorName}`)} className="rounded border px-3 py-1 text-sm">+ Add line</button></div>
           <div className="space-y-2">{(workRequest.QuotationLines ?? []).map((line) => <div key={line.id} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
@@ -487,7 +507,7 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
           <div className="flex flex-wrap gap-4">{([
             ["RequiresSAT", "Requires SAT"], ["RequiresDrawingUpdate", "Requires Drawing/Engineering Update"], ["RequiresInventoryUpdate", "Requires CIFM Inventory Update"],
           ] as const).map(([fieldName, label]) => <label key={fieldName} className="flex items-center gap-2"><input type="checkbox" checked={Boolean(workRequest[fieldName])} onChange={(e) => update((wr) => ({ ...wr, [fieldName]: e.target.checked }), `${label} ${e.target.checked ? "enabled" : "disabled"} by ${actorName}`)} />{label}</label>)}</div>
-          {workRequest.RequiresSAT && <article className="rounded border p-4"><h4 className="font-semibold">Pre-SAT [TRADE_TM]</h4><p className="my-2 text-sm">Status: {workRequest.PreSATApproved ? "Approved" : "Pending"}</p><button disabled={Boolean(workRequest.PreSATApproved) || role !== "TRADE_TM" || workRequest.Percentage < 78 || workRequest.Percentage >= 94} onClick={() => stage(Math.max(79, workRequest.Percentage), "Pre-SAT Approved", { PreSATApproved: true }, ["TRADE_TM"])} className="mr-2 rounded bg-green-700 px-3 py-2 text-white disabled:opacity-50">Approve / Give OK</button></article>}
+          {workRequest.RequiresSAT && <article className="rounded border p-4"><h4 className="font-semibold">Pre-SAT [TRADE_TM]</h4><p className="my-2 text-sm">Status: {workRequest.PreSATApproved ? "Approved" : "Pending"}</p><button disabled={Boolean(workRequest.PreSATApproved) || !hasPermission(["TRADE_TM"]) || workRequest.Percentage < 78 || workRequest.Percentage >= 94} onClick={() => stage(Math.max(79, workRequest.Percentage), "Pre-SAT Approved", { PreSATApproved: true }, ["TRADE_TM"])} className="mr-2 rounded bg-green-700 px-3 py-2 text-white disabled:opacity-50">Approve / Give OK</button></article>}
           {([
             ["SAT", "SAT [ESA_TO/ESA_TM]", Boolean(workRequest.RequiresSAT)],
             ["DrawingEngineering", "Drawing/Engineering [ESA_DO Draftsman]", Boolean(workRequest.RequiresDrawingUpdate)],

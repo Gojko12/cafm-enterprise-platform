@@ -16,6 +16,9 @@ import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 import { migrateWorkRequestIdsTo10Digits } from "@/lib/wr-id-migration";
 import { sanitizeStateForSite } from "@/lib/site-state-sanitize";
 import { acquireWriteLock } from "@/lib/state-write-lock";
+import { migrateFeatureMatrix } from "@/lib/feature-migration";
+import { hasInvalidLockedOverrides, validateGovernance } from "@/lib/wr-governance";
+import { resolveGovernanceActor } from "@/lib/governance-actor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +39,7 @@ function cors(request: Request) {
   return {
     ...(origin && allowedOrigin(request, origin) ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CAFM-Site-Id, X-CAFM-Person",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CAFM-Site-Id, X-CAFM-Person, X-CAFM-Actor-Id",
     "Cache-Control": "no-store",
     Vary: "Origin",
   };
@@ -176,6 +179,7 @@ const stateSchema = z.object({
   pmCoordination: z.array(PmCoordinationRecordSchema).optional(),
   ljStageMatrix: z.record(z.string().regex(/^\d{1,3}:[A-Z_]+$/), z.enum(["act", "notify", "none", "P", "O"])).optional(),
   featurePermissionOverrides: z.record(z.string().regex(/^[A-Za-z_]+\|[A-Za-z]+\.[A-Za-z]+$/), z.boolean()).optional(),
+  featureMatrixVersion: z.number().int().nonnegative().optional(),
   siteSlaConfig: SiteSlaConfigSchema.optional(),
   cifmPeople: z.array(CifmPersonSchema).optional(),
   onboardingRequests: z.array(OnboardingRequestSchema).optional(),
@@ -204,10 +208,14 @@ const stateSchema = z.object({
     equipmentCode: z.string().min(1), buildingId: z.string().min(1), updatedAt: z.string().min(1), updatedBy: z.string().min(1),
   })).optional(),
 }).strict().transform((state, context) => {
-  try { return migrateWorkRequestIdsTo10Digits(migratePmState(state)); }
+  try { return migrateFeatureMatrix(migrateWorkRequestIdsTo10Digits(migratePmState(state))); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
 });
-const payloadSchema = z.preprocess(migrateLegacySiteIds, z.object({ revision: z.number().int().nonnegative(), state: stateSchema }));
+const payloadSchema = z.preprocess(migrateLegacySiteIds, z.object({
+  revision: z.number().int().nonnegative(), state: stateSchema,
+  governanceProof: z.object({ wrId: z.string().min(1), kind: z.enum(["pm-reactivation", "lj-override"]), reason: z.string(),
+    confirmed1At: z.string(), confirmed2At: z.string() }).optional(),
+}));
 const envelopeSchema = z.object({ revision: z.number().int().positive(), state: stateSchema });
 const databaseSchema = z.preprocess(migrateLegacySiteIds, z.object({
   sites: z.partialRecord(siteSchema, envelopeSchema),
@@ -414,6 +422,9 @@ export async function POST(request: Request) {
     try { json = JSON.parse(text); } catch { return reply(request, { error: "Invalid JSON." }, 400); }
     const parsed = payloadSchema.safeParse(json);
     if (!parsed.success) return reply(request, { error: "Invalid state or revision.", details: parsed.error.issues }, 400);
+    if (json && typeof json === "object" && "state" in json && json.state && typeof json.state === "object" &&
+      "featurePermissionOverrides" in json.state && hasInvalidLockedOverrides(json.state.featurePermissionOverrides))
+      return reply(request, { error: "Admin-only feature permissions are locked." }, 403);
     parsed.data.state = sanitizeStateForSite(parsed.data.state, site);
     const invalidField = validateSite(parsed.data.state, site);
     if (invalidField) return reply(request, { error: `State validation failed: ${invalidField}` }, 400);
@@ -449,7 +460,22 @@ export async function POST(request: Request) {
       if (changed) return reply(request, { error: `Blueprint ${changed.ChecklistCode} has a locked frequency. Create a new blueprint instead.` }, 400);
     }
     const merged = forceReset || !current ? parsed.data.state : mergeNewerWorkRequests(current.state, parsed.data.state);
+    const actorId = request.headers.get("X-CAFM-Actor-Id")?.trim() ?? "";
+    const localActor = current && resolveGovernanceActor(current.state, site, actorId);
+    const globalSuper = Object.entries(database.sites).map(([id, entry]) => resolveGovernanceActor(entry.state, id, actorId))
+      .find((actor) => actor?.roles.includes("SuperAdmin") && actor.id.toLowerCase() === actorId.toLowerCase() &&
+        (!localActor || localActor.id.toLowerCase() === actor.id.toLowerCase())) ?? undefined;
+    const globalActor = globalSuper && localActor
+      ? { ...localActor, roles: [...new Set([...localActor.roles, "SuperAdmin" as const])], isAdmin: true } : globalSuper;
+    if (current) {
+      const violation = validateGovernance(current.state, merged, site, actorId, parsed.data.governanceProof, globalActor);
+      if (violation) return reply(request, { error: violation }, 403);
+    }
     const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(recordBlueprintRevisions(current?.state, merged, request.headers.get("X-CAFM-Person")?.trim() || "Web Portal")) };
+    if (current) {
+      const violation = validateGovernance(current.state, next.state, site, actorId, parsed.data.governanceProof, globalActor);
+      if (violation) return reply(request, { error: violation }, 403);
+    }
     database.sites[site] = next;
     if (storage.kind === "supabase") {
       const newVersion = randomUUID();

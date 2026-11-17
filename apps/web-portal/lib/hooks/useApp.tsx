@@ -1,7 +1,9 @@
 "use client";
 
 import React, { createContext, ReactNode, useState } from "react";
-import { UserRole, ROLE_PERMISSIONS } from "@cafm/shared-schema";
+import { UserRole } from "@cafm/shared-schema";
+import { roleHasPermission } from "@/lib/rbac-matrix";
+import { resolveGovernanceActor } from "@/lib/governance-actor";
 import { SiteContextProvider, useSiteContext } from "@/lib/contexts/SiteContext";
 import { CafmStoreProvider, useCafmStore } from "@/lib/cafm-store";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
@@ -30,24 +32,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
 }
 
 function ScopedAppProvider({ children }: { children: ReactNode }) {
-  const { activePerson, activeSiteId, currentUser } = useSiteContext();
+  const { activePerson, activeSiteId } = useSiteContext();
   const { data } = useCafmStore();
-  const matchingUser = [currentUser, ...data.users].find((user) => user &&
-    (user.DisplayName === activePerson || user.UserId === activePerson) && user.AssignedSiteIds.includes(activeSiteId));
-  const roles: UserRole[] = activePerson === "SiteAdmin" ? ["SiteAdministrator"] : [
-    ...(activePerson === "TeamLeader" ? ["TeamLeader" as const] : []),
-    ...(matchingUser && matchingUser.SystemRole !== "SiteAdministrator" ? [matchingUser.SystemRole] : []),
-    ...data.siteRoleAssignments.filter((assignment) => assignment.SiteId === activeSiteId && assignment.PersonName === activePerson)
-      .map((assignment) => assignment.RoleCode),
-  ];
-  const currentRole = roles[0] ?? "StandardEmployee";
+  const actor = resolveGovernanceActor(data, activeSiteId, activePerson);
+  const roles = actor?.roles ?? [];
+  const currentRole: UserRole = roles.includes("SuperAdmin") ? "SuperAdmin" : roles.includes("SiteAdministrator") ? "SiteAdministrator" :
+    roles[0] ?? "StandardEmployee";
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [useSampleData] = useState(true);
 
   const canAccess = (permission: string) => (roles.length ? roles : [currentRole])
-    .some((role) => ROLE_PERMISSIONS[role].some((item) => item === permission));
+    .some((role) => roleHasPermission(role, permission, data.featurePermissionOverrides));
 
   const value: AppContextType = {
     currentRole,
