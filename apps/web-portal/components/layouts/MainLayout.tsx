@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import { 
-  Building, Home, Settings, Wrench, Zap, Clipboard, 
-  Calendar, Upload, BarChart3, Lock, Globe, AlertCircle
+import {
+  Armchair, ArrowLeftRight, BarChart3, Box, Building, Calendar, CalendarClock,
+  ChevronsLeft, ChevronsRight, ClipboardCheck, Cog, Gauge, Globe, Home,
+  Hourglass, Map, Repeat, ShieldCheck, Users, Zap
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -13,57 +14,102 @@ import { SiteId, PLATFORM_SITE_IDS, SITE_LABELS } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import type { SiteRoleAssignment } from "@cafm/shared-schema";
 import { PhoneShare } from "@/components/common/PhoneShare";
+import { PLATFORM_VERSION } from "@/lib/platform-version";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", icon: Home },
   { section: "Workspace", items: [
     { href: "/locations", label: "Locations", icon: Building },
-    { href: "/floor-plans", label: "Floor Plans", icon: Building },
-    { href: "/bim-viewer", label: "3D BIM Viewer", icon: Settings },
-    { href: "/equipment", label: "Equipment Registry", icon: Settings },
-    { href: "/desk-reservations", label: "Desk Reservations", icon: Settings },
+    { href: "/floor-plans", label: "Floor Plans", icon: Map },
+    { href: "/bim-viewer", label: "3D BIM Viewer", icon: Box },
+    { href: "/equipment", label: "Equipment Registry", icon: Cog },
+    { href: "/desk-reservations", label: "Desk Reservations", icon: Armchair },
   ]},
   { section: "Operations", items: [
-    { href: "/preventive-maintenance", label: "Preventive Maintenance", icon: Wrench },
-    { href: "/fast-jobs", label: "Fast Jobs", icon: Wrench },
-    { href: "/long-jobs", label: "Long Jobs", icon: Wrench },
-    { href: "/smart-pm", label: "SmartPM", icon: Zap },
-    { href: "/technical-audits", label: "Technical Audits", icon: Clipboard },
-    { href: "/audit-assurance", label: "Audit & Assurance", icon: Clipboard },
+    { href: "/preventive-maintenance", label: "Preventive Maintenance", icon: CalendarClock },
+    { href: "/fast-jobs", label: "Fast Jobs", icon: Zap },
+    { href: "/long-jobs", label: "Long Jobs", icon: Hourglass },
+    { href: "/smart-pm", label: "SmartPM", icon: Repeat },
+    { href: "/technical-audits", label: "Technical Audits", icon: ClipboardCheck },
+    { href: "/audit-assurance", label: "Audit & Assurance", icon: ShieldCheck },
     { href: "/scheduler", label: "Scheduler", icon: Calendar },
   ]},
   { section: "Administration", items: [
-    { href: "/import-export", label: "Import/Export", icon: Upload },
+    { href: "/import-export", label: "Import/Export", icon: ArrowLeftRight },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
-    { href: "/admin/rbac", label: "People & Permissions", icon: Lock },
-    { href: "/sla-settings", label: "SLA Settings", icon: Calendar },
+    { href: "/admin/rbac", label: "People & Permissions", icon: Users },
+    { href: "/sla-settings", label: "SLA Settings", icon: Gauge },
   ]},
 ];
 
 const SITE_IDS: SiteId[] = [...PLATFORM_SITE_IDS];
 
+const SIDEBAR_COLLAPSED_KEY = "cafm_sidebar_collapsed_v1";
+
+function readSidebarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function Sidebar() {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = React.useState(false);
+
+  React.useEffect(() => {
+    setCollapsed(readSidebarCollapsed());
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((previous) => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // Storage may be unavailable (private mode); collapse still applies for this session.
+      }
+      return next;
+    });
+  };
 
   return (
-    <aside className="w-64 bg-gray-900 text-white h-screen overflow-y-auto border-r border-gray-800">
-      <div className="p-6">
-        <h1 className="text-2xl font-bold">CAFM Platform</h1>
-        <p className="text-gray-400 text-sm mt-1">Enterprise Edition</p>
+    <aside className={`${collapsed ? "w-20" : "w-64"} bg-gray-900 text-white h-screen overflow-y-auto border-r border-gray-800 shrink-0 transition-[width] duration-200`}>
+      <div className={`p-6 ${collapsed ? "px-0 flex items-center justify-center" : "flex items-start justify-between gap-2"}`}>
+        {!collapsed && (
+          <div>
+            <h1 className="text-2xl font-bold">CAFM Platform</h1>
+            <p className="text-gray-400 text-sm mt-1">Enterprise Edition · {PLATFORM_VERSION}</p>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="flex items-center justify-center w-9 h-9 shrink-0 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+        >
+          {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+        </button>
       </div>
 
       <nav className="px-3 py-4 space-y-6">
         {/* Dashboard */}
         <Link
           href="/"
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+          aria-current={pathname === "/" ? "page" : undefined}
+          title={collapsed ? "Dashboard" : undefined}
+          className={`flex items-center gap-3 rounded-lg transition-colors ${
+            collapsed ? "justify-center px-2 py-3" : "px-4 py-3"
+          } ${
             pathname === "/"
               ? "bg-blue-600 text-white"
               : "text-gray-300 hover:bg-gray-800"
           }`}
         >
           <Home size={20} />
-          <span className="text-sm font-medium">Dashboard</span>
+          {!collapsed && <span className="text-sm font-medium">Dashboard</span>}
         </Link>
 
         {/* Sections */}
@@ -71,9 +117,13 @@ export function Sidebar() {
           if ("section" in item && item.section) {
             return (
               <div key={item.section} className="space-y-2">
-                <p className="text-xs font-semibold text-gray-500 uppercase px-4">
-                  {item.section}
-                </p>
+                {collapsed ? (
+                  <div className="border-t border-gray-800 mx-2" aria-hidden="true" />
+                ) : (
+                  <p className="text-xs font-semibold text-gray-500 uppercase px-4">
+                    {item.section}
+                  </p>
+                )}
                 <div className="space-y-1">
                   {item.items.map(({ href, label, icon: Icon }) => {
                     const isActive = pathname === href || pathname.startsWith(href + "/");
@@ -82,14 +132,18 @@ export function Sidebar() {
                         key={href}
                         href={href}
                         aria-current={isActive ? "page" : undefined}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm ${
+                        aria-label={collapsed ? label : undefined}
+                        title={collapsed ? label : undefined}
+                        className={`flex items-center gap-3 rounded-lg transition-colors text-sm ${
+                          collapsed ? "justify-center px-2 py-3" : "px-4 py-3"
+                        } ${
                           isActive
                             ? "bg-blue-600 text-white"
                             : "text-gray-300 hover:bg-gray-800"
                         }`}
                       >
                         <Icon size={18} />
-                        <span className="font-medium">{label}</span>
+                        {!collapsed && <span className="font-medium">{label}</span>}
                       </Link>
                     );
                   })}
@@ -97,12 +151,15 @@ export function Sidebar() {
               </div>
             );
           }
+          return null;
         })}
       </nav>
 
-      <div className="p-4 border-t border-gray-800">
-        <p className="text-xs text-gray-400">© 2026 Enterprise CAFM</p>
-      </div>
+      {!collapsed && (
+        <div className="p-4 border-t border-gray-800">
+          <p className="text-xs text-gray-400">© 2026 Enterprise CAFM</p>
+        </div>
+      )}
     </aside>
   );
 }
