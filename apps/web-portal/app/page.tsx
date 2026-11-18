@@ -1,54 +1,98 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
+import Link from "next/link";
 import {
-  TrendingUp,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  Users,
-  Zap,
+  AlertCircle, Building, Calendar, CheckCircle, Clock, Cog, Map, Users, Wrench, Zap,
 } from "lucide-react";
+import type { BaseWorkRequest } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { useApp } from "@/lib/hooks/useApp";
-import { getSampleData } from "@/lib/utils/sampleData";
+import { useCafmStore } from "@/lib/cafm-store";
+import { completionMs, dueMs, isActiveAt, isCancelled, isOverdueAt, isOverMarginAt } from "@/lib/analytics-engine";
 import { QAReportNotifications } from "@/components/modules/QAReportNotifications";
 
+const WR_TYPE_TONE: Record<string, string> = {
+  PM: "bg-blue-100 text-blue-800",
+  FJ: "bg-emerald-100 text-emerald-800",
+  LJ: "bg-amber-100 text-amber-800",
+};
+
+const QUICK_ACTIONS = [
+  { href: "/locations", icon: Building, title: "Manage Locations", text: "Configure buildings, floors, and rooms" },
+  { href: "/equipment", icon: Cog, title: "Equipment Registry", text: "Asset management & QR code generation" },
+  { href: "/floor-plans", icon: Map, title: "Floor Plans", text: "Interactive 2D room visualizations" },
+  { href: "/preventive-maintenance", icon: Wrench, title: "Preventive Maintenance", text: "Execute and track PM work requests" },
+  { href: "/scheduler", icon: Calendar, title: "Scheduler", text: "Dispatch calendar and craftsperson shifts" },
+  { href: "/fast-jobs", icon: Zap, title: "Fast Jobs", text: "Rapid corrective tickets and follow-ups" },
+];
+
 export default function DashboardPage() {
-  const { currentRole, useSampleData } = useApp();
-  const sampleData = useSampleData ? getSampleData() : { buildings: [], floors: [], rooms: [], equipment: [] };
+  const { currentRole } = useApp();
+  const { data } = useCafmStore();
+  const workRequests = data.workRequests;
+
+  const metrics = useMemo(() => {
+    const now = Date.now();
+    const active = workRequests.filter((wr) => isActiveAt(wr, now));
+    const activeByType = (type: string) => active.filter((wr) => wr.WR_Type === type).length;
+    const overdue = workRequests
+      .filter((wr) => isOverdueAt(wr, now))
+      .sort((a, b) => (dueMs(a) ?? 0) - (dueMs(b) ?? 0));
+    const overMargin = workRequests.filter((wr) => isOverMarginAt(wr, now)).length;
+    const pmDueToDate = workRequests.filter((wr) =>
+      wr.WR_Type === "PM" && !isCancelled(wr) && (dueMs(wr) ?? Infinity) <= now);
+    const pmOnTime = pmDueToDate.filter((wr) => {
+      const completed = completionMs(wr);
+      return completed !== null && completed <= (dueMs(wr) ?? completed);
+    });
+    const compliance = pmDueToDate.length > 0 ? Math.round((pmOnTime.length / pmDueToDate.length) * 100) : null;
+    const trades = new Set(data.craftspeople.map((person) => person.Trade)).size;
+    return {
+      activeCount: active.length,
+      pmCount: activeByType("PM"),
+      fjCount: activeByType("FJ"),
+      ljCount: activeByType("LJ"),
+      overdue,
+      overMargin,
+      compliance,
+      pmOnTime: pmOnTime.length,
+      pmDueToDate: pmDueToDate.length,
+      craftspeople: data.craftspeople.length,
+      trades,
+    };
+  }, [workRequests, data.craftspeople]);
+
+  const recentActivity = useMemo(() => {
+    const entries = workRequests.flatMap((wr) =>
+      (wr.Activity ?? []).map((entry) => ({
+        wrId: wr.WR_ID, wrType: wr.WR_Type, createdAt: entry.createdAt,
+        actorName: entry.actorName, kind: entry.kind, text: entry.text,
+      })));
+    return entries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 6);
+  }, [workRequests]);
 
   const stats = [
     {
-      label: "Active Work Requests",
-      value: 42,
-      change: "+12%",
-      icon: AlertCircle,
-      color: "text-blue-600",
-      bg: "bg-blue-50",
+      label: "Active Work Requests", value: metrics.activeCount,
+      sub: `${metrics.pmCount} PM · ${metrics.fjCount} FJ · ${metrics.ljCount} LJ`,
+      icon: AlertCircle, color: "text-blue-600", bg: "bg-blue-50",
     },
     {
-      label: "PM Compliance",
-      value: "94%",
-      change: "+3%",
-      icon: CheckCircle,
-      color: "text-emerald-600",
-      bg: "bg-emerald-50",
+      label: "Overdue WRs", value: metrics.overdue.length,
+      sub: `${metrics.overMargin} past margin date`,
+      icon: Clock, color: "text-red-600", bg: "bg-red-50",
     },
     {
-      label: "Overdue WRs",
-      value: 3,
-      change: "-1",
-      icon: Clock,
-      color: "text-red-600",
-      bg: "bg-red-50",
+      label: "PM On-Time Compliance",
+      value: metrics.compliance === null ? "—" : `${metrics.compliance}%`,
+      sub: `${metrics.pmOnTime} of ${metrics.pmDueToDate} PMs due to date`,
+      icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50",
     },
     {
-      label: "Assigned Technicians",
-      value: 12,
-      change: "+2",
-      icon: Users,
-      color: "text-purple-600",
-      bg: "bg-purple-50",
+      label: "Registered Craftspeople", value: metrics.craftspeople,
+      sub: `${metrics.trades} trades covered`,
+      icon: Users, color: "text-purple-600", bg: "bg-purple-50",
     },
   ];
 
@@ -66,26 +110,17 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Key Metrics */}
+      {/* Key Metrics (live from site state) */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div
-              key={stat.label}
-              className={`${stat.bg} rounded-lg border border-gray-200 p-6 shadow-sm`}
-            >
+            <div key={stat.label} className={`${stat.bg} rounded-lg border border-gray-200 p-6 shadow-sm`}>
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 font-medium">
-                    {stat.label}
-                  </p>
-                  <p className="text-3xl font-bold text-gray-900 mt-2">
-                    {stat.value}
-                  </p>
-                  <p className="text-xs text-green-600 font-medium mt-2">
-                    {stat.change}
-                  </p>
+                  <p className="text-sm text-gray-600 font-medium">{stat.label}</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-2">{stat.value}</p>
+                  <p className="text-xs text-gray-500 font-medium mt-2">{stat.sub}</p>
                 </div>
                 <Icon size={28} className={stat.color} />
               </div>
@@ -94,67 +129,78 @@ export default function DashboardPage() {
         })}
       </div>
 
+      {/* Overdue Spotlight */}
+      {metrics.overdue.length > 0 && (
+        <div className="max-w-7xl mx-auto">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Overdue Spotlight</h2>
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+            {metrics.overdue.slice(0, 5).map((wr: BaseWorkRequest) => (
+              <Link key={wr.WR_ID} href="/work-requests" className="flex items-center gap-4 px-4 py-3 hover:bg-gray-50">
+                <span className="font-mono text-sm text-gray-700">{wr.WR_ID}</span>
+                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${WR_TYPE_TONE[wr.WR_Type] ?? "bg-gray-100 text-gray-800"}`}>
+                  {wr.WR_Type}
+                </span>
+                <span className="flex-1 truncate text-sm text-gray-700">{wr.Description}</span>
+                {wr.MarginDate && <span className="text-xs text-gray-400">Margin {formatDateDDMMYYYY(wr.MarginDate)}</span>}
+                <span className="text-xs font-semibold text-red-600">Due {formatDateDDMMYYYY(wr.DueDate ?? wr.CreatedDate)}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recent Activity */}
+      <div className="max-w-7xl mx-auto">
+        <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity</h2>
+        <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+          {recentActivity.length === 0 && (
+            <p className="px-4 py-6 text-sm text-gray-500">No activity recorded for this site yet.</p>
+          )}
+          {recentActivity.map((entry) => (
+            <div key={`${entry.wrId}-${entry.createdAt}-${entry.text}`} className="flex items-baseline gap-3 px-4 py-3">
+              <span className="font-mono text-xs text-gray-400">{formatDateDDMMYYYY(entry.createdAt)}</span>
+              <span className="font-mono text-xs text-gray-600">{entry.wrId}</span>
+              <span className="text-xs font-semibold text-gray-700">{entry.actorName}</span>
+              <span className="flex-1 truncate text-sm text-gray-600">{entry.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Quick Actions */}
       <div className="max-w-7xl mx-auto">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <a
-            href="/locations"
-            className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg hover:border-blue-300 transition-all cursor-pointer"
-          >
-            <div className="text-2xl mb-2">📍</div>
-            <h3 className="font-semibold text-gray-900">Manage Locations</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Configure buildings, floors, and rooms
-            </p>
-          </a>
-
-          <a
-            href="/equipment"
-            className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg hover:border-blue-300 transition-all cursor-pointer"
-          >
-            <div className="text-2xl mb-2">⚙️</div>
-            <h3 className="font-semibold text-gray-900">Equipment Registry</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Asset management & QR code generation
-            </p>
-          </a>
-
-          <a
-            href="/floor-plans"
-            className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg hover:border-blue-300 transition-all cursor-pointer"
-          >
-            <div className="text-2xl mb-2">🗺️</div>
-            <h3 className="font-semibold text-gray-900">Floor Plans</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Interactive 2D room visualizations
-            </p>
-          </a>
+          {QUICK_ACTIONS.map((action) => {
+            const Icon = action.icon;
+            return (
+              <Link key={action.href} href={action.href}
+                className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg hover:border-blue-300 transition-all">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="font-semibold text-gray-900">{action.title}</h3>
+                    <p className="text-sm text-gray-600 mt-1">{action.text}</p>
+                  </div>
+                  <Icon size={24} className="text-blue-600" />
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </div>
 
-      {/* Sample Data Status */}
-      <div className="max-w-7xl mx-auto bg-green-50 border border-green-200 rounded-lg p-6">
+      {/* Live Data Summary */}
+      <div className="max-w-7xl mx-auto bg-slate-50 border border-slate-200 rounded-lg p-6">
         <div className="flex items-start gap-4">
-          <Zap size={24} className="text-green-600 flex-shrink-0 mt-1" />
+          <Cog size={24} className="text-slate-600 flex-shrink-0 mt-1" />
           <div>
-            <h3 className="font-semibold text-green-900">
-              ✓ Sample Data Loaded
-            </h3>
-            <p className="text-sm text-green-700 mt-1">
-              This demo uses realistic enterprise sample data:
-              {sampleData.buildings && (
-                <>
-                  {" "}
-                  {sampleData.buildings.length} building(s),{" "}
-                  {sampleData.floors?.length || 0} floor(s),{" "}
-                  {sampleData.rooms?.length || 0} room(s),{" "}
-                  {sampleData.equipment?.length || 0} equipment item(s).
-                </>
-              )}
+            <h3 className="font-semibold text-slate-900">Live Site Data</h3>
+            <p className="text-sm text-slate-700 mt-1">
+              {data.buildings.length} building(s), {data.floors.length} floor(s), {data.rooms.length} room(s),{" "}
+              {data.equipment.length} equipment item(s), {workRequests.length} work request(s).
             </p>
-            <p className="text-xs text-green-600 mt-2">
-              All modules are fully functional with mock workflows. In production, these connect to Firebase Firestore & Cloud Functions.
+            <p className="text-xs text-slate-500 mt-2">
+              Synchronized live against the CAFM state backend with revision-based conflict checks; the numbers above are computed from the current site state, not mocked values.
             </p>
           </div>
         </div>
