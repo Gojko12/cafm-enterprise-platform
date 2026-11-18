@@ -11,6 +11,7 @@ import { DEFAULT_QA_FAILURE_REASONS } from "./qa-settings";
 import { seedAccessProfiles, defaultRoleDefinitions, migrateRoles } from "./access-profiles";
 import { seedAssurance, seedAuditTemplates } from "./audit-assurance-seed";
 import { withSnowdonShowcase } from "./snowdon-seed";
+import { withSBuildingShowcase } from "./sb-building-seed";
 import { ensureAnalyticsHistorySeeded } from "./analytics-history-seed";
 import { withCoordinationShowcase } from "./pm-coordination-seed";
 import { withPeopleDirectory } from "./people-seed";
@@ -39,7 +40,7 @@ export function scopeData(data: DemoData, requestedSite: SiteId): DemoData {
   data = migrateFeatureMatrix(data);
   // The Snowdon Towers showcase + 2026 analytics history migrations are idempotent and
   // run on every scope pass, so existing saved states are enriched without a reset.
-  data = withManufacturerSeed(withOnboardingSeed(withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSnowdonShowcase(withEquipmentRegistryMigration(withPmChecklistEnrichment(migratePmState(migrateLegacySiteIds(migrateWorkRequestIdsTo10Digits(data))))))))))));
+  data = withManufacturerSeed(withOnboardingSeed(withCifmDirectory(withPeopleDirectory(withCoordinationShowcase(ensureAnalyticsHistorySeeded(withSBuildingShowcase(withSnowdonShowcase(withEquipmentRegistryMigration(withPmChecklistEnrichment(migratePmState(migrateLegacySiteIds(migrateWorkRequestIdsTo10Digits(data)))))))))))));
   const scoped: DemoData = {
     ...data,
     onboardingRequests: (data.onboardingRequests ?? []).filter((item) => item.stationedSiteId === site),

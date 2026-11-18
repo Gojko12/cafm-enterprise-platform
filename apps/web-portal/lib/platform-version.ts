@@ -1,3 +1,3 @@
 // Bump this on every platform release, in the same rhythm as apps/mobile-app/src/version.ts.
-// V40 = bundled 02-ESOC S-building IFC model (02-S_V1), site-matching default in the BIM viewer.
-export const PLATFORM_VERSION = "V40";
+// V41 = S Building Darmstadt showcase seed (12 IFC-linked EQs, demo WRs, freeze, PMs) for 02-S_V1.
+export const PLATFORM_VERSION = "V41";
