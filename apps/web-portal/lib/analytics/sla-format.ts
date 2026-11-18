@@ -1,5 +1,5 @@
 import type { BaseWorkRequest } from "@cafm/shared-schema";
-import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average } from "./core";
+import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average, yearStartMs } from "./core";
 import type { AnalyticsFilters } from "./core";
 // ---------------------------------------------------------------------------
 // KPI helpers & CSV export
@@ -14,16 +14,17 @@ export interface SlaKpis {
 
 export function slaKpis(workRequests: BaseWorkRequest[], now: Date): SlaKpis {
   const nowMs = now.getTime();
+  const yearStart = yearStartMs(now);
   const pool = workRequests.filter((wr) => (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && !isCancelled(wr));
-  const completed2026 = pool.filter((wr) => {
+  const completedThisYear = pool.filter((wr) => {
     const completion = completionMs(wr);
-    return completion !== null && completion >= Date.parse("2026-01-01T00:00:00.000Z") && wr.Percentage >= 78;
+    return completion !== null && completion >= yearStart && wr.Percentage >= 78;
   });
-  const onTime = completed2026.filter((wr) => { const due = dueMs(wr); const done = completionMs(wr)!; return due === null || done <= due; });
-  const withinMargin = completed2026.filter((wr) => { const margin = marginMs(wr); const done = completionMs(wr)!; return margin === null || done <= margin; });
+  const onTime = completedThisYear.filter((wr) => { const due = dueMs(wr); const done = completionMs(wr)!; return due === null || done <= due; });
+  const withinMargin = completedThisYear.filter((wr) => { const margin = marginMs(wr); const done = completionMs(wr)!; return margin === null || done <= margin; });
   return {
-    onTimePct: completed2026.length ? (onTime.length / completed2026.length) * 100 : null,
-    withinMarginPct: completed2026.length ? (withinMargin.length / completed2026.length) * 100 : null,
+    onTimePct: completedThisYear.length ? (onTime.length / completedThisYear.length) * 100 : null,
+    withinMarginPct: completedThisYear.length ? (withinMargin.length / completedThisYear.length) * 100 : null,
     currentOverdue: pool.filter((wr) => isOverdueAt(wr, nowMs)),
     currentOverMargin: pool.filter((wr) => isOverMarginAt(wr, nowMs)),
   };

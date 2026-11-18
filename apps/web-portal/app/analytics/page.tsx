@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Download, Printer } from "lucide-react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
+import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useApp } from "@/lib/hooks/useApp";
@@ -37,7 +38,12 @@ export default function AnalyticsPage() {
   const [wrPopup, setWrPopup] = useState<BaseWorkRequest | null>(null);
   const exportRef = useRef<(() => { name: string; csv: string }) | null>(null);
   const registerExport = useCallback((build: () => { name: string; csv: string }) => { exportRef.current = build; }, []);
-  const now = useMemo(() => new Date(), []);
+  // "now" refreshes every minute so "Current OverDue" style KPIs stay truthful during long sessions.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Building filter stays in sync with the header Location Context (in-page override allowed).
   useEffect(() => { setBuildingId(selectedBuilding?.bl_id ?? ""); }, [selectedBuilding?.bl_id]);
@@ -61,7 +67,8 @@ export default function AnalyticsPage() {
     const build = exportRef.current;
     if (!build) return;
     const { name, csv } = build();
-    downloadCsv(name, csv);
+    const stamp = `${activeSiteId}-${formatDateDDMMYYYY(now.toISOString())}`;
+    downloadCsv(`${name.replace(/\.csv$/, "")}-${stamp}.csv`, csv);
   };
 
   const openWr = (wr: BaseWorkRequest) => setWrPopup(wr);

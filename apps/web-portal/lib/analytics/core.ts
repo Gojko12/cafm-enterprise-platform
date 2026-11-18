@@ -102,3 +102,13 @@ export function average(values: number[]): number | null {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
+/** Start of `now`'s calendar year in UTC — the YTD anchor for every analytics window. */
+export function yearStartMs(now: Date): number {
+  return Date.parse(`${now.getUTCFullYear()}-01-01T00:00:00.000Z`);
+}
+
+/** Calendar-year start as a YYYY-MM-01 string, for labels and month bucketing. */
+export function yearStartIso(now: Date): string {
+  return `${now.getUTCFullYear()}-01-01`;
+}
+

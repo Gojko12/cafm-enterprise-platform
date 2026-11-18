@@ -1,6 +1,6 @@
 import type { BaseWorkRequest, Equipment } from "@cafm/shared-schema";
 import type { NormalizedFinding } from "./audit-findings";
-import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average } from "./core";
+import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average, yearStartMs } from "./core";
 import type { AnalyticsFilters } from "./core";
 // ---------------------------------------------------------------------------
 // F. Problematic equipment ("Bad Actors")
@@ -53,7 +53,7 @@ export function badActorAnalytics(
     const totalRepairHours = repairPool.reduce((sum, wr) => sum + (wr.TotalTimeMinutes ?? 0) / 60, 0);
     const downtimeHours = wrs.reduce((sum, wr) => sum + (wr.DowntimeMinutes ?? 0) / 60, 0);
     const failureTimes = reactiveFJs.map((wr) => createdMs(wr)).sort((a, b) => a - b);
-    const observationDays = Math.max(1, (nowMs - Date.parse("2026-01-01T00:00:00.000Z")) / DAY_MS);
+    const observationDays = Math.max(1, (nowMs - yearStartMs(now)) / DAY_MS);
     const issueScore = reactiveFJs.length + unfavourablePmSteps + assetFindings.length + linkedLJs.length;
     if (!issueScore) continue;
     actors.push({

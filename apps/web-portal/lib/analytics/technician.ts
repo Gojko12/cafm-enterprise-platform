@@ -1,6 +1,6 @@
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { qaStatus } from "../qa-audits";
-import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average } from "./core";
+import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average, yearStartMs } from "./core";
 import type { AnalyticsFilters } from "./core";
 // ---------------------------------------------------------------------------
 // E. Technician logged hours & reopen / success scorecard
@@ -37,15 +37,15 @@ export function scorecardWindowStart(window: ScorecardWindow, now: Date): number
   if (window === "day") return now.getTime() - DAY_MS;
   if (window === "week") return now.getTime() - 7 * DAY_MS;
   if (window === "month") return now.getTime() - 30 * DAY_MS;
-  return Date.parse("2026-01-01T00:00:00.000Z");
+  return yearStartMs(now);
 }
 
 export function scorecardCapacityHours(window: ScorecardWindow, now: Date): number {
   if (window === "day") return 8;
   if (window === "week") return 40;
   if (window === "month") return 168;
-  const daysElapsed = Math.max(1, (now.getTime() - Date.parse("2026-01-01T00:00:00.000Z")) / DAY_MS);
-  return Math.round(daysElapsed * (5 / 7)) * 8;
+  const daysElapsed = Math.max(1, (now.getTime() - yearStartMs(now)) / DAY_MS);
+  return Math.round(daysElapsed * (5 / 7) * 8);
 }
 
 export function technicianScorecard(

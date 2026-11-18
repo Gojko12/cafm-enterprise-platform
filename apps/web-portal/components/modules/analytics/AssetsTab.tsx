@@ -70,7 +70,7 @@ export function AssetsTab({ wrs, findings, equipment, siteId, filters, now, onDr
   }, [registerExport, actors]);
 
   const header = (key: SortKey, label: string) => (
-    <button onClick={() => setSort(key)} className={`${sort === key ? "text-blue-700" : ""}`}>{label}{sort === key ? " ↓" : ""}</button>
+    <button onClick={() => setSort(key)} aria-pressed={sort === key} className={`${sort === key ? "text-blue-700" : ""}`}>{label}{sort === key ? " ↓" : ""}</button>
   );
 
   return (

@@ -8,11 +8,11 @@ import {
 import type { DemoData } from "@/lib/cafm-data";
 import { ColumnChart, KpiCard, Section, type DrilldownRequest } from "./analytics-ui";
 
-const WINDOWS: ReadonlyArray<{ key: ScorecardWindow; label: string }> = [
-  { key: "day", label: "Past Day" },
-  { key: "week", label: "Past Week" },
-  { key: "month", label: "Past Month" },
-  { key: "ytd", label: "YTD 2026" },
+const WINDOWS: ReadonlyArray<{ key: ScorecardWindow; label: (now: Date) => string }> = [
+  { key: "day", label: () => "Past Day" },
+  { key: "week", label: () => "Past Week" },
+  { key: "month", label: () => "Past Month" },
+  { key: "ytd", label: (now) => `YTD ${now.getUTCFullYear()}` },
 ];
 
 export function TechniciansTab({ wrs, craftspeople, now, onDrilldown, registerExport }: {
@@ -23,10 +23,14 @@ export function TechniciansTab({ wrs, craftspeople, now, onDrilldown, registerEx
   registerExport: (build: () => { name: string; csv: string }) => void;
 }) {
   const [window, setWindow] = useState<ScorecardWindow>("week");
-  const scorecard = useMemo(() => technicianScorecard(wrs, craftspeople, window, now), [wrs, craftspeople, window, now]);
-  const dayCard = useMemo(() => technicianScorecard(wrs, craftspeople, "day", now), [wrs, craftspeople, now]);
-  const weekCard = useMemo(() => technicianScorecard(wrs, craftspeople, "week", now), [wrs, craftspeople, now]);
-  const monthCard = useMemo(() => technicianScorecard(wrs, craftspeople, "month", now), [wrs, craftspeople, now]);
+  // All four windows are computed once per data/now change; the leaderboard reuses them without recomputation.
+  const cards = useMemo(() => ({
+    day: technicianScorecard(wrs, craftspeople, "day", now),
+    week: technicianScorecard(wrs, craftspeople, "week", now),
+    month: technicianScorecard(wrs, craftspeople, "month", now),
+    ytd: technicianScorecard(wrs, craftspeople, "ytd", now),
+  }), [wrs, craftspeople, now]);
+  const scorecard = cards[window];
   const hoursFor = (card: ReturnType<typeof technicianScorecard>, personId: string) =>
     card.stats.find((entry) => entry.personId === personId)?.totalHours ?? 0;
 
@@ -51,7 +55,7 @@ export function TechniciansTab({ wrs, craftspeople, now, onDrilldown, registerEx
           {WINDOWS.map((option) => (
             <button key={option.key} onClick={() => setWindow(option.key)} aria-pressed={window === option.key}
               className={`px-2.5 py-1.5 ${window === option.key ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"}`}>
-              {option.label}
+              {option.label(now)}
             </button>
           ))}
         </div>
@@ -114,9 +118,9 @@ export function TechniciansTab({ wrs, craftspeople, now, onDrilldown, registerEx
                   onClick={() => onDrilldown({ title: `${entry.name} — completed WRs in window`, wrs: entry.completedWRs })}>
                   <td className="py-1.5 pr-2 font-bold text-gray-900">{entry.name}</td>
                   <td className="pr-2">{entry.trade}</td>
-                  <td className="pr-2">{hoursFor(dayCard, entry.personId).toFixed(1)}</td>
-                  <td className="pr-2">{hoursFor(weekCard, entry.personId).toFixed(1)}</td>
-                  <td className="pr-2">{hoursFor(monthCard, entry.personId).toFixed(1)}</td>
+                  <td className="pr-2">{hoursFor(cards.day, entry.personId).toFixed(1)}</td>
+                  <td className="pr-2">{hoursFor(cards.week, entry.personId).toFixed(1)}</td>
+                  <td className="pr-2">{hoursFor(cards.month, entry.personId).toFixed(1)}</td>
                   <td className="pr-2">{formatPct(entry.utilizationPct)}</td>
                   <td className="pr-2">{formatPct(entry.plannedVsActualPct)}</td>
                   <td className="pr-2 font-semibold">{entry.completedWRs.length}</td>

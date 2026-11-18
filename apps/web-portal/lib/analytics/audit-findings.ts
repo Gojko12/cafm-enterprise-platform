@@ -76,7 +76,7 @@ export function auditFindingAnalytics(findings: AuditFinding[], siteId: string, 
     buildings.set(entry.finding.buildingId, bucket);
   }
   const monthlyTrend = Array.from({ length: Math.min(12, now.getUTCMonth() + 1) }, (_, index) => {
-    const month = `2026-${String(index + 1).padStart(2, "0")}`;
+    const month = `${now.getUTCFullYear()}-${String(index + 1).padStart(2, "0")}`;
     return {
       month,
       label: `${month.slice(5)}-${month.slice(0, 4)}`,

@@ -99,7 +99,7 @@ export function longJobAnalytics(workRequests: BaseWorkRequest[], now: Date): Lj
     .filter((value): value is number => value !== null);
 
   const monthlyThroughput = Array.from({ length: Math.min(12, now.getUTCMonth() + 1) }, (_, index) => {
-    const month = `2026-${String(index + 1).padStart(2, "0")}`;
+    const month = `${now.getUTCFullYear()}-${String(index + 1).padStart(2, "0")}`;
     const created = ljs.filter((wr) => wr.CreatedDate.startsWith(month)).length;
     const completedInMonth = completed.filter((wr) => {
       const closed = completionMs(wr);

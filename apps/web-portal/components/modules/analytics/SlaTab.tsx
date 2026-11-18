@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import {
-  breachChurn, netTrendPct, pointInTimeBreachSeries, slaKpis, toCsv,
+  breachChurn, netTrendPct, pointInTimeBreachSeries, slaKpis, toCsv, yearStartIso,
   type BreachChurn, type CheckpointGranularity, type WrTypeFilter,
 } from "@/lib/analytics-engine";
 import { ColumnChart, KpiCard, Section, type ColumnChartPoint, type DrilldownRequest } from "./analytics-ui";
@@ -84,9 +84,12 @@ export function SlaTab({ wrs, now, onDrilldown, registerExport }: {
   const [granularity, setGranularity] = useState<CheckpointGranularity>("monthly");
   const [windowDays, setWindowDays] = useState<1 | 7 | 30>(7);
 
-  const series = useMemo(() => pointInTimeBreachSeries(wrs, granularity, now), [wrs, granularity, now]);
+  const monthlySeries = useMemo(() => pointInTimeBreachSeries(wrs, "monthly", now), [wrs, now]);
+  const series = useMemo(() => granularity === "monthly"
+    ? monthlySeries
+    : pointInTimeBreachSeries(wrs, granularity, now), [granularity, monthlySeries, wrs, now]);
   const kpis = useMemo(() => slaKpis(wrs, now), [wrs, now]);
-  const overdueTrend = useMemo(() => netTrendPct(pointInTimeBreachSeries(wrs, "monthly", now), "overdue"), [wrs, now]);
+  const overdueTrend = useMemo(() => netTrendPct(monthlySeries, "overdue"), [monthlySeries]);
   const overdueChurn = useMemo(() => breachChurn(wrs, "overdue", windowDays, typeFilter, now), [wrs, windowDays, typeFilter, now]);
   const overMarginChurn = useMemo(() => breachChurn(wrs, "overmargin", windowDays, typeFilter, now), [wrs, windowDays, typeFilter, now]);
 
@@ -130,26 +133,26 @@ export function SlaTab({ wrs, now, onDrilldown, registerExport }: {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Toggle options={[{ key: "ALL", label: "PM + FJ" }, { key: "PM", label: "PM" }, { key: "FJ", label: "FJ" }] as const} value={typeFilter} onChange={setTypeFilter} />
-        <Toggle options={[{ key: "monthly", label: "Monthly (01-MM-2026)" }, { key: "weekly", label: "Weekly (12w)" }, { key: "daily", label: "Daily (30d)" }] as const} value={granularity} onChange={setGranularity} />
+        <Toggle options={[{ key: "monthly", label: "Monthly (01-MM)" }, { key: "weekly", label: "Weekly (12w)" }, { key: "daily", label: "Daily (30d)" }] as const} value={granularity} onChange={setGranularity} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <KpiCard tone="green" label="On-Time %" value={kpis.onTimePct === null ? "—" : `${kpis.onTimePct.toFixed(1)}%`} sub="Completed 2026 PM + FJ" />
-        <KpiCard tone="blue" label="Within Margin %" value={kpis.withinMarginPct === null ? "—" : `${kpis.withinMarginPct.toFixed(1)}%`} sub="Completed 2026 PM + FJ" />
+        <KpiCard tone="green" label="On-Time %" value={kpis.onTimePct === null ? "—" : `${kpis.onTimePct.toFixed(1)}%`} sub={`Completed ${now.getUTCFullYear()} PM + FJ`} />
+        <KpiCard tone="blue" label="Within Margin %" value={kpis.withinMarginPct === null ? "—" : `${kpis.withinMarginPct.toFixed(1)}%`} sub={`Completed ${now.getUTCFullYear()} PM + FJ`} />
         <KpiCard tone="red" label="Current OverDue" value={kpis.currentOverdue.length}
           onClick={() => onDrilldown({ title: "Currently OverDue WRs", wrs: kpis.currentOverdue })} sub="Click to drill down" />
         <KpiCard tone="amber" label="Current OverMargin" value={kpis.currentOverMargin.length}
           onClick={() => onDrilldown({ title: "Currently OverMargin WRs", wrs: kpis.currentOverMargin })} sub="Click to drill down" />
-        <KpiCard tone="purple" label={`Net Trend since ${formatDateDDMMYYYY("2026-01-01")}`}
+        <KpiCard tone="purple" label={`Net Trend since ${formatDateDDMMYYYY(yearStartIso(now))}`}
           value={overdueTrend === null ? "—" : `${overdueTrend >= 0 ? "▼" : "▲"} ${Math.abs(overdueTrend).toFixed(0)}%`}
           sub={overdueTrend !== null && overdueTrend >= 0 ? "OverDue backlog reduced" : "OverDue backlog grew"} />
       </div>
 
-      <Section title={`Point-in-Time OverDue WRs (${formatDateDDMMYYYY("2026-01-01")} → Today)`}>
+      <Section title={`Point-in-Time OverDue WRs (${formatDateDDMMYYYY(yearStartIso(now))} → Today)`}>
         <ColumnChart points={buildPoints("overdue")} lineName="Total trend" onBarClick={drill("overdue")} />
       </Section>
 
-      <Section title={`Point-in-Time OverMargin WRs (${formatDateDDMMYYYY("2026-01-01")} → Today)`}>
+      <Section title={`Point-in-Time OverMargin WRs (${formatDateDDMMYYYY(yearStartIso(now))} → Today)`}>
         <ColumnChart points={buildPoints("overmargin")} lineName="Total trend" onBarClick={drill("overmargin")} />
       </Section>
 

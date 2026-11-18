@@ -6,7 +6,7 @@
  * the WR drilldown drawer, and CSV download helpers. All dates are DD-MM-YYYY.
  */
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { BaseWorkRequest } from "@cafm/shared-schema";
 import { formatDateDDMMYYYY } from "@cafm/shared-schema";
@@ -260,6 +260,11 @@ export function DrilldownDrawer({ request, onClose, onOpenWr }: {
   onOpenWr: (wr: BaseWorkRequest) => void;
 }) {
   const sorted = useMemo(() => [...request.wrs].sort((a, b) => (a.DueDate ?? "").localeCompare(b.DueDate ?? "") || a.WR_ID.localeCompare(b.WR_ID)), [request.wrs]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-[60] flex justify-end bg-slate-950/40 no-print" role="presentation" onClick={onClose}>
       <aside role="dialog" aria-modal="true" aria-label="Work request drilldown"

@@ -3,7 +3,7 @@ import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { DAY_MS, filterWorkRequests, startOfDayMs, endOfDayMs, dayString, addDaysIso, createdMs, isCancelled, completionMs, dueMs, marginMs, isActiveAt, isOverdueAt, isOverMarginAt, parseStamp, median, average } from "./core";
 import type { AnalyticsFilters } from "./core";
 // ---------------------------------------------------------------------------
-// A. Point-in-time OverDue & OverMargin series (01-01-2026 -> today)
+// A. Point-in-time OverDue & OverMargin series (year start -> today)
 // ---------------------------------------------------------------------------
 
 export type CheckpointGranularity = "monthly" | "weekly" | "daily";
@@ -22,9 +22,10 @@ export interface BreachCheckpoint {
 export function buildCheckpoints(granularity: CheckpointGranularity, now: Date): string[] {
   const today = now.toISOString().slice(0, 10);
   if (granularity === "monthly") {
+    const year = now.getUTCFullYear();
     const dates: string[] = [];
     for (let month = 1; month <= 12; month++) {
-      const date = `2026-${String(month).padStart(2, "0")}-01`;
+      const date = `${year}-${String(month).padStart(2, "0")}-01`;
       if (date <= today) dates.push(date);
     }
     if (!dates.includes(today)) dates.push(today);

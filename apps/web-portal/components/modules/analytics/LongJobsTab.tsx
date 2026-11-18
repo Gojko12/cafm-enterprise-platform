@@ -100,7 +100,7 @@ export function LongJobsTab({ wrs, now, onDrilldown, onOpenWr, registerExport }:
         </Section>
       </div>
 
-      <Section title="Monthly LJ Created vs Completed & Lead-Time Trend (2026)">
+      <Section title={`Monthly LJ Created vs Completed & Lead-Time Trend (${now.getUTCFullYear()})`}>
         <ColumnChart mode="grouped" lineName="Avg lead days"
           points={lj.monthlyThroughput.map((month) => ({
             key: month.month, label: month.label,

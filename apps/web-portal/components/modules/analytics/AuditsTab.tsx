@@ -47,13 +47,13 @@ export function AuditsTab({ findings, siteId, filters, now, registerExport }: {
     severity === "Critical" ? "bg-red-100 text-red-800" : severity === "Major" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700";
 
   const header = (key: SortKey, label: string) => (
-    <button onClick={() => setSort(key)} className={sort === key ? "text-blue-700" : ""}>{label}{sort === key ? " ↓" : ""}</button>
+    <button onClick={() => setSort(key)} aria-pressed={sort === key} className={sort === key ? "text-blue-700" : ""}>{label}{sort === key ? " ↓" : ""}</button>
   );
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <KpiCard tone="slate" label="Total Findings" value={analytics.totalFindings} sub="2026 technical audits" />
+        <KpiCard tone="slate" label="Total Findings" value={analytics.totalFindings} sub={`${now.getUTCFullYear()} technical audits`} />
         <KpiCard tone="green" label="Addressed" value={`${analytics.addressedCount} (${formatPct(analytics.addressedPct)})`}
           sub={`${analytics.addressedOnTimeCount} on time · ${analytics.addressedLateCount} late`} />
         <KpiCard tone="blue" label="Open — In Window" value={analytics.openInWindow.length} sub="Due date still ahead" />
@@ -82,7 +82,7 @@ export function AuditsTab({ findings, siteId, filters, now, registerExport }: {
           </div>
         </Section>
 
-        <Section title="Monthly Findings Opened vs Addressed (2026)">
+        <Section title={`Monthly Findings Opened vs Addressed (${now.getUTCFullYear()})`}>
           <ColumnChart mode="grouped"
             points={analytics.monthlyTrend.map((month) => ({
               key: month.month, label: month.label,
