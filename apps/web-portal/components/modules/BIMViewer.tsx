@@ -273,9 +273,11 @@ export function BIMViewer() {
       if (!active) return;
       setModels(list);
       const requested = searchParams.get("building");
+      // Prefer the site-matching model (e.g. `02-S_V1` for 02-ESOC) over the legacy default.
+      const sitePrefix = `${activeSiteId.slice(0, 2)}-`;
       const preferred = requested && list.some((model) => model.buildingId === requested) ? requested
-        : list.some((model) => model.buildingId === "S01-BL-1") ? "S01-BL-1"
-          : list[0]?.buildingId ?? "";
+        : list.find((model) => model.buildingId.startsWith(sitePrefix))?.buildingId
+          ?? (list.some((model) => model.buildingId === "S01-BL-1") ? "S01-BL-1" : list[0]?.buildingId ?? "");
       setBuildingId(preferred);
       if (!list.length) setStatus("No .ifc models are available yet. Upload one to get started.");
     }).catch(() => {

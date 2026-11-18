@@ -960,3 +960,10 @@ Include a toggle in the `Actions` header:
 - `app/analytics/page.tsx` refreshes its `now` timestamp every 60 seconds, so long-lived sessions keep truthful YTD/overdue KPIs, and CSV exports stamp the filename with site and date (`analytics-<tab>-<siteId>-<DD-MM-YYYY>.csv`).
 - SlaTab computes the monthly series once and reuses it for both trend and chart; TechniciansTab computes all four scorecard windows in one memo and reuses them for the leaderboard; window labels show the live year. Long Jobs and Audits tab titles use the live year too.
 - The DrilldownDrawer closes on Escape; sortable table headers in Assets and Audits tabs carry `aria-pressed`. Verification uses `npx tsc --noEmit` in web-portal plus `node scripts/build-cloud.cjs`; no mobile code changed, so the mobile version remains V35.
+
+## 90. V40 Bundled 02-ESOC S-Building Model
+
+- The example S building for 02-ESOC (Darmstadt) ships as a bundled model: `apps/web-portal/public/bim/02-S_V1.ifc.gz` (25.6MB Revit Reference View export compressed to 5.7MB). Bundled storage is deliberate: Render has no persistent disk, so runtime `.data/bim` uploads would be lost on redeploy, while `public/bim` ships with every build. The gzip ISIZE footer equals the uncompressed size and is verified as in `app/api/bim-models/route.ts`.
+- `GET /api/bim-models` lists `02-S_V1` for every site alongside S01-BL-1/S01-BL-2 through the existing bundled-model path; the in-app upload equipment-mark flow keeps working, and PATCH assignments still persist as site overrides via copy-on-write.
+- The 3D BIM Viewer now prefers the site-matching model when picking a default: it selects the first catalogue entry whose buildingId starts with the site's `NN-` prefix (e.g. `02-S_V1` for 02-ESOC), falling back to the legacy S01-BL-1 default for sites without a matching model. `?building=` deep links keep overriding the choice.
+- Verification uses `npx tsc --noEmit` in web-portal plus `node scripts/build-cloud.cjs`; no mobile code changed, so the mobile version remains V35.
