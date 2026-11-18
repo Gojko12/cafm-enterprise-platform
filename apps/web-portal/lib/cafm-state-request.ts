@@ -10,8 +10,9 @@ export async function stateRequest(site: SiteId, person: string, method: "GET" |
   });
   const result: unknown = await response.json();
   if (!response.ok) {
-    const message = result && typeof result === "object" && "error" in result ? String(result.error) : `HTTP ${response.status}`;
-    throw new StateRequestError(message, response.status);
+    const body = result && typeof result === "object" ? result as Record<string, unknown> : {};
+    const message = typeof body.error === "string" && body.error ? body.error : `HTTP ${response.status}`;
+    throw new StateRequestError(message, response.status, body.details);
   }
   if (!result || typeof result !== "object" || !("revision" in result) || typeof result.revision !== "number" || !("state" in result)) {
     throw new Error("Invalid state response.");
@@ -20,5 +21,6 @@ export async function stateRequest(site: SiteId, person: string, method: "GET" |
 }
 
 export class StateRequestError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  // `details` carries the server's structured debug context (site, actor, revision, timestamp) when provided.
+  constructor(message: string, readonly status: number, readonly details?: unknown) { super(message); }
 }

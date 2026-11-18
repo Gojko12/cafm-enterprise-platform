@@ -400,9 +400,10 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           if (active) { setSyncError(null); schedulePush.current(0); }
           return;
         }
-        console.error("CAFM state sync failed", error);
+        const context = error instanceof StateRequestError ? ` (HTTP ${error.status}, site ${site})` : "";
+        console.error("CAFM state sync failed", { site, person: personRef.current, actorId: actorIdRef.current, revision: revision.current, operation: hasUnsavedUserEditsRef.current ? "push" : "poll", pendingWorkRequests: [...dirtyWrIdsRef.current], pendingFields: [...dirtyFieldsRef.current], error, details: error instanceof StateRequestError ? error.details : undefined });
         const message = error instanceof Error ? error.message : "State sync failed.";
-        if (active) setSyncError(message);
+        if (active) setSyncError(`${message}${context}`);
       } finally {
         busy.current = false;
       }
@@ -506,8 +507,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     const next = { ...scopeData(seedData(), site), mobileMutationIds: previous.mobileMutationIds };
     void commitSnapshot(previous, next, { forceReset: true }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : "Reset failed.";
-      console.error("Could not reset demo data", error);
-      setSyncError(`Reset failed: ${message}`);
+      const context = error instanceof StateRequestError ? ` (HTTP ${error.status}, site ${site})` : "";
+      console.error("Could not reset demo data", { site, error, details: error instanceof StateRequestError ? error.details : undefined });
+      setSyncError(`Reset failed: ${message}${context}`);
     });
   };
 

@@ -467,14 +467,20 @@ export async function POST(request: Request) {
         (!localActor || localActor.id.toLowerCase() === actor.id.toLowerCase())) ?? undefined;
     const globalActor = globalSuper && localActor
       ? { ...localActor, roles: [...new Set([...localActor.roles, "SuperAdmin" as const])], isAdmin: true } : globalSuper;
-    if (current) {
+    if (current && !forceReset) {
       const violation = validateGovernance(current.state, merged, site, actorId, parsed.data.governanceProof, globalActor);
-      if (violation) return reply(request, { error: violation }, 403);
+      if (violation) {
+        console.warn("Governance rejection", { site, actorId, violation, revision: current.revision });
+        return reply(request, { error: violation, details: { site, revision: current.revision, actorId } }, 403);
+      }
     }
     const next = { revision: (current?.revision ?? 0) + 1, state: reconcileAssurance(recordBlueprintRevisions(current?.state, merged, request.headers.get("X-CAFM-Person")?.trim() || "Web Portal")) };
-    if (current) {
+    if (current && !forceReset) {
       const violation = validateGovernance(current.state, next.state, site, actorId, parsed.data.governanceProof, globalActor);
-      if (violation) return reply(request, { error: violation }, 403);
+      if (violation) {
+        console.warn("Governance rejection after merge", { site, actorId, violation, revision: current.revision });
+        return reply(request, { error: violation, details: { site, revision: current.revision, actorId } }, 403);
+      }
     }
     database.sites[site] = next;
     if (storage.kind === "supabase") {

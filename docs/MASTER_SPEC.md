@@ -918,3 +918,31 @@ Include a toggle in the `Actions` header:
 - Disk-backed state writes wait up to five seconds for the write lock, retrying at 50–90 ms intervals and removing locks older than 15 seconds. Active writers refresh their lock; Supabase continues to use revision-based conditional writes.
 - Passive web views poll for server updates without posting normalization changes. User edits retain their pending work-request IDs and changed fields across reloads. Revision and temporary lock conflicts trigger a fresh read and retry; overlapping changes to the same work request or other edited field are reported rather than silently overwritten. Legacy pending snapshots without edit metadata are backed up in browser storage rather than automatically posted.
 - Mobile retries 409 and 503 responses up to four times with increasing 250 ms delays, re-reading the server and reapplying queued mutations on each attempt. Persistent conflicts and connectivity failures remain visible and unsent work stays queued.
+
+## 84. V34 Restored V33 Synchronization and Hardened WR ID Watermarks
+
+- The V33 state-write coordination is restored after a revert: web and mobile sync against the unified `cafm-state` backend with revision-conditional writes, and live checklist uploads remain debounced at 700 ms.
+- Work request IDs use a persisted per-site high-watermark under `cafm-wr-watermark:${site}` so sequences survive reloads. `sanitizeSequenceWatermark` strips the 2026 year prefix and rejects any non-integer or sequence above 989999, returning 0 instead of crashing hydration. IDs 9899xx are reserved synthetic bands.
+- `allocateWorkRequestId` allocates strictly above the normal high-watermark, wrapping to unused IDs when necessary. Synthetic IDs stay reserved but never advance the normal watermark, so seed bands and demo resets cannot inflate production sequences. Deleted work request IDs are never reissued.
+- All IDs validate through `isStrictWorkRequestId`; non-conforming legacy IDs migrate to the strict 2026-prefixed 10-digit form on write.
+
+## 85. V35 Storage Quota Recovery and Confirmed Mobile Freeze Overrides
+
+- When IndexedDB is unavailable or the storage quota is exhausted, the mobile app falls back to a memory-backed database (`memory-db.ts`) so checklists, timers and queued mutations remain usable and sync-safe instead of silently failing. The fallback is covered by `offline-sync-safety` tests and never blocks the sync queue.
+- The mobile freeze safety gate alerts technicians to active location freezes before WR execution. The override flag is mount state by design: leaving and re-entering the checklist re-locks the gate, so every freeze override must be re-confirmed.
+- Confirmed overrides are audit-logged and apply only at 50% Issued status; the same gate surfaces pending clearances (ESA IT, OCC, Security, Kitchen, Newsflash) and early slot starts. Mobile advances to V35 with the `cafm-mobile-v35:` service worker cache.
+
+## 86. V36 PM and Long Job Lifecycle Governance
+
+- At 78% Technically Completed, PM labor and checklist answers are read-only: incoming states that change `laborEntries`, `CraftpersonLabor`, `CraftpersonAssignments`, `timeSessions`, `MobileWorkSessions`, `ChecklistResults`, `ChecklistInstances` or `ChecklistSteps` are rejected server-side (`wr-governance.ts`).
+- Terminal PMs (100% Closed, 27% Cancelled) reactivate only through an administrator action with a double-confirmed governance proof: a reason of at least 5 characters, two sequential confirmations within a 5-second tolerance, a whitelisted field set (percentage/status/freeze/audit fields), `ReopenCount` increment and an `[Admin Reactivation]` audit log plus `ReopenedHistory` entry. Reactivation targets are limited to 50% Issued, 55% On Hold for Access (frozen) or 78% Technically Completed.
+- PM Complete (100%) and Cancel (27%) require `pmWorkRequests.complete` / `pmWorkRequests.cancel` permissions held only by SiteAdministrator, TeamLeader and SuperAdmin. Completion must originate from 78% with Closed status; cancellation requires a Cancelled status/substatus and an audit-logged cancellation reason.
+- Work requests can never change type between PM, FJ and LJ. Long Job stage changes validate against the transition matrix; arbitrary stage overrides require an `lj-override` proof and are limited to `LJ_OVERRIDE_STAGES`, while normal transitions, shortcuts and acceptance-gate actions (78%-81% SAT, Drawing, CIFM) follow the role matrix.
+- Feature permission overrides change only by administrators, and hard-locked features can never be unlocked. The API resolves the acting `actorId` against persisted server user records; governance violations return HTTP 403 and do not modify state.
+
+## 87. V37 Resettable Governance Boundary, Collapsible Navigation and Sync Diagnostics
+
+- The web portal sidebar collapses to an icon rail through a header chevron button; the choice persists in `cafm_sidebar_collapsed_v1` local storage. Collapsed mode hides labels, replaces section headers with dividers and keeps hover/ARIA labels per item. Every navigation address has its own distinct icon, and the header shows `Enterprise Edition · <PLATFORM_VERSION>` from `apps/web-portal/lib/platform-version.ts`, which is bumped each platform release independently of the mobile version.
+- `POST /api/cafm-state` skips `validateGovernance` while `forceReset` is true: an explicit, confirm-guarded admin seed replacement replaces site state wholesale and is no longer rejected by 78% PM labor/checklist read-only locks. Structural validations (cross-site duplicate WR IDs, schedule/blueprint collisions, locked blueprint frequencies) still apply to resets. Governance rejections log `{ site, actorId, violation, revision }` server-side and return a `details` object with the 403 response.
+- The web store records structured debug context on every sync failure in the browser console: site, active person, actor ID, revision, push vs poll, pending work-request IDs and pending fields, plus the server `details`. The red state-sync banner appends `(HTTP <status>, site <site>)` and reset failures report `Reset failed: <reason> (HTTP <status>, site <site>)`.
+- Verification uses `npx tsc --noEmit` in shared-schema, mobile-app and web-portal plus `node scripts/build-cloud.cjs`. No mobile code changed in this round, so the mobile version remains V35.
