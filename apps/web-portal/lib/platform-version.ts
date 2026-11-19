@@ -1,3 +1,3 @@
 // Bump this on every platform release, in the same rhythm as apps/mobile-app/src/version.ts.
-// V41 = S Building Darmstadt showcase seed (12 IFC-linked EQs, demo WRs, freeze, PMs) for 02-S_V1.
-export const PLATFORM_VERSION = "V41";
+// V42 = Mission Control: mission planner view over the freeze engine (schema, page, publish-to-CAFM bridge, seed, RBAC flag). MASTER_SPEC Section 92.
+export const PLATFORM_VERSION = "V42";

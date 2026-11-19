@@ -12,6 +12,7 @@ export * from "./rbac.js";
 export * from "./sla.js";
 export * from "./site-role-assignments.js";
 export * from "./dispatch.js";
+export * from "./mission-control.js";
 export * from "./user-access-profile.js";
 export * from "./cifm-person.js";
 export * from "./onboarding.js";

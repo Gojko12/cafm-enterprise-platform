@@ -54,6 +54,7 @@ const permissionsSchema = z.object({
   canManageEquipment: z.boolean(), auditTrades: z.array(tradeSchema), auditWRTypes: z.array(z.enum(["PM", "FJ"])),
   canAuditChooseWRs: z.boolean(), canAuditDoInspection: z.boolean(), canAuditReopenWR: z.boolean(), canManageFailureReasons: z.boolean(),
   canScheduleCraftperson: z.boolean(), canOverwriteLaborTime: z.boolean(), canManageShiftsAndLeaves: z.boolean(), canManageLocationFreezes: z.boolean(),
+  canManageMissionEvents: z.boolean().optional(),
 });
 const UserAccessProfileSchema = z.object({
   id: z.string().min(1), siteId: siteSchema, personName: z.string().min(1), fullName: z.string().min(1),
@@ -101,6 +102,21 @@ const LocationFreezeSchema = z.preprocess((value) => {
   if (entry.roomIds?.length && !entry.floorIds?.length) context.addIssue({ code: "custom", path: ["floorIds"], message: "Selected rooms require their parent floors." });
   if (entry.endDateTime <= entry.startDateTime) context.addIssue({ code: "custom", path: ["endDateTime"], message: "End must be after start." });
 }));
+const MissionEventSchema = z.object({
+  id: z.string().min(1), siteId: siteSchema,
+  missionRef: z.string().trim().min(1), missionName: z.string().trim().min(1),
+  eventType: z.enum(["LEOP", "Launch Window", "Critical Pass", "Maneuver", "Collision Avoidance", "Commissioning", "Special Event"]),
+  criticality: z.enum(["Critical", "High", "Standard"]),
+  startDateTime: localDateTime, endDateTime: localDateTime,
+  buildingIds: z.array(z.string().trim().min(1)).min(1),
+  floorIds: z.array(z.string().trim().min(1)).optional(),
+  roomIds: z.array(z.string().trim().min(1)).optional(),
+  facilityConstraint: z.enum(["TOTAL_LOCKDOWN", "PLANNED_ONLY", "COORDINATE_FIRST"]),
+  missionLead: z.string().trim().min(1), remarks: z.string().trim().default(""),
+  freezeId: z.string().min(1).optional(),
+}).superRefine((entry, context) => {
+  if (entry.endDateTime <= entry.startDateTime) context.addIssue({ code: "custom", path: ["endDateTime"], message: "The ops window must end after it starts." });
+});
 const records = z.array(z.record(z.string(), z.unknown()));
 const qaStagedVerdictSchema = z.object({
   verdict: z.enum(["Pass", "Fail"]), inspector: z.string().min(1), stagedAt: z.string().min(1),
@@ -174,6 +190,7 @@ const stateSchema = z.object({
   roleDefinitions: z.array(roleDefinitionSchema).optional(),
   craftpersonAbsences: z.array(CraftpersonAbsenceSchema).optional(),
   locationFreezes: z.array(LocationFreezeSchema).optional(),
+  missionEvents: z.array(MissionEventSchema).optional(),
   stakeholderTeams: z.array(SiteStakeholderTeamSchema).optional(),
   coordinationRequirements: z.array(SiteCoordinationRequirementSchema).optional(),
   pmCoordination: z.array(PmCoordinationRecordSchema).optional(),
@@ -289,6 +306,7 @@ function validateSite(state: z.infer<typeof stateSchema>, site: string): string 
   if (state.craftpersonAbsences?.some((item) => item.siteId !== site || !state.craftspeople.some((person) => person.id === item.craftpersonId && person.SiteId === site))) return "craftpersonAbsences";
   // Location freezes may reference floors/rooms that are still syncing from BIM; only the site scope is enforced.
   if (state.locationFreezes?.some((item) => item.siteId !== site)) return "locationFreezes";
+  if (state.missionEvents?.some((item) => item.siteId !== site)) return "missionEvents";
   if (state.users.some((user) => !Array.isArray(user.AssignedSiteIds) || user.AssignedSiteIds.length !== 1 || user.AssignedSiteIds[0] !== site)) return "users";
   // A BIM link may point at equipment that is not created yet; only the building-scoped key shape is enforced.
   if (state.bimElementLinks && Object.entries(state.bimElementLinks).some(([key, link]) => !key.startsWith(`${link.buildingId}:`))) return "bimElementLinks";

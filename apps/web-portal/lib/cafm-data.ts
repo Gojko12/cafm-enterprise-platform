@@ -1,4 +1,4 @@
-import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, QAAuditReport, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
+import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, MissionEvent, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, QAAuditReport, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
 import type { AuditCampaign, AuditFinding, AuditInspection, AuditSettings, AuditTemplate, AuditImport } from "./audit-assurance-types";
 import type { AuditAssurance } from "./equipment-inspection";
 import type { SuppressedPmOccurrence, BlueprintAuditEntry, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, SiteSlaConfig, CifmPerson } from "@cafm/shared-schema";
@@ -56,6 +56,7 @@ export interface DemoData {
   craftspeople: { id: string; Name: string; LastName: string; username?: string; Trade: string; HourlyRate: number; ShiftHours: number; SiteId: SiteId; SkillLevel: number; shiftStart?: string; shiftEnd?: string; baseShiftType?: ShiftType; shiftOverrides?: Record<string, CraftpersonShift>; secondaryTradeIds?: string[]; Activity?: NonNullable<BaseWorkRequest["Activity"]> }[];
   craftpersonAbsences: CraftpersonAbsence[];
   locationFreezes: LocationFreeze[];
+  missionEvents?: MissionEvent[];
   stakeholderTeams?: SiteStakeholderTeam[];
   coordinationRequirements?: SiteCoordinationRequirement[];
   pmCoordination?: PmCoordinationRecord[];

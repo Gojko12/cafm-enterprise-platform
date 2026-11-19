@@ -31,6 +31,7 @@ export function permissionsForPreset(preset: AccessPreset): UserGranularPermissi
     canAuditChooseWRs: inspector, canAuditDoInspection: inspector, canAuditReopenWR: inspector,
     canManageFailureReasons: inspector, canScheduleCraftperson: manager, canOverwriteLaborTime: manager,
     canManageShiftsAndLeaves: manager, canManageLocationFreezes: manager,
+    canManageMissionEvents: manager,
   };
 }
 const placeholder = /^(?:(?:esa )?(?:trade manager|cost centre manager|long job manager|technical officer)|trade contract manager|(?:cifm )?inventory admin|draftsman|teamleader|siteadmin)(?:\s*\(site-\d+\))?$/i;
@@ -55,7 +56,7 @@ const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades
   "canEditSlaDates", "canReopenCancelledWR", "canChangeIssuedWRChecklist",
   "canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ", "canDefinePMSchedule", "canAssignPMPToEQ", "canManageEquipment",
   "canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons", "canScheduleCraftperson",
-  "canOverwriteLaborTime", "canManageShiftsAndLeaves", "canManageLocationFreezes",
+  "canOverwriteLaborTime", "canManageShiftsAndLeaves", "canManageLocationFreezes", "canManageMissionEvents",
 ];
 export const checklistDefinitionFlags = ["canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ"] as const;
 export const auditPermissionFlags = ["canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons"] as const;
@@ -83,6 +84,19 @@ export function normalizeChecklistRole(role: RoleDefinition): RoleDefinition {
   permissions.canChangeIssuedWRChecklist = ["TeamLeader", "SiteAdministrator", "SuperAdmin"].includes(role.baseRoleType);
   return { ...role, permissions };
 }
+const PRESET_BY_BASE_ROLE: Record<RoleDefinition["baseRoleType"], AccessPreset> = {
+  SuperAdmin: "FullAdmin", SiteAdministrator: "FullAdmin", TeamLeader: "TeamLeader",
+  QAInspector: "QAInspector", TechnicalOfficer: "PMEngineer", Craftperson: "Craftperson",
+  Helpdesk: "Helpdesk", HRAdmin: "HRAdmin",
+};
+/** Fill permission keys that were absent in saved states (the flag postdates them). Explicit stored values are never overwritten. */
+export function backfillPermissionKeys(role: RoleDefinition): RoleDefinition {
+  const stored = role.permissions as unknown as Record<string, boolean | undefined>;
+  const missing = permissionFlags.filter((key) => stored[key] === undefined);
+  if (!missing.length) return role;
+  const fresh = permissionsForPreset(PRESET_BY_BASE_ROLE[role.baseRoleType]);
+  return { ...role, permissions: { ...role.permissions, ...Object.fromEntries(missing.map((key) => [key, fresh[key]])) } };
+}
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {
   if (profile.isSuperAdmin || profile.primaryRole === "SuperAdmin") return permissionsForPreset("FullAdmin");
   const result = permissionsForPreset("Craftperson");
@@ -108,7 +122,7 @@ export function resolveEffectivePermissions(profile: UserAccessProfile, definiti
 }
 
 export function migrateRoles(profiles: UserAccessProfile[], existing?: RoleDefinition[]) {
-  const roles = (existing ?? defaultRoleDefinitions()).map(normalizeChecklistRole);
+  const roles = (existing ?? defaultRoleDefinitions()).map((role) => normalizeChecklistRole(backfillPermissionKeys(role)));
   if (!roles.some((role) => role.id === "hr-admin")) roles.push(...defaultRoleDefinitions().filter((role) => role.id === "hr-admin"));
   const next = profiles.filter(isPersonProfile).map((original) => {
     const cleanName = (value: string) => value.replace(/\s*\((?:ESTEC|ESRIN) Admin\)$/i, "");

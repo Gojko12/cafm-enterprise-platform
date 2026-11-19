@@ -32,6 +32,7 @@ export const UserGranularPermissionsSchema = z.object({
   canOverwriteLaborTime: z.boolean(),
   canManageShiftsAndLeaves: z.boolean(),
   canManageLocationFreezes: z.boolean(),
+  canManageMissionEvents: z.boolean(),
 });
 export type UserGranularPermissions = z.infer<typeof UserGranularPermissionsSchema>;
 

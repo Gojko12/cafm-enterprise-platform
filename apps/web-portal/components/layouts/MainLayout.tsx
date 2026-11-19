@@ -4,7 +4,7 @@ import React from "react";
 import {
   Armchair, ArrowLeftRight, BarChart3, Box, Building, Calendar, CalendarClock,
   ChevronsLeft, ChevronsRight, ClipboardCheck, Cog, Gauge, Globe, Home,
-  Hourglass, Map, Repeat, ShieldCheck, Users, Zap
+  Hourglass, Map, Repeat, Satellite, ShieldCheck, Users, Zap
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -32,6 +32,7 @@ const NAV_ITEMS = [
     { href: "/technical-audits", label: "Technical Audits", icon: ClipboardCheck },
     { href: "/audit-assurance", label: "Audit & Assurance", icon: ShieldCheck },
     { href: "/scheduler", label: "Scheduler", icon: Calendar },
+    { href: "/mission-control", label: "Mission Control", icon: Satellite },
   ]},
   { section: "Administration", items: [
     { href: "/import-export", label: "Import/Export", icon: ArrowLeftRight },
