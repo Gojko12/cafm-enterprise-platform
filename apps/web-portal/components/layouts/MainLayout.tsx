@@ -58,6 +58,7 @@ function readSidebarCollapsed(): boolean {
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = React.useState(false);
+  const { alertsMuted, setAlertsMuted } = useCafmStore();
 
   React.useEffect(() => {
     setCollapsed(readSidebarCollapsed());
@@ -159,6 +160,7 @@ export function Sidebar() {
       {!collapsed && (
         <div className="p-4 border-t border-gray-800">
           <p className="text-xs text-gray-400">© 2026 Enterprise CAFM</p>
+          {alertsMuted && <button type="button" onClick={() => setAlertsMuted(false)} className="mt-2 block text-xs text-gray-500 hover:text-gray-300 underline">System alerts are hidden · Show</button>}
         </div>
       )}
     </aside>

@@ -7,7 +7,7 @@ import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { assignRoles, auditPermissionFlags, canRoleDefineChecklists, canRoleInspect, checklistDefinitionFlags, isPersonProfile, normalizeChecklistRole, permissionsForPreset, resolveEffectivePermissions } from "@/lib/access-profiles";
 
-type Flag = { [K in keyof UserGranularPermissions]: UserGranularPermissions[K] extends boolean ? K : never }[keyof UserGranularPermissions];
+type Flag = { [K in keyof UserGranularPermissions]-?: UserGranularPermissions[K] extends boolean | undefined ? K : never }[keyof UserGranularPermissions];
 const groups: Array<{ title: string; fields: Array<[Flag, string]> }> = [
   { title: "Work Requests & Execution", fields: [["canGeneratePM_WR", "Generate PM WR"], ["canOpenFollowUpFJ", "Open Follow-Up FJ"], ["canCreateFJ", "Create FJ"], ["canCreateLJ", "Create LJ"], ["canClaimUnassignedWR", "Claim WR"], ["canCompleteWR78", "Complete 78%"], ["canCloseWR100", "Close 100%"], ["canEditSlaDates", "Edit SLA Dates (Due / Margin)"], ["canReopenCancelledWR", "Reopen Cancelled WR"], ["canChangeIssuedWRChecklist", "Change Issued WR Checklist"]] },
   { title: "Checklists & SmartPM", fields: [["canDefineChecklistPM", "Define PM Checklist"], ["canDefineChecklistFJ", "Define FJ Checklist"], ["canDefineChecklistLJ", "Define LJ Checklist"], ["canDefinePMSchedule", "Define PM Schedule"], ["canAssignPMPToEQ", "Assign PMP"], ["canManageEquipment", "Manage Equipment"]] },

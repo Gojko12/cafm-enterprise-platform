@@ -95,7 +95,9 @@ export function backfillPermissionKeys(role: RoleDefinition): RoleDefinition {
   const missing = permissionFlags.filter((key) => stored[key] === undefined);
   if (!missing.length) return role;
   const fresh = permissionsForPreset(PRESET_BY_BASE_ROLE[role.baseRoleType]);
-  return { ...role, permissions: { ...role.permissions, ...Object.fromEntries(missing.map((key) => [key, fresh[key]])) } };
+  const additions: Partial<Record<(typeof permissionFlags)[number], boolean>> = {};
+  for (const key of missing) additions[key] = fresh[key] ?? false;
+  return { ...role, permissions: { ...role.permissions, ...additions } };
 }
 export function resolveEffectivePermissions(profile: UserAccessProfile, definitions: RoleDefinition[]): UserGranularPermissions {
   if (profile.isSuperAdmin || profile.primaryRole === "SuperAdmin") return permissionsForPreset("FullAdmin");
@@ -107,7 +109,7 @@ export function resolveEffectivePermissions(profile: UserAccessProfile, definiti
   for (const original of selected) {
     const role = normalizeChecklistRole(original);
     for (const key of permissionFlags) {
-      if (!auditPermissionFlags.some((flag) => flag === key) || canRoleInspect(role)) result[key] ||= role.permissions[key];
+      if (!auditPermissionFlags.some((flag) => flag === key) || canRoleInspect(role)) result[key] = result[key] || !!role.permissions[key];
     }
     if (canRoleInspect(role)) {
       result.auditTrades = [...new Set([...result.auditTrades, ...role.permissions.auditTrades])];

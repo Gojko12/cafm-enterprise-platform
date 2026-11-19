@@ -66,7 +66,11 @@ interface Store {
   setData: React.Dispatch<React.SetStateAction<DemoData>>;
   reset: () => void;
   commitSnapshot: (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean; governanceProof?: GovernanceProof }) => Promise<void>;
+  alertsMuted: boolean;
+  setAlertsMuted: (muted: boolean) => void;
 }
+
+const ALERTS_MUTED_KEY = "cafm_alerts_muted_v1";
 
 const StoreContext = createContext<Store | null>(null);
 
@@ -88,6 +92,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const [syncError, setSyncError] = useState<string | null>(null);
   const [legacyBackup, setLegacyBackup] = useState(false);
   const [cacheWarning, setCacheWarning] = useState(false);
+  const [alertsMuted, setAlertsMutedState] = useState(false);
+  useEffect(() => { try { setAlertsMutedState(window.localStorage.getItem(ALERTS_MUTED_KEY) === "1"); } catch { /* private mode: alerts stay audible */ } }, []);
+  const setAlertsMuted = (muted: boolean) => { setAlertsMutedState(muted); try { window.localStorage.setItem(ALERTS_MUTED_KEY, muted ? "1" : "0"); } catch { /* storage unavailable: session-only mute */ } };
   const legacyPendingSnapshot = useRef<{ snapshot: string; pending: unknown; base: string | null } | null>(null);
   const previousSnapshot = useRef<DemoData | null>(null);
   const cachedSnapshot = useRef("");
@@ -544,11 +551,13 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
     });
     schedulePush.current();
   };
-  return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot }}>
-    {!!data.pmMigrationNotes?.length && <details className="bg-amber-50 p-2 text-sm text-amber-900"><summary>PM assignment migration notes ({data.pmMigrationNotes.length})</summary>{data.pmMigrationNotes.map((note) => <p key={note}>{note}</p>)}</details>}
-    {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900">State sync: {syncError}</div>}
-    {cacheWarning && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900">Browser storage is full. Edits remain in memory and will sync to the server, but may be lost if the page closes before synchronization.</div>}
-    {legacyBackup && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900">An older pending local snapshot is held in memory only and was not automatically synchronized. It will be lost when the site changes or this page closes.</div>}
+  return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot, alertsMuted, setAlertsMuted }}>
+    {!alertsMuted && <>
+      {!!data.pmMigrationNotes?.length && <details className="bg-amber-50 p-2 text-sm text-amber-900"><summary>PM assignment migration notes ({data.pmMigrationNotes.length})</summary>{data.pmMigrationNotes.map((note) => <p key={note}>{note}</p>)}</details>}
+      {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900"><span>State sync: {syncError}</span> <button type="button" onClick={() => setAlertsMuted(true)} className="ml-2 underline font-semibold">Hide alerts</button></div>}
+      {cacheWarning && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900"><span>Browser storage is full. Edits remain in memory and will sync to the server, but may be lost if the page closes before synchronization.</span> <button type="button" onClick={() => setAlertsMuted(true)} className="ml-2 underline font-semibold">Hide alerts</button></div>}
+      {legacyBackup && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900"><span>An older pending local snapshot is held in memory only and was not automatically synchronized. It will be lost when the site changes or this page closes.</span> <button type="button" onClick={() => setAlertsMuted(true)} className="ml-2 underline font-semibold">Hide alerts</button></div>}
+    </>}
     {ready ? children : <div>Loading saved CAFM data...</div>}
   </StoreContext.Provider>;
 }
