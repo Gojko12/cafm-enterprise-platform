@@ -42,6 +42,9 @@ const LEGACY_BASELINES = {
   "apps/web-portal/components/modules/long-jobs/LongJobDrawer.tsx": 806,
   "apps/web-portal/lib/ifc-cafm-bridge.ts": 782,
   "apps/mobile-app/src/App.tsx": 770,
+  // V48 (Section 98): the consolidated sync API route (schema validation + delta pipeline +
+  // Stage A/B/C storage layers); recorded at 605 lines, growth limit 665.
+  "apps/web-portal/app/api/cafm-state/route.ts": 605,
 };
 
 // Single leading underscore marks a scratch script; Python dunder files (`__init__.py`) are legitimate.

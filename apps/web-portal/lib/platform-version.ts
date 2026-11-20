@@ -1,3 +1,3 @@
 // Bump this on every platform release, in the same rhythm as apps/mobile-app/src/version.ts.
-// V47 = Stage B delta sync: the client POSTs only changed collections and changed WR records (lib/sync-delta.ts), the API applies deltas onto the stored state with the same governance pipeline, useActiveUserPermissions extracted to its own module. MASTER_SPEC Section 97.
-export const PLATFORM_VERSION = "V47";
+// V48 = Stage C conditional GET: idle polls offer the known revision and get a tiny unchanged envelope instead of the full state download. MASTER_SPEC Section 98.
+export const PLATFORM_VERSION = "V48";

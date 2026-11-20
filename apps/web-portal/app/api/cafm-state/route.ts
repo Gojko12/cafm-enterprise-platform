@@ -40,7 +40,7 @@ function cors(request: Request) {
   return {
     ...(origin && allowedOrigin(request, origin) ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CAFM-Site-Id, X-CAFM-Person, X-CAFM-Actor-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CAFM-Site-Id, X-CAFM-Person, X-CAFM-Actor-Id, X-CAFM-Revision",
     "Cache-Control": "no-store",
     Vary: "Origin",
   };
@@ -455,6 +455,15 @@ export async function GET(request: Request) {
     const storage = await backend();
     const { database } = await load(storage);
     const current = database.sites[site];
+    // Stage C: an idle client that offers its known revision and is already current gets a
+    // tiny `unchanged` envelope instead of re-downloading the full multi-megabyte state.
+    const known = Number(request.headers.get("x-cafm-revision"));
+    if (current && known === current.revision) {
+      const response = reply(request, { revision: current.revision, state: null, unchanged: true });
+      response.headers.set("X-CAFM-Storage", storage.kind);
+      response.headers.set("X-CAFM-Unchanged", "1");
+      return response;
+    }
     const highWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => [entry.state.pmsOrderHighWatermark ?? 0, ...entry.state.schedules.map((order) => Number(order.ScheduleId))]));
     const blueprintHighWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => [entry.state.blueprintHighWatermark ?? 0, ...entry.state.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))]));
     const response = reply(request, current ? { ...current, state: { ...current.state, pmsOrderHighWatermark: highWatermark, blueprintHighWatermark } } : { revision: 0, state: null });

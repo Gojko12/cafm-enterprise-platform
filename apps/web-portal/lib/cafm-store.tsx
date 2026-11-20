@@ -291,7 +291,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       busy.current = true;
       try {
         if (!connected.current) {
-          const remote = await stateRequest(site, personRef.current, "GET");
+          // Stage C: offer the known revision; an `unchanged` envelope skips the full download.
+          const remote = await stateRequest(site, personRef.current, "GET", undefined, undefined, knownRevision.current ? revision.current : undefined);
           if (remote.state !== null && (!remote.state || typeof remote.state !== "object" ||
               !("workRequests" in remote.state) || !Array.isArray(remote.state.workRequests))) {
             throw new Error("Invalid server state.");
@@ -316,7 +317,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           revision.current = remote.revision;
           knownRevision.current = true;
           if (hasUnsavedUserEditsRef.current || offlineEdits.current) {
-            acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : "";
+            // Stage C: an `unchanged` answer has no state to normalize; the previous acknowledgment
+            // still matches revision.current, so keep it instead of forcing one full-state upload.
+            acknowledged.current = normalizedRemote ? JSON.stringify(normalizedRemote) : acknowledged.current;
           } else if (normalizedRemote) {
             // Never drop locally created or edited WRs that the server does not have yet.
             const next = dirtyWrIdsRef.current.size
@@ -336,7 +339,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         let serialized = JSON.stringify(outgoing);
         if (hasUnsavedUserEditsRef.current && serialized !== acknowledged.current) {
           // Merge newer server records before pushing so stale local copies never overwrite them.
-          const latest = await stateRequest(site, personRef.current, "GET");
+          const latest = await stateRequest(site, personRef.current, "GET", undefined, undefined, knownRevision.current ? revision.current : undefined);
           if (sentVersion !== editVersion.current) { schedulePush.current(); return; }
           if (latest.state && latest.revision !== revision.current) {
             const remote = normalizeServerState(latest.state as DemoData, site);
@@ -395,7 +398,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             dirtyWrIdsRef.current.clear();
             localStorage.removeItem(pendingKey);
           }
-          const result = await stateRequest(site, personRef.current, "GET");
+          const result = await stateRequest(site, personRef.current, "GET", undefined, undefined, knownRevision.current ? revision.current : undefined);
           if (!hasUnsavedUserEditsRef.current && result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
             const next = normalizeServerState(result.state as DemoData, site);
