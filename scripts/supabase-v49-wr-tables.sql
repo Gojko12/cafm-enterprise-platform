@@ -211,14 +211,17 @@ create or replace view public.cafm_blocks with (security_invoker = true) as
   from public.cafm_site_revision r;
 
 do $grant$
-  declare r text;
 begin
-  -- Supabase roles; skipped automatically in a vanilla Postgres used for testing.
-  foreach r in array array['anon', 'authenticated', 'service_role'] loop
-    if exists (select 1 from pg_roles where rolname = r) then
-      execute format('grant select on public.cafm_blocks to %I', r);
-    end if;
-  end loop;
+  -- CAFM projects manage grants explicitly (no Supabase default privileges, V45-era
+  -- posture): the security_invoker view needs SELECT on the view AND on the record
+  -- tables underneath for the service role the server uses. Learned the hard way in
+  -- production on 20-11-2026: without the record-table grant every API read failed
+  -- instantly (permission denied -> red HTTP 500 state-sync banner).
+  -- Skipped automatically in a vanilla local Postgres used for testing.
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant select on public.cafm_blocks to service_role';
+    execute 'grant select on public.work_requests, public.deleted_work_requests to service_role';
+  end if;
 end
 $grant$;
 
