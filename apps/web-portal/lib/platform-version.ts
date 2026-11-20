@@ -1,3 +1,3 @@
 // Bump this on every platform release, in the same rhythm as apps/mobile-app/src/version.ts.
-// V43 = Presentation alert mute: sync/cache/legacy/PM-migration banners can be hidden for demos (localStorage cafm_alerts_muted_v1, sidebar footer restore link). MASTER_SPEC Section 93.
-export const PLATFORM_VERSION = "V43";
+// V44 = Database split stage A: server storage moves from the single cafm_state JSON blob to per-site, per-collection Postgres rows (cafm_blocks + cafm_site_revision, atomic cafm_save_state function). MASTER_SPEC Section 94.
+export const PLATFORM_VERSION = "V44";

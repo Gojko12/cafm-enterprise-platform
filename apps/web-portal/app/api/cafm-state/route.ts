@@ -330,7 +330,7 @@ async function backend(): Promise<Backend> {
     if (!url || !key) throw new Error("Both SUPABASE_URL and a Supabase key are required.");
     const parsedUrl = new URL(url);
     if (parsedUrl.protocol !== "https:" && parsedUrl.hostname !== "localhost" && parsedUrl.hostname !== "127.0.0.1") throw new Error("Supabase URL must use HTTPS.");
-    return { kind: "supabase", url: `${url.replace(/\/+$/, "")}/rest/v1/cafm_state`, key };
+    return { kind: "supabase", url: `${url.replace(/\/+$/, "")}/rest/v1`, key };
   }
   const directory = path.join(process.cwd(), ".data");
   try {
@@ -360,17 +360,42 @@ async function supabaseRequest(storage: Extract<Backend, { kind: "supabase" }>, 
   });
   if (!response.ok) {
     if (response.status === 409) return null;
+    if (response.status === 404) throw new Error("V44 CAFM database objects are missing; run scripts/supabase-v44-blocks.sql once in the Supabase SQL editor.");
+    const body = await response.text();
+    // SQLSTATE 40001 from cafm_save_state surfaces as a conflict, whatever HTTP status the gateway picked.
+    if (body.includes("State has changed; reload and resolve the conflict.")) return null;
+    if (response.status === 413) throw new Error("The site state is too large for the database API; the Stage B split (per-collection writes) is required.");
     throw new Error(`Supabase CAFM state request failed (${response.status}); check table, permissions, and configuration.`);
   }
   return response.json() as Promise<unknown>;
 }
 
+// V44 database layout: one row per site and per state collection (cafm_blocks + cafm_site_revision).
+// Loaded by reading all revision rows and all block rows, assembling the same multi-site Database
+// object the single-blob era produced, so every downstream check is unchanged.
+async function loadSupabaseDatabase(storage: Extract<Backend, { kind: "supabase" }>): Promise<Database> {
+  const revisionRowSchema = z.array(z.object({ site_id: z.string().min(1), revision: z.number().int().nonnegative() }));
+  const revisions = revisionRowSchema.parse(await supabaseRequest(storage, "/cafm_site_revision?select=site_id,revision&order=site_id") ?? []);
+  const blocks = z.array(z.object({ site_id: z.string().min(1), kind: z.string().min(1), payload: z.unknown() }))
+    .parse(await supabaseRequest(storage, "/cafm_blocks?select=site_id,kind,payload&order=site_id") ?? []);
+  if (!revisions.length) {
+    const migrated = z.object({ migratedSites: z.number().int().nonnegative().default(0) })
+      .parse(await supabaseRequest(storage, "/rpc/cafm_migrate_v44", { method: "POST", body: "{}" }) ?? {});
+    if (migrated.migratedSites > 0) return loadSupabaseDatabase(storage);
+    return { sites: {} };
+  }
+  const sites: { [site: string]: { revision: number; state: Record<string, unknown> } } = {};
+  for (const row of revisions) sites[row.site_id] = { revision: row.revision, state: {} };
+  for (const row of blocks) {
+    const entry = sites[row.site_id];
+    if (entry) entry.state[row.kind] = row.payload;
+  }
+  return databaseSchema.parse({ sites });
+}
+
 async function load(storage: Backend): Promise<StoredDatabase> {
   if (storage.kind === "supabase") {
-    const result = await supabaseRequest(storage, "?id=eq.default&select=payload,version");
-    const rows = z.array(z.object({ payload: databaseSchema, version: z.string().uuid() })).parse(result);
-    if (rows.length > 1) throw new Error("Supabase CAFM state contains duplicate rows.");
-    return rows.length ? { database: rows[0].payload, version: rows[0].version } : { database: { sites: {} }, version: null };
+    return { database: await loadSupabaseDatabase(storage), version: null };
   }
   try {
     return { database: databaseSchema.parse(JSON.parse(await readFile(storage.filename, "utf8"))), version: null };
@@ -421,6 +446,7 @@ export async function GET(request: Request) {
     const blueprintHighWatermark = Math.max(0, ...Object.values(database.sites).flatMap((entry) => [entry.state.blueprintHighWatermark ?? 0, ...entry.state.blueprints.map((bp) => Number(/^CB-(\d{4})-/.exec(bp.ChecklistCode)?.[1] ?? 0))]));
     const response = reply(request, current ? { ...current, state: { ...current.state, pmsOrderHighWatermark: highWatermark, blueprintHighWatermark } } : { revision: 0, state: null });
     response.headers.set("X-CAFM-Storage", storage.kind);
+    if (current) response.headers.set("X-CAFM-State-Bytes", String(Buffer.byteLength(JSON.stringify(current.state))));
     return response;
   } catch (error) {
     console.error("Could not read CAFM state", error);
@@ -451,7 +477,7 @@ export async function POST(request: Request) {
       releaseLock = (await acquireWriteLock(storage.lockFile)) ?? undefined;
       if (!releaseLock) return reply(request, { error: "Another state write is in progress." }, 503);
     }
-    const { database, version } = await load(storage);
+    const { database } = await load(storage);
     const current = database.sites[site];
     if (parsed.data.revision !== (current?.revision ?? 0)) {
       return reply(request, { error: "State has changed; reload and resolve the conflict.", revision: current?.revision ?? 0 }, 409);
@@ -502,12 +528,15 @@ export async function POST(request: Request) {
     }
     database.sites[site] = next;
     if (storage.kind === "supabase") {
-      const newVersion = randomUUID();
-      const result = await supabaseRequest(storage, version ? `?id=eq.default&version=eq.${version}` : "", {
-        method: version ? "PATCH" : "POST",
-        body: JSON.stringify({ ...(version ? {} : { id: "default" }), payload: database, version: newVersion, updated_at: new Date().toISOString() }),
+      // Atomic per-site save inside Postgres (cafm_save_state): revision check,
+      // block replacement and revision bump happen in one transaction.
+      const result = await supabaseRequest(storage, "/rpc/cafm_save_state", {
+        method: "POST",
+        body: JSON.stringify({ p_site_id: site, p_expected_revision: current?.revision ?? 0, p_new_revision: next.revision, p_blocks: next.state }),
       });
-      if (!Array.isArray(result) || result.length !== 1) return reply(request, { error: "State changed during save; reload and resolve the conflict." }, 409);
+      if (!result) return reply(request, { error: "State changed during save; reload and resolve the conflict." }, 409);
+      const saved = z.object({ revision: z.number().int().positive() }).safeParse(result);
+      if (!saved.success) throw new Error("Unexpected response from the CAFM database save function.");
     } else {
       temporary = path.join(storage.directory, `cafm-db-${randomUUID()}.tmp`);
       const file = await open(temporary, "wx", 0o600);
