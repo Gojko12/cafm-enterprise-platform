@@ -64,6 +64,31 @@ function hasCollapsedPmClosure(old: Wr, next: Wr): boolean {
   return false;
 }
 
+// V46: a closed PM (100%) stays auditable. The QA audit workflow writes only QA metadata
+// (selection, verdicts, corrections, follow-up FJ links) while every stage field is frozen,
+// and a failed inspection performs exactly one controlled reopen to 50% with its own log
+// entry. Both paths are accepted without an administrator reactivation proof.
+const QA_METADATA_KEYS = new Set(["QA_CompletionDate", "QA_AuditStatus", "QA_SelectionMode", "QA_InspectedBy",
+  "QA_InspectedDate", "QA_InspectionStatus", "AuditInspectionStatus", "QA_IssueDescription", "QA_CorrectionComment",
+  "QA_CorrectedDate", "QA_AuditPhotos", "qaStagedVerdict", "qaReinspectionCount", "qaTeamLeaderChallenges",
+  "FollowUpFJIds", "Activity", "UpdatedAt", "updatedAt"]);
+
+const keysEqualOutside = (old: Wr, next: Wr, allowed: ReadonlySet<string>): boolean =>
+  [...new Set([...Object.keys(old), ...Object.keys(next)])]
+    .every((key) => allowed.has(key) || isDeepStrictEqual(old[key], next[key]));
+
+const isPmQaMetadataChange = (old: Wr, next: Wr): boolean =>
+  ["Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "ClosedAt", "IsFrozen", "FreezeReason"]
+    .every((key) => isDeepStrictEqual(old[key], next[key])) &&
+  keysEqualOutside(old, next, QA_METADATA_KEYS);
+
+const isPmQaFailedReopen = (old: Wr, next: Wr): boolean =>
+  next.Percentage === 50 && next.WorkRequestStatus === "Issued" && next.WorkRequestSubstatus === "Re-opened (50% - QA Failed)" &&
+  next.QA_AuditStatus === "QA_Failed_ActionRequired" &&
+  appended(old.Activity, next.Activity, (entry) => entry.kind === "log" && typeof entry.text === "string" &&
+    entry.text.startsWith("QA Inspection FAILED by") && entry.text.endsWith(" WR automatically Re-opened and set to 50%.")) &&
+  keysEqualOutside(old, next, new Set([...QA_METADATA_KEYS, "Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "ClosedAt"]));
+
 export function validateGovernance(existing: State, incoming: State, site: string, actorId: string, proof?: GovernanceProof, globalActor?: GovernanceActor): string | null {
   const actor = globalActor ?? resolveGovernanceActor(existing, site, actorId);
   const overrides = incoming.featurePermissionOverrides ?? {};
@@ -82,7 +107,8 @@ export function validateGovernance(existing: State, incoming: State, site: strin
       ["laborEntries", "CraftpersonLabor", "CraftpersonAssignments", "timeSessions", "MobileWorkSessions",
         "ChecklistResults", "ChecklistInstances", "ChecklistSteps"].some((key) => !isDeepStrictEqual(old[key], next[key])))
       return `PM ${old.WR_ID} labor and checklist answers are read-only at 78%.`;
-    if (old.WR_Type === "PM" && (old.Percentage === 100 || old.Percentage === 27) && !isDeepStrictEqual(old, next)) {
+    if (old.WR_Type === "PM" && (old.Percentage === 100 || old.Percentage === 27) && !isDeepStrictEqual(old, next) &&
+      !(next && old.Percentage === 100 && (isPmQaMetadataChange(old, next) || isPmQaFailedReopen(old, next)))) {
       if (!next || next.WR_Type !== "PM" || !actor?.isAdmin || ![50, 55, 78].includes(Number(next.Percentage)) ||
         !validProof(proof, old.WR_ID, "pm-reactivation") || !allowedReactivationFields(old, next))
         return `PM ${old.WR_ID} is terminal and may only be reactivated by an administrator.`;

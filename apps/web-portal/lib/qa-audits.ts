@@ -22,18 +22,19 @@ function log(wr: BaseWorkRequest, text: string, actor: Actor): BaseWorkRequest {
   return { ...wr, UpdatedAt: now, Activity: [...(wr.Activity ?? []), { id: crypto.randomUUID(), kind: "log", actorId: actor.name, actorName: actor.name, actorRole: actor.role, createdAt: now, text }] };
 }
 export function selectAudit(wr: BaseWorkRequest, mode: QAMode, actor: Actor): BaseWorkRequest {
-  if (!isQACompleted(wr) || qaStatus(wr) !== "None") throw new Error(`${wr.WR_ID}: only completed, unselected PM or FJ work requests can be selected.`);
+  // V46: only closed (100%) PM/FJ work requests are auditable; technically completed (78%) WRs stay excluded.
+  if (!isQAEligibleType(wr) || wr.Percentage !== 100 || qaStatus(wr) !== "None") throw new Error(`${wr.WR_ID}: only closed (100%), unselected PM or FJ work requests can be selected for QA audit.`);
   if (wr.qaTeamLeaderChallenges?.length) throw new Error(`${wr.WR_ID}: an existing QA challenge requires review before selection.`);
   return log({ ...wr, QA_CompletionDate: qaDate(wr), QA_AuditStatus: "ToBeInspected", QA_SelectionMode: mode }, `Selected for QA inspection (${mode}).`, actor);
 }
 export function selectRandomAudits(requests: BaseWorkRequest[], options: QAOptions, actor: Actor, assignments: QAInspectorAssignment[]): BaseWorkRequest[] {
   if (options.dateFrom && options.dateTo && options.dateFrom > options.dateTo) throw new Error("Invalid audit date range.");
   if (options.targetCount !== undefined && (!Number.isInteger(options.targetCount) || options.targetCount < 0)) throw new Error("Target count must be a non-negative integer.");
-  const eligible = requests.filter((wr) => qaMatches(wr, options));
+  const eligible = requests.filter((wr) => wr.Percentage === 100 && qaMatches(wr, options));
   const chosen = new Map<string, BaseWorkRequest>();
   const selected = eligible.filter((wr) => qaStatus(wr) !== "None");
   const needed = Math.max(0, (options.targetCount ?? Math.ceil(eligible.length * 0.05)) - selected.length);
-  const pool = eligible.filter((wr) => qaStatus(wr) === "None" && (wr.Percentage === 78 || wr.Percentage === 100) && canInspectWR(actor.name, wr, assignments)).map((wr) => ({ wr, random: Math.random() }));
+  const pool = eligible.filter((wr) => qaStatus(wr) === "None" && wr.Percentage === 100 && canInspectWR(actor.name, wr, assignments)).map((wr) => ({ wr, random: Math.random() }));
   const ratio = (wr: BaseWorkRequest, by: "trade" | "type") => {
     const matches = (item: BaseWorkRequest) => by === "trade" ? item.TradeName === wr.TradeName : item.WR_Type === wr.WR_Type;
     return selected.filter(matches).length / eligible.filter(matches).length;
@@ -61,7 +62,7 @@ export function transitionAudit(wr: BaseWorkRequest, action: "confirm" | "unsele
 export function swapAudit(requests: BaseWorkRequest[], id: string, actor: Actor): BaseWorkRequest[] {
   const wr = requests.find((item) => item.WR_ID === id);
   if (!wr || !isQAEligibleType(wr) || qaStatus(wr) !== "ToBeInspected" || wr.QA_SelectionMode !== "ComputerRandom5Percent") throw new Error("Only a pending PM or FJ random audit can be swapped.");
-  const candidates = requests.filter((item) => item.WR_ID !== id && item.WR_Type === wr.WR_Type && isQACompleted(item) && qaStatus(item) === "None").map((item) => ({ item, score: Number(item.RoomCode !== wr.RoomCode) + Number(!item.AssignedCraftpersonIds.some((person) => wr.AssignedCraftpersonIds.includes(person))), random: Math.random() })).sort((a, b) => b.score - a.score || a.random - b.random);
+  const candidates = requests.filter((item) => item.WR_ID !== id && item.WR_Type === wr.WR_Type && item.Percentage === 100 && qaStatus(item) === "None").map((item) => ({ item, score: Number(item.RoomCode !== wr.RoomCode) + Number(!item.AssignedCraftpersonIds.some((person) => wr.AssignedCraftpersonIds.includes(person))), random: Math.random() })).sort((a, b) => b.score - a.score || a.random - b.random);
   if (!candidates.length) throw new Error("No replacement completed work request is available.");
   const replacement = selectAudit(candidates[0].item, "ComputerRandom5Percent", actor);
   return requests.map((item) => item.WR_ID === id ? log({ ...item, QA_AuditStatus: "None", QA_SelectionMode: undefined }, `Random audit swapped for ${replacement.WR_ID}.`, actor) : item.WR_ID === replacement.WR_ID ? replacement : item);

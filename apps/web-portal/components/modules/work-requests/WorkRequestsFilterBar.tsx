@@ -30,7 +30,7 @@ export function WorkRequestsFilterBar({ queue, requestType }: { queue: WorkReque
     permissions, isFilterExpanded, setFilterExpanded, columnFilterCount, textFilter, setTextFilter,
     view, setView, locationFilter, setLocationFilter, selectedEquipmentCodes, setSelectedEquipmentCodes,
     dueDateFrom, setDueDateFrom, dueDateTo, setDueDateTo, resetFilters,
-    siteBuildings, siteFloors, siteRooms, siteEquipment, handleCreateLJ, setFastJobOpen,
+    siteBuildings, siteFloors, siteRooms, siteEquipment, filteredRequests, handleCreateLJ, setFastJobOpen,
     bucket, setBucket, fjView, setFjView, groupLJ, setGroupLJ, siteRequests, teamQueue, setTeamQueue, currentRole,
   } = queue;
   return <>
@@ -45,6 +45,8 @@ export function WorkRequestsFilterBar({ queue, requestType }: { queue: WorkReque
           <input value={textFilter} onChange={(event) => setTextFilter(event.target.value)} placeholder="Quick search" aria-label="Search work requests" className="min-w-0 w-40 rounded border px-2 py-1" />
         </div>
         <div className="flex items-center gap-2">
+          {/* V46: light visible-count indicator for the current filters. */}
+          <span className="text-gray-400 whitespace-nowrap" aria-live="polite">{filteredRequests.length} shown{filteredRequests.length !== siteRequests.length ? ` of ${siteRequests.length}` : ""}</span>
           <button type="button" aria-pressed={view === "grid"} onClick={() => setView("grid")} className={`rounded px-2 py-1 ${view === "grid" ? "bg-blue-600 text-white" : "border"}`}>Data Grid</button>
           <button type="button" aria-pressed={view === "card"} onClick={() => setView("card")} className={`rounded px-2 py-1 ${view === "card" ? "bg-blue-600 text-white" : "border"}`}>Card View</button>
           <button type="button" onClick={resetFilters} className="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Reset Filter</button>
