@@ -18,6 +18,7 @@ import { sanitizeStateForSite } from "@/lib/site-state-sanitize";
 import { acquireWriteLock } from "@/lib/state-write-lock";
 import { migrateFeatureMatrix } from "@/lib/feature-migration";
 import { hasInvalidLockedOverrides, validateGovernance } from "@/lib/wr-governance";
+import { applySyncDelta } from "@/lib/sync-delta";
 import { resolveGovernanceActor } from "@/lib/governance-actor";
 
 export const runtime = "nodejs";
@@ -228,11 +229,23 @@ const stateSchema = z.object({
   try { return migrateFeatureMatrix(migrateWorkRequestIdsTo10Digits(migratePmState(state))); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
 });
+const governanceProofSchema = z.object({ wrId: z.string().min(1), kind: z.enum(["pm-reactivation", "lj-override"]), reason: z.string(),
+  confirmed1At: z.string(), confirmed2At: z.string() });
 const payloadSchema = z.preprocess(migrateLegacySiteIds, z.object({
   revision: z.number().int().nonnegative(), state: stateSchema,
-  governanceProof: z.object({ wrId: z.string().min(1), kind: z.enum(["pm-reactivation", "lj-override"]), reason: z.string(),
-    confirmed1At: z.string(), confirmed2At: z.string() }).optional(),
+  governanceProof: governanceProofSchema.optional(),
 }));
+// Stage B (Section 96): a delta POST carries only changed collections and changed work-request
+// records; the route applies it onto the stored site state. Full-state POSTs are unchanged.
+const deltaPayloadSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  delta: z.object({
+    workRequests: z.array(z.record(z.string(), z.unknown())),
+    deletedWrIds: z.array(z.string().min(1)),
+    collections: z.record(z.string(), z.union([z.array(z.unknown()), z.record(z.string(), z.unknown()), z.string(), z.number(), z.boolean()])),
+  }),
+  governanceProof: governanceProofSchema.optional(),
+});
 const envelopeSchema = z.object({ revision: z.number().int().positive(), state: stateSchema });
 const databaseSchema = z.preprocess(migrateLegacySiteIds, z.object({
   sites: z.partialRecord(siteSchema, envelopeSchema),
@@ -464,14 +477,6 @@ export async function POST(request: Request) {
     if (Buffer.byteLength(text) > maxBytes) return reply(request, { error: "State exceeds 32 MB." }, 413);
     let json: unknown;
     try { json = JSON.parse(text); } catch { return reply(request, { error: "Invalid JSON." }, 400); }
-    const parsed = payloadSchema.safeParse(json);
-    if (!parsed.success) return reply(request, { error: "Invalid state or revision.", details: parsed.error.issues }, 400);
-    if (json && typeof json === "object" && "state" in json && json.state && typeof json.state === "object" &&
-      "featurePermissionOverrides" in json.state && hasInvalidLockedOverrides(json.state.featurePermissionOverrides))
-      return reply(request, { error: "Admin-only feature permissions are locked." }, 403);
-    parsed.data.state = sanitizeStateForSite(parsed.data.state, site);
-    const invalidField = validateSite(parsed.data.state, site);
-    if (invalidField) return reply(request, { error: `State validation failed: ${invalidField}` }, 400);
     const storage = await backend();
     if (storage.kind !== "supabase") {
       releaseLock = (await acquireWriteLock(storage.lockFile)) ?? undefined;
@@ -479,6 +484,26 @@ export async function POST(request: Request) {
     }
     const { database } = await load(storage);
     const current = database.sites[site];
+    // Stage B: resolve either a full-state payload ({ revision, state }) or a delta payload
+    // ({ revision, delta }) onto one validated state so the pipeline below is identical.
+    let parsed: { data: { revision: number; state: z.infer<typeof stateSchema>; governanceProof?: z.infer<typeof governanceProofSchema> } };
+    if (json && typeof json === "object" && !Array.isArray(json) && "delta" in json && !("state" in json)) {
+      const delta = deltaPayloadSchema.safeParse(json);
+      if (!delta.success) return reply(request, { error: "Invalid delta or revision.", details: delta.error.issues }, 400);
+      if (!current) return reply(request, { error: "This site has no stored state yet; upload one full state first." }, 409);
+      const mergedState = stateSchema.safeParse(applySyncDelta(current.state, delta.data.delta));
+      if (!mergedState.success) return reply(request, { error: "Invalid delta state.", details: mergedState.error.issues }, 400);
+      parsed = { data: { revision: delta.data.revision, state: mergedState.data, governanceProof: delta.data.governanceProof } };
+    } else {
+      const full = payloadSchema.safeParse(json);
+      if (!full.success) return reply(request, { error: "Invalid state or revision.", details: full.error.issues }, 400);
+      parsed = { data: { revision: full.data.revision, state: full.data.state, governanceProof: full.data.governanceProof } };
+    }
+    if (parsed.data.state.featurePermissionOverrides && hasInvalidLockedOverrides(parsed.data.state.featurePermissionOverrides))
+      return reply(request, { error: "Admin-only feature permissions are locked." }, 403);
+    parsed.data.state = sanitizeStateForSite(parsed.data.state, site);
+    const invalidField = validateSite(parsed.data.state, site);
+    if (invalidField) return reply(request, { error: `State validation failed: ${invalidField}` }, 400);
     if (parsed.data.revision !== (current?.revision ?? 0)) {
       return reply(request, { error: "State has changed; reload and resolve the conflict.", revision: current?.revision ?? 0 }, 409);
     }
@@ -552,6 +577,8 @@ export async function POST(request: Request) {
     }
     const response = reply(request, next);
     response.headers.set("X-CAFM-Storage", storage.kind);
+    // Stage B observability: request payload size on the wire vs the full state size (X-CAFM-State-Bytes on GET).
+    response.headers.set("X-CAFM-Upload-Bytes", String(Buffer.byteLength(text)));
     return response;
   } catch (error) {
     console.error("Could not persist CAFM state", error);

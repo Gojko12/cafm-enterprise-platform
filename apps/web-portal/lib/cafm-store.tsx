@@ -6,7 +6,7 @@ import { logChecklistCorrections, LEGACY_SITE_ALIAS } from "@cafm/shared-schema"
 import type { SiteId } from "@cafm/shared-schema";
 import { ensureFjSurveys } from "./fj-satisfaction";
 import type { DemoData } from "./cafm-data";
-import { seedAccessProfiles, resolveEffectivePermissions, permissionsForPreset } from "./access-profiles";
+import { seedAccessProfiles } from "./access-profiles";
 import { ahuTemplate } from "./equipment-inspection";
 import { reconcileAssurance } from "./assurance-workflow";
 import { migratePmState } from "./pm-orders";
@@ -14,8 +14,10 @@ import { mergeRemoteState, mergeUserEdits, stampChangedWorkRequests } from "./st
 import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 import type { GovernanceProof } from "./wr-governance-types";
 import { stateRequest, StateRequestError } from "./cafm-state-request";
+import { buildSyncDelta } from "./sync-delta";
 import { resolveGovernanceActor } from "./governance-actor";
 export { stateRequest } from "./cafm-state-request";
+export { useActiveUserPermissions } from "./active-user-permissions";
 export { getEffectiveCraftpersonShift } from "./craftperson-shifts";
 export type { DemoData, ExtractedDesk, TradeRoleMapping, SiteRoleMapping } from "./cafm-data";
 
@@ -346,7 +348,12 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           }
           outgoing = scopeData(migrateWorkRequestIdsTo10Digits(outgoing), site);
           serialized = JSON.stringify(outgoing);
-          const result = await stateRequest(site, pendingActor.current ?? personRef.current, "POST", { revision: revision.current, state: outgoing }, pendingActor.current ?? actorIdRef.current);
+          // Stage B: push only what changed since the acknowledged server state; fall back to a
+          // full-state upload before the first successful acknowledgment.
+          const deltaBase: unknown = acknowledged.current ? JSON.parse(acknowledged.current) : null;
+          const result = await stateRequest(site, pendingActor.current ?? personRef.current, "POST",
+            deltaBase ? { revision: revision.current, delta: buildSyncDelta(deltaBase, outgoing) } : { revision: revision.current, state: outgoing },
+            pendingActor.current ?? actorIdRef.current);
           revision.current = result.revision;
           if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) {
             throw new Error("Server returned an invalid saved state.");
@@ -462,7 +469,14 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       setData(next);
     }
     try {
-      const result = await stateRequest(site, personRef.current, "POST", { revision: revision.current, state: next, ...(options?.forceReset ? { forceReset: true } : {}), ...(options?.governanceProof ? { governanceProof: options.governanceProof } : {}) }, actorIdRef.current);
+      // Stage B: explicit commits (imports, QA actions) also push deltas whenever a server state has
+      // been acknowledged and the commit is not a forceReset; a forceReset keeps sending the full state.
+      const commitBase: unknown = !options?.forceReset && acknowledged.current ? JSON.parse(acknowledged.current) : null;
+      const result = await stateRequest(site, personRef.current, "POST",
+        commitBase
+          ? { revision: revision.current, delta: buildSyncDelta(commitBase, next), ...(options?.governanceProof ? { governanceProof: options.governanceProof } : {}) }
+          : { revision: revision.current, state: next, ...(options?.forceReset ? { forceReset: true } : {}), ...(options?.governanceProof ? { governanceProof: options.governanceProof } : {}) },
+        actorIdRef.current);
       committed = true;
       revision.current = result.revision;
       if (!result.state || typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Server returned an invalid saved state.");
@@ -566,32 +580,4 @@ export function useCafmStore() {
   const store = useContext(StoreContext);
   if (!store) throw new Error("useCafmStore must be used within CafmStoreProvider");
   return store;
-}
-
-export function useActiveUserPermissions() {
-  const { data } = useCafmStore();
-  const { activeSiteId, activePerson } = useSiteContext();
-  const siteProfiles = data.userAccessProfiles.filter((item) => item.siteId === activeSiteId);
-  const person = activePerson.trim().toLowerCase();
-  // Resolve by personName, fullName, username — then by unambiguous first-name prefix
-  // so "Mark" -> "Mark Meyer", "Thomas" -> "Thomas Wagner", "Claudia" -> "Claudia Fischer".
-  const firstNameMatches = siteProfiles.filter((item) =>
-    item.personName.trim().split(/\s+/)[0].toLowerCase() === person || item.fullName.trim().split(/\s+/)[0].toLowerCase() === person);
-  const profile = siteProfiles.find((item) => item.personName.trim().toLowerCase() === person ||
-      item.fullName.trim().toLowerCase() === person || item.username?.trim().toLowerCase() === person) ??
-    (firstNameMatches.length === 1 ? firstNameMatches[0] : undefined) ??
-    (activePerson === "Gregor" ? siteProfiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined) ??
-    (firstNameMatches.length > 1 ? firstNameMatches[0] : undefined);
-  const superAdmin = resolveGovernanceActor(data, activeSiteId, activePerson)?.roles.includes("SuperAdmin");
-  const siteAdmin = profile?.isSiteAdmin && !superAdmin && !profile.isSuperAdmin;
-  const siteAllowed = !siteAdmin || (!!profile.managedSiteIds?.includes(activeSiteId));
-  const governance = (key: keyof NonNullable<NonNullable<typeof profile>["siteAdminGovernance"]>) =>
-    !siteAdmin || (siteAllowed && profile.siteAdminGovernance?.[key] === true);
-  const resolved = superAdmin ? permissionsForPreset("FullAdmin") : profile && resolveEffectivePermissions(profile, data.roleDefinitions);
-  const permissions = resolved && {
-    ...resolved,
-    canManageShiftsAndLeaves: resolved.canManageShiftsAndLeaves && governance("canManageFreezesAndShifts"),
-    canManageLocationFreezes: resolved.canManageLocationFreezes && governance("canManageFreezesAndShifts"),
-  };
-  return { profile, permissions, governance };
 }
