@@ -47,6 +47,23 @@ function allowedReactivationFields(old: Wr, next: Wr): boolean {
     .every((key) => allowed.has(key) || isDeepStrictEqual(old[key], next[key]));
 }
 
+// V45: closing a PM at 50/55 -> 78 (sometimes with an explicit incomplete-checklist
+// override) and then to 100 within one sync window reaches the server collapsed as a
+// single 50/55 -> 100 jump. The two honest intermediate steps are proven by the WR's
+// own appended audit-log entries, in chronological order.
+function hasCollapsedPmClosure(old: Wr, next: Wr): boolean {
+  if (old.Percentage !== 50 && old.Percentage !== 55) return false;
+  const logs = array(next.Activity).map(object).filter((entry) => entry.kind === "log");
+  const fromBefore = `WR status changed from ${old.Percentage}% to 78%`;
+  let passed78 = false;
+  for (const entry of logs) {
+    if (typeof entry.text !== "string") continue;
+    if (entry.text.startsWith(fromBefore)) passed78 = true;
+    else if (passed78 && entry.text.startsWith("WR status changed from 78% to 100%")) return true;
+  }
+  return false;
+}
+
 export function validateGovernance(existing: State, incoming: State, site: string, actorId: string, proof?: GovernanceProof, globalActor?: GovernanceActor): string | null {
   const actor = globalActor ?? resolveGovernanceActor(existing, site, actorId);
   const overrides = incoming.featurePermissionOverrides ?? {};
@@ -84,7 +101,8 @@ export function validateGovernance(existing: State, incoming: State, site: strin
       const permission = next.Percentage === 100 ? "pmWorkRequests.complete" : "pmWorkRequests.cancel";
       if (!actorCanPmAction(actor, permission, existing.featurePermissionOverrides))
         return `Not permitted to ${next.Percentage === 100 ? "complete" : "cancel"} PM ${old.WR_ID}.`;
-      if (next.Percentage === 100 && (old.Percentage !== 78 || next.WorkRequestStatus !== "Closed"))
+      if (next.Percentage === 100 && (old.Percentage !== 78 || next.WorkRequestStatus !== "Closed") &&
+        !(next.WorkRequestStatus === "Closed" && hasCollapsedPmClosure(old, next)))
         return `PM ${old.WR_ID} must be technically completed before closure.`;
       if (next.Percentage === 27 && (next.WorkRequestStatus !== "Cancelled" || next.WorkRequestSubstatus !== "Cancelled" || !appended(old.Activity, next.Activity, (entry) =>
         entry.kind === "log" && entry.actorId === actorId && typeof entry.text === "string" && /Cancellation reason:\s*\S/i.test(entry.text)))

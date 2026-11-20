@@ -18,6 +18,7 @@ import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useQAActions } from "@/lib/use-qa-actions";
 import { isQACompleted, isQAEligibleType, qaMatches, qaStatus } from "@/lib/qa-audits";
+import { getChecklistProgress, getFollowUpFJsForPM, getUnfavourableStepCount } from "@/lib/wr-signals";
 import { addDays, calendarDate } from "@/lib/dispatch";
 import { DateInputDDMMYYYY } from "@/components/common/DateInputDDMMYYYY";
 
@@ -33,6 +34,7 @@ export default function TechnicalAuditsPage() {
   const [to, setTo] = useState("");
   const [types, setTypes] = useState<string[] | null>(null);
   const [trades, setTrades] = useState<string[] | null>(null);
+  const [findings, setFindings] = useState<string[] | null>(null);
   const [target, setTarget] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [id, setId] = useState("");
@@ -52,9 +54,20 @@ export default function TechnicalAuditsPage() {
   const today = calendarDate(new Date());
   const start = period === "week" ? addDays(today, -((new Date(`${today}T12:00:00`).getDay() + 6) % 7)) : period === "month" ? `${today.slice(0, 7)}-01` : period === "custom" ? from : "";
   const end = period === "custom" ? to : period === "all" ? "" : today;
+  // V45: inspector checklist findings filter (incomplete checklists, unfavourable answers, follow-up FJs).
+  const matchesChecklistFindings = (wr: BaseWorkRequest): boolean => {
+    if (findings === null || !findings.length) return true;
+    const progress = getChecklistProgress(wr, data);
+    if (findings.includes("incomplete") && progress.incomplete.length > 0) return true;
+    if (findings.includes("complete") && wr.WR_Type === "PM" && progress.total > 0 && progress.incomplete.length === 0) return true;
+    if (findings.includes("unfavourable") && getUnfavourableStepCount(wr, data) > 0) return true;
+    if (findings.includes("followup") && wr.WR_Type === "PM" && getFollowUpFJsForPM(wr.WR_ID, data.workRequests).length > 0) return true;
+    return false;
+  };
   const requests = data.workRequests.filter((wr) => wr.SiteId === activeSiteId && isQAEligibleType(wr) && !!profile &&
     (wr.WR_Type === "PM" || wr.WR_Type === "FJ") && !!permissions && permissions.auditWRTypes.includes(wr.WR_Type) &&
     permissions.auditTrades.some((trade) => trade === wr.TradeName || trade === wr.TradeId) &&
+    matchesChecklistFindings(wr) &&
     (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id)));
   const rework = data.workRequests.filter((wr) => wr.SiteId === activeSiteId && isQAEligibleType(wr) && !!profile &&
     (!profile.vpaBuildingIds.length || profile.vpaBuildingIds.includes(wr.bl_id)) &&
@@ -104,7 +117,7 @@ export default function TechnicalAuditsPage() {
     <section className="space-y-3 rounded border bg-white p-3"><div className="grid gap-2 md:grid-cols-4">{[["Total Completed WRs", completed.length], ["5% Target Needed", total.target], ["Chosen / Audited So Far", `${total.count} (${total.percent.toFixed(1)}%)`], ["Still Needed to Choose", total.gap]].map(([label, value]) => <div key={label} className="rounded bg-slate-100 p-2"><strong>{label}</strong><p className="text-xl">{value}</p></div>)}</div>
       <div className="grid gap-2 md:grid-cols-3"><div>Overall PM + FJ: {total.count} / {completed.length} ({total.percent.toFixed(1)}%) · target {total.target}<progress className="block w-full" max={Math.max(1, completed.length)} value={total.count} /></div>{(["PM", "FJ"] as const).map((type) => { const group = completed.filter((wr) => wr.WR_Type === type); const q = quota(group); return <div key={type}>{type} Audits (5% target): {q.count} / {group.length} ({q.percent.toFixed(1)}%) · target {q.target}<progress className="block w-full" max={Math.max(1, group.length)} value={q.count} /></div>; })}</div>
       <div className="overflow-auto"><table className="w-full text-left"><thead><tr>{["Trade", "Completed WRs", "5% Target", "Chosen / Audited", "Still Needed"].map((item) => <th key={item}>{item}</th>)}</tr></thead><tbody>{CLASSICAL_TRADES.map((trade) => { const group = completed.filter((wr) => wr.TradeName === trade); const q = quota(group); return <tr key={trade} className="border-t"><td>{trade}</td><td>{group.length}</td><td>{q.target}</td><td>{q.count} / {group.length} ({q.percent.toFixed(1)}%)</td><td>{q.gap}</td></tr>; })}</tbody></table></div><p className="text-xs">Period uses completion date when recorded, otherwise last update. Reopened QA failures remain in their original completion cohort.</p>
-      <div className="flex flex-wrap gap-2"><button disabled={busy || !permissions?.canAuditChooseWRs} className="rounded bg-blue-700 p-2 text-white disabled:opacity-50" onClick={() => void run(() => actions.autoSelect5PercentQAAudits({ dateFrom: start || undefined, dateTo: end || undefined, wrTypes: types === null ? undefined : types.filter((type): type is "PM" | "FJ" => type === "PM" || type === "FJ"), trades: trades ?? undefined, targetCount: target === "" ? undefined : Number(target) }), "Random selection saved.")}>🎲 Auto-Pick Remaining Missing WRs ({Number.isFinite(pickGap) ? pickGap : "—"} needed)</button><MultiSelectFilter label="WR Types" value={types} onChange={setTypes} options={["PM", "FJ"].map((item) => ({ value: item, label: item }))} /><MultiSelectFilter label="Trades" value={trades} onChange={setTrades} options={CLASSICAL_TRADES.map((item) => ({ value: item, label: item }))} /><label>Target count <input className="w-24 border" type="number" min="0" step="1" value={target} placeholder="5%" onChange={(e) => setTarget(e.target.value)} /></label></div>
+      <div className="flex flex-wrap gap-2"><button disabled={busy || !permissions?.canAuditChooseWRs} className="rounded bg-blue-700 p-2 text-white disabled:opacity-50" onClick={() => void run(() => actions.autoSelect5PercentQAAudits({ dateFrom: start || undefined, dateTo: end || undefined, wrTypes: types === null ? undefined : types.filter((type): type is "PM" | "FJ" => type === "PM" || type === "FJ"), trades: trades ?? undefined, targetCount: target === "" ? undefined : Number(target) }), "Random selection saved.")}>🎲 Auto-Pick Remaining Missing WRs ({Number.isFinite(pickGap) ? pickGap : "—"} needed)</button><MultiSelectFilter label="WR Types" value={types} onChange={setTypes} options={["PM", "FJ"].map((item) => ({ value: item, label: item }))} /><MultiSelectFilter label="Trades" value={trades} onChange={setTrades} options={CLASSICAL_TRADES.map((item) => ({ value: item, label: item }))} /><MultiSelectFilter label="Checklist Findings" value={findings} onChange={setFindings} options={[{ value: "incomplete", label: "Checklist incomplete" }, { value: "complete", label: "Checklist fully filled" }, { value: "unfavourable", label: "Unfavourable answers" }, { value: "followup", label: "Follow-up FJ present" }]} /><label>Target count <input className="w-24 border" type="number" min="0" step="1" value={target} placeholder="5%" onChange={(e) => setTarget(e.target.value)} /></label></div>
     </section></>}
     <nav className="flex flex-wrap gap-2">{([["pool", "1. Completed WRs Pool (Select)"], ["queue", `2. Active Inspection Queue (${queue.length})`], ["report", `3. Commit Findings & Team Leader Report (${staged.length} Staged)`], ["rework", `4. Re-Opened WRs & TL Challenges (🔔 ${unread} Unread)`], ["analytics", "5. QA BI Analytics & Committed Reports"], ["reasons", "6. Predefined Failure Reasons"]] as const).filter(([key]) => visibleTabs.includes(key)).map(([key, title]) => <button key={key} className={`rounded border p-2 ${tab === key ? "border-blue-700 bg-blue-600 font-semibold text-white shadow-sm" : "border-slate-300 bg-white text-slate-700"}`} aria-pressed={tab === key} onClick={() => { setTab(key); setSelected([]); }}>{title}</button>)}</nav>
     {(tab === "queue" || tab === "qr") && <button className="underline" onClick={() => setTab(tab === "queue" ? "qr" : "queue")}>{tab === "queue" ? "Equipment QR Spot-Check" : "Back to inspection queue"}</button>}
