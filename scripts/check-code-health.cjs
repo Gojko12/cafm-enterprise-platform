@@ -45,6 +45,9 @@ const LEGACY_BASELINES = {
   // V48 (Section 98): the consolidated sync API route (schema validation + delta pipeline +
   // Stage A/B/C storage layers); recorded at 605 lines, growth limit 665.
   "apps/web-portal/app/api/cafm-state/route.ts": 605,
+  // V54 (Section 104): the store provider (hydration + Stage B/C sync loop + the V54
+  // stuck-change guard with its discard action); recorded at 625 lines, growth limit 685.
+  "apps/web-portal/lib/cafm-store.tsx": 625,
 };
 
 // Single leading underscore marks a scratch script; Python dunder files (`__init__.py`) are legitimate.

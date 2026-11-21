@@ -1,6 +1,8 @@
 // Bump this on every platform release, in the same rhythm as apps/mobile-app/src/version.ts.
-// V53 = Location renames: building codes, floor level names and room codes become editable; a rename cascades through every
-// referencing record (floors, rooms, desks, equipment, work requests, PM schedules, suppressed occurrences, freezes, mission
-// events, audit sheets, BIM links) in one atomic save. lib/location-rename.ts + governance exception isPmLocationKeyChange
-// for terminal PMs. MASTER_SPEC Section 103.
-export const PLATFORM_VERSION = "V53";
+// V54 = Stuck-change guard: a push that can never succeed on retry (governance / permission /
+// schema rejection or an unresolvable merge conflict) pauses saving and shows a banner with a
+// discard action instead of retrying forever and silently blocking every later edit from that
+// browser. lib/stuck-change.ts classifies failures, components/common/StuckChangeAlert.tsx is
+// the pause banner, cafm-store.tsx gates the push loop behind the discard decision.
+// MASTER_SPEC Section 104.
+export const PLATFORM_VERSION = "V54";

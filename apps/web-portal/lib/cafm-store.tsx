@@ -15,6 +15,8 @@ import { migrateWorkRequestIdsTo10Digits } from "./wr-id-migration";
 import type { GovernanceProof } from "./wr-governance-types";
 import { stateRequest, StateRequestError } from "./cafm-state-request";
 import { buildSyncDelta } from "./sync-delta";
+import { permanentPushFailure } from "./stuck-change";
+import { StuckChangeAlert } from "@/components/common/StuckChangeAlert";
 import { resolveGovernanceActor } from "./governance-actor";
 export { stateRequest } from "./cafm-state-request";
 export { useActiveUserPermissions } from "./active-user-permissions";
@@ -92,6 +94,8 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const baseKey = `${BASE_KEY}:${site}`;
   const [ready, setReady] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // V54 (Section 104): a permanently rejected push pauses saving until the user discards.
+  const [stuckChange, setStuckChange] = useState<string | null>(null);
   const [legacyBackup, setLegacyBackup] = useState(false);
   const [cacheWarning, setCacheWarning] = useState(false);
   const [alertsMuted, setAlertsMutedState] = useState(false);
@@ -114,6 +118,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   const hasUnsavedUserEditsRef = useRef(false);
   const pendingActor = useRef<string | null>(null);
   const editVersion = useRef(0);
+  const stuckRef = useRef(false);
   const pushTimer = useRef<number | null>(null);
   const schedulePush = useRef<(delay?: number) => void>(() => {});
   current.current = data;
@@ -337,7 +342,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
         if (snapshot !== current.current) { current.current = snapshot; if (active) setData(snapshot); }
         let outgoing = snapshot;
         let serialized = JSON.stringify(outgoing);
-        if (hasUnsavedUserEditsRef.current && serialized !== acknowledged.current) {
+        // V54 (Section 104): while an unsavable change is stuck, pushes and the 2.5 s
+        // full-state polls pause; only the discard action resumes normal syncing.
+        if (hasUnsavedUserEditsRef.current && !stuckRef.current && serialized !== acknowledged.current) {
           // Merge newer server records before pushing so stale local copies never overwrite them.
           const latest = await stateRequest(site, personRef.current, "GET", undefined, undefined, knownRevision.current ? revision.current : undefined);
           if (sentVersion !== editVersion.current) { schedulePush.current(); return; }
@@ -398,8 +405,9 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
             dirtyWrIdsRef.current.clear();
             localStorage.removeItem(pendingKey);
           }
-          const result = await stateRequest(site, personRef.current, "GET", undefined, undefined, knownRevision.current ? revision.current : undefined);
-          if (!hasUnsavedUserEditsRef.current && result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
+          const result = stuckRef.current ? null
+            : await stateRequest(site, personRef.current, "GET", undefined, undefined, knownRevision.current ? revision.current : undefined);
+          if (result && !hasUnsavedUserEditsRef.current && result.revision !== revision.current && result.state && JSON.stringify(current.current) === serialized) {
             if (typeof result.state !== "object" || !("workRequests" in result.state) || !Array.isArray(result.state.workRequests)) throw new Error("Invalid server state.");
             const next = normalizeServerState(result.state as DemoData, site);
             revision.current = result.revision;
@@ -418,8 +426,17 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
           return;
         }
         const context = error instanceof StateRequestError ? ` (HTTP ${error.status}, site ${site})` : "";
-        console.error("CAFM state sync failed", { site, person: personRef.current, actorId: actorIdRef.current, revision: revision.current, operation: hasUnsavedUserEditsRef.current ? "push" : "poll", pendingWorkRequests: [...dirtyWrIdsRef.current], pendingFields: [...dirtyFieldsRef.current], error, details: error instanceof StateRequestError ? error.details : undefined });
         const message = error instanceof Error ? error.message : "State sync failed.";
+        console.error("CAFM state sync failed", { site, person: personRef.current, actorId: actorIdRef.current, revision: revision.current, operation: hasUnsavedUserEditsRef.current ? "push" : "poll", pendingWorkRequests: [...dirtyWrIdsRef.current], pendingFields: [...dirtyFieldsRef.current], error, details: error instanceof StateRequestError ? error.details : undefined });
+        // V54 (Section 104): a failure that can never succeed on retry (governance,
+        // schema or permission rejection, or a deterministic merge conflict) stops the
+        // push loop and shows the pause banner with the discard action instead of
+        // retrying every poll and silently blocking all later edits.
+        if (hasUnsavedUserEditsRef.current && !stuckRef.current && permanentPushFailure(error)) {
+          stuckRef.current = true;
+          if (active) { setSyncError(null); setStuckChange(`${message}${context}`); }
+          return;
+        }
         if (active) setSyncError(`${message}${context}`);
       } finally {
         busy.current = false;
@@ -448,6 +465,27 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       document.removeEventListener("visibilitychange", run);
     };
   }, [ready, site, pendingKey, baseKey]);
+
+  // V54 (Section 104): revert this device to the last saved server state after an
+  // unsavable change paused saving. revision 0 + unknown revision forces the next
+  // GET to return the full server state, which replaces the local (stuck) world
+  // record by record instead of merging the abandoned records back in.
+  const discardStuckChanges = () => {
+    stuckRef.current = false;
+    dirtyWrIdsRef.current.clear();
+    dirtyFieldsRef.current.clear();
+    hasUnsavedUserEditsRef.current = false;
+    offlineEdits.current = false;
+    pendingActor.current = null;
+    editVersion.current++;
+    try { localStorage.removeItem(pendingKey); } catch { /* storage unavailable: memory state already cleared */ }
+    setStuckChange(null);
+    setSyncError(null);
+    revision.current = 0;
+    knownRevision.current = false;
+    connected.current = false;
+    schedulePush.current(0);
+  };
 
   const commitSnapshot = async (expected: DemoData, next: DemoData, options?: { optimistic?: boolean; forceReset?: boolean; governanceProof?: GovernanceProof }) => {
     if (!connected.current || blocked.current) throw new Error("Sync is unavailable or has a conflict; resolve it before importing.");
@@ -570,6 +608,7 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
   };
   return <StoreContext.Provider value={{ data, setData: setUserData, reset, commitSnapshot, alertsMuted, setAlertsMuted }}>
     {!alertsMuted && <>
+      {stuckChange && <StuckChangeAlert message={stuckChange} onDiscard={discardStuckChanges} />}
       {!!data.pmMigrationNotes?.length && <details className="bg-amber-50 p-2 text-sm text-amber-900"><summary>PM assignment migration notes ({data.pmMigrationNotes.length})</summary>{data.pmMigrationNotes.map((note) => <p key={note}>{note}</p>)}</details>}
       {syncError && <div role="alert" className="bg-red-100 p-2 text-sm text-red-900"><span>State sync: {syncError}</span> <button type="button" onClick={() => setAlertsMuted(true)} className="ml-2 underline font-semibold">Hide alerts</button></div>}
       {cacheWarning && <div role="alert" className="bg-amber-100 p-2 text-sm text-amber-900"><span>Browser storage is full. Edits remain in memory and will sync to the server, but may be lost if the page closes before synchronization.</span> <button type="button" onClick={() => setAlertsMuted(true)} className="ml-2 underline font-semibold">Hide alerts</button></div>}
