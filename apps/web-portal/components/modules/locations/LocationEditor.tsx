@@ -1,10 +1,11 @@
 "use client";
 
 // V52 Locations Workbench editor: create and edit buildings, floors and rooms.
-// Identity fields (bl_id, LevelName, RoomCode) are locked on edit because equipment,
-// desks, PM schedules and work requests reference them; creation validates the same
-// uniqueness rules the server enforces (bl_id per site, LevelName per building,
-// RoomCode per floor).
+// V53 (MASTER_SPEC Section 103): identity fields (bl_id, LevelName, RoomCode) are
+// editable; renaming is validated against the same one-level-uniqueness rules as
+// creation and cascades through every referencing record in one atomic save
+// (lib/location-rename.ts). Parent selects stay locked on edit: moving a floor or
+// room to another parent is not a rename and would leave stale references behind.
 import React, { useState } from "react";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import {
@@ -12,6 +13,7 @@ import {
   type LocationFormValues,
   type LocationKind,
 } from "@/lib/locations";
+import { formRenameRequest, renameLabel } from "@/lib/location-rename";
 
 const label = "block text-xs font-semibold text-slate-600 mb-1";
 const input = "w-full min-w-0 rounded-lg border p-2 text-sm";
@@ -65,7 +67,7 @@ export function formValuesFor(target: LocationEditorTarget): LocationFormValues 
 }
 
 export function LocationEditor({
-  target, buildings, floors, validate, onClose, onApply,
+  target, buildings, floors, validate, onClose, onApply, impactFor,
 }: {
   target: LocationEditorTarget;
   buildings: Building[];
@@ -73,6 +75,7 @@ export function LocationEditor({
   validate: (values: LocationFormValues, target: LocationEditorTarget) => Partial<Record<keyof LocationFormValues, string>>;
   onClose: () => void;
   onApply: (values: LocationFormValues, target: LocationEditorTarget) => void;
+  impactFor?: (values: LocationFormValues, target: LocationEditorTarget) => string[] | null;
 }) {
   const [values, setValues] = useState<LocationFormValues>(() => formValuesFor(target));
   const errors = validate(values, target);
@@ -83,7 +86,10 @@ export function LocationEditor({
     ? (target.kind === "building" ? "Add Building" : target.kind === "floor" ? "Add Floor" : "Add Room")
     : (target.kind === "building" ? "Edit Building" : target.kind === "floor" ? "Edit Floor" : "Edit Room");
 
-  const lockedNote = "Identity fields are locked: equipment, desks, PM schedules and work requests reference them. Create a new location plus deactivation if the key itself must change.";
+  const rename = formRenameRequest(target, values);
+  const renameNote = "This is the location's identity. Renaming it updates every record that references it in one atomic save.";
+  const parentLockNote = "Locked: moving to another parent is not a rename (references would be ambiguous); create the location under the new parent instead.";
+  const impactLines = rename ? impactFor?.(values, target) ?? null : null;
 
   return <div role="dialog" aria-modal="true" aria-label={title}
     className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-2">
@@ -97,10 +103,10 @@ export function LocationEditor({
         {target.kind === "building" && <>
           <div>
             <label className={label}>Building code (bl_id)</label>
-            <input className={input} value={values.blId} disabled={target.mode === "edit"}
+            <input className={errors.blId ? inputError : input} value={values.blId}
               onChange={(event) => set("blId", event.target.value)} aria-invalid={!!errors.blId} />
             {errors.blId && <p className={fieldError}>{errors.blId}</p>}
-            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{lockedNote}</p>}
+            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{renameNote}</p>}
           </div>
           <div>
             <label className={label}>Name *</label>
@@ -142,13 +148,14 @@ export function LocationEditor({
               {buildings.map((building) => <option key={building.bl_id} value={building.bl_id}>{building.bl_id} · {building.Name}</option>)}
             </select>
             {errors.blId && <p className={fieldError}>{errors.blId}</p>}
+            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{parentLockNote}</p>}
           </div>
           <div>
             <label className={label}>Level name *</label>
             <input className={errors.levelName ? inputError : input} value={values.levelName} placeholder="e.g. Level 0, Parking, L2"
-              disabled={target.mode === "edit"} onChange={(event) => set("levelName", event.target.value)} aria-invalid={!!errors.levelName} />
+              onChange={(event) => set("levelName", event.target.value)} aria-invalid={!!errors.levelName} />
             {errors.levelName && <p className={fieldError}>{errors.levelName}</p>}
-            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{lockedNote}</p>}
+            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{renameNote}</p>}
           </div>
           <div>
             <label className={label}>Floor number</label>
@@ -186,6 +193,7 @@ export function LocationEditor({
               {buildings.map((building) => <option key={building.bl_id} value={building.bl_id}>{building.bl_id} · {building.Name}</option>)}
             </select>
             {errors.blId && <p className={fieldError}>{errors.blId}</p>}
+            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{parentLockNote}</p>}
           </div>
           <div>
             <label className={label}>Floor *</label>
@@ -196,13 +204,14 @@ export function LocationEditor({
                 <option key={floor.LevelName} value={floor.LevelName}>{floor.LevelName}{floor.FloorNumber !== undefined ? ` (${floor.FloorNumber})` : ""}</option>)}
             </select>
             {errors.levelName && <p className={fieldError}>{errors.levelName}</p>}
+            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{parentLockNote}</p>}
           </div>
           <div>
             <label className={label}>Room code *</label>
             <input className={errors.roomCode ? inputError : input} value={values.roomCode}
-              disabled={target.mode === "edit"} onChange={(event) => set("roomCode", event.target.value)} aria-invalid={!!errors.roomCode} />
+              onChange={(event) => set("roomCode", event.target.value)} aria-invalid={!!errors.roomCode} />
             {errors.roomCode && <p className={fieldError}>{errors.roomCode}</p>}
-            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{lockedNote}</p>}
+            {target.mode === "edit" && <p className="mt-1 text-[11px] text-slate-400">{renameNote}</p>}
           </div>
           <div>
             <label className={label}>Name *</label>
@@ -233,6 +242,19 @@ export function LocationEditor({
             <input className={input} value={values.costCenter} onChange={(event) => set("costCenter", event.target.value)} />
           </div>
         </>}
+
+        {target.mode === "edit" && rename && (
+          <div className="sm:col-span-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+            <p className="font-bold">
+              Rename {renameLabel(rename).from} → {renameLabel(rename).to}
+            </p>
+            <p>
+              {impactLines && impactLines.length > 0
+                ? `All references update automatically in one atomic save: ${impactLines.join(", ")}.`
+                : "No other records reference this location, so nothing else changes."}
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-4 sm:col-span-2">
           <label className="flex items-center gap-2 text-sm">

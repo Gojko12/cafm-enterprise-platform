@@ -4,7 +4,10 @@
 // (Buildings / Floors / Rooms) with a 50/50 split screen; selecting a row opens its
 // details panel on the right. Create / edit / toggle / delete run through the standard
 // cafm-store setData pipeline, so the Stage B delta sync pushes only the changed
-// collection. Identity fields stay immutable after creation (server references).
+// collection. V53 (Section 103): identity fields are editable; a rename rewrites
+// every referencing record (floors, rooms, desks, equipment, work requests, PM
+// schedules, freezes, inspections, BIM links) in the same setData via
+// lib/location-rename.ts, so the server's validateSite always sees a consistent site.
 import React, { useMemo, useState } from "react";
 import { Building2, Layers, DoorOpen, Plus } from "lucide-react";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
@@ -15,6 +18,7 @@ import { OverviewTable, type TableColumn } from "@/components/common/TableColumn
 import { LocationDetailsPanel } from "./LocationDetails";
 import { LocationEditor, type LocationEditorTarget } from "./LocationEditor";
 import { numberOrUndefined, validateLocationForm, type LocationFormValues, type LocationKind } from "@/lib/locations";
+import { applyLocationRename, formRenameRequest, locationRenameImpact, renameLabel, type LocationRenameRequest } from "@/lib/location-rename";
 
 type Tab = LocationKind;
 interface Selection {
@@ -101,11 +105,29 @@ export function LocationsWorkbench() {
   ];
   const addLabel = tab === "building" ? "Add Building" : tab === "floor" ? "Add Floor" : "Add Room";
 
+  // On edit, the record being edited is excluded from the one-level-uniqueness checks.
+  const editIgnore = (target: LocationEditorTarget) =>
+    target.mode === "edit" && target.kind === "building" && target.building ? { blId: target.building.bl_id } :
+    target.mode === "edit" && target.kind === "floor" && target.floor ? { blId: target.floor.bl_id, levelName: target.floor.LevelName } :
+    target.mode === "edit" && target.kind === "room" && target.room
+      ? { blId: target.room.bl_id, levelName: target.room.LevelName, roomCode: target.room.RoomCode }
+      : undefined;
+
   const applyEditor = (values: LocationFormValues, target: LocationEditorTarget) => {
-    const errors = validateLocationForm(target.kind, target.mode, values, data, activeSiteId);
+    const errors = validateLocationForm(target.kind, target.mode, values, data, activeSiteId, editIgnore(target));
     if (Object.keys(errors).length) return;
+    const rename = formRenameRequest(target, values);
+    if (rename) {
+      const impacted = locationRenameImpact(data, rename);
+      const detail = impacted.length > 0
+        ? impacted.map((item) => `${item.count} ${item.label}`).join(", ")
+        : "no other records";
+      const labels = renameLabel(rename);
+      if (!window.confirm(`Rename "${labels.from}" to "${labels.to}"? This updates ${detail} in one atomic save.`)) return;
+    }
     const now = new Date().toISOString();
     setData((current) => {
+      let next = current;
       if (target.kind === "building") {
         const gps = values.latitude.trim() !== "" && values.longitude.trim() !== "" ? {
           latitude: Number(values.latitude.trim()),
@@ -117,15 +139,15 @@ export function LocationsWorkbench() {
             bl_id: values.blId.trim(), SiteId: activeSiteId, Name: values.name.trim(), Address: values.address.trim(),
             ...(gps ? { GPSCoordinates: gps } : {}), IsActive: values.isActive, CreatedAt: now, UpdatedAt: now,
           };
-          return { ...current, buildings: [...current.buildings, building] };
+          next = { ...next, buildings: [...next.buildings, building] };
+        } else {
+          next = { ...next, buildings: next.buildings.map((building) =>
+            building.SiteId === activeSiteId && target.building && building.bl_id === target.building.bl_id
+              ? { ...building, bl_id: values.blId.trim(), Name: values.name.trim(), Address: values.address.trim(),
+                  ...(gps ? { GPSCoordinates: gps } : { GPSCoordinates: undefined }), IsActive: values.isActive, UpdatedAt: now }
+              : building) };
         }
-        return { ...current, buildings: current.buildings.map((building) =>
-          building.SiteId === activeSiteId && building.bl_id === target.building?.bl_id
-            ? { ...building, Name: values.name.trim(), Address: values.address.trim(),
-                ...(gps ? { GPSCoordinates: gps } : { GPSCoordinates: undefined }), IsActive: values.isActive, UpdatedAt: now }
-            : building) };
-      }
-      if (target.kind === "floor") {
+      } else if (target.kind === "floor") {
         const floorBody = {
           FloorNumber: Number(values.floorNumber.trim()),
           ...(values.grossArea.trim() !== "" ? { GrossAreaM2: numberOrUndefined(values.grossArea) } : { GrossAreaM2: undefined }),
@@ -135,31 +157,52 @@ export function LocationsWorkbench() {
         };
         if (target.mode === "create") {
           const floor: Floor = { bl_id: values.blId, SiteId: activeSiteId, LevelName: values.levelName.trim(), ...floorBody };
-          return { ...current, floors: [...current.floors, floor] };
+          next = { ...next, floors: [...next.floors, floor] };
+        } else {
+          next = { ...next, floors: next.floors.map((floor) =>
+            floor.SiteId === activeSiteId && target.floor && floor.bl_id === target.floor.bl_id && floor.LevelName === target.floor.LevelName
+              ? { ...floor, LevelName: values.levelName.trim(), ...floorBody } : floor) };
         }
-        return { ...current, floors: current.floors.map((floor) =>
-          floor.SiteId === activeSiteId && floor.bl_id === target.floor?.bl_id && floor.LevelName === target.floor?.LevelName
-            ? { ...floor, ...floorBody } : floor) };
+      } else {
+        const roomBody = {
+          Name: values.name.trim(),
+          ...(values.roomCategory.trim() !== "" ? { RoomCategory: values.roomCategory.trim() } : { RoomCategory: undefined }),
+          ...(values.usage.trim() !== "" ? { Usage: values.usage.trim() } : { Usage: undefined }),
+          ...(values.department.trim() !== "" ? { Department: values.department.trim() } : { Department: undefined }),
+          ...(values.costCenter.trim() !== "" ? { CostCenter: values.costCenter.trim() } : { CostCenter: undefined }),
+          ...(values.netArea.trim() !== "" ? { NetAreaM2: numberOrUndefined(values.netArea) } : { NetAreaM2: undefined }),
+          IsDeskReservable: values.deskReservable,
+          IsActive: values.isActive,
+        };
+        if (target.mode === "create") {
+          const room: Room = { bl_id: values.blId, SiteId: activeSiteId, LevelName: values.levelName, RoomCode: values.roomCode.trim(), ...roomBody };
+          next = { ...next, rooms: [...next.rooms, room] };
+        } else {
+          next = { ...next, rooms: next.rooms.map((room) =>
+            room.SiteId === activeSiteId && target.room && room.bl_id === target.room.bl_id && room.LevelName === target.room.LevelName && room.RoomCode === target.room.RoomCode
+              ? { ...room, RoomCode: values.roomCode.trim(), ...roomBody } : room) };
+        }
       }
-      const roomBody = {
-        Name: values.name.trim(),
-        ...(values.roomCategory.trim() !== "" ? { RoomCategory: values.roomCategory.trim() } : { RoomCategory: undefined }),
-        ...(values.usage.trim() !== "" ? { Usage: values.usage.trim() } : { Usage: undefined }),
-        ...(values.department.trim() !== "" ? { Department: values.department.trim() } : { Department: undefined }),
-        ...(values.costCenter.trim() !== "" ? { CostCenter: values.costCenter.trim() } : { CostCenter: undefined }),
-        ...(values.netArea.trim() !== "" ? { NetAreaM2: numberOrUndefined(values.netArea) } : { NetAreaM2: undefined }),
-        IsDeskReservable: values.deskReservable,
-        IsActive: values.isActive,
-      };
-      if (target.mode === "create") {
-        const room: Room = { bl_id: values.blId, SiteId: activeSiteId, LevelName: values.levelName, RoomCode: values.roomCode.trim(), ...roomBody };
-        return { ...current, rooms: [...current.rooms, room] };
-      }
-      return { ...current, rooms: current.rooms.map((room) =>
-        room.SiteId === activeSiteId && room.bl_id === target.room?.bl_id && room.LevelName === target.room?.LevelName && room.RoomCode === target.room?.RoomCode
-          ? { ...room, ...roomBody } : room) };
+      if (rename) next = applyLocationRename(next, rename);
+      return next;
     });
+    if (rename) reselectAfterRename(rename, target);
     setEditing(null);
+  };
+
+  // Keeps the selection (and the app-wide selected building/floor/room) pointing at
+  // the renamed identity instead of a key that no longer exists.
+  const reselectAfterRename = (rename: LocationRenameRequest, target: LocationEditorTarget) => {
+    if (rename.kind === "building" && target.building) {
+      select("building", { ...target.building, bl_id: rename.to.blId }, null, null);
+    } else if (rename.kind === "floor" && target.floor) {
+      const parent = siteBuildings.find((item) => item.bl_id === target.floor?.bl_id) ?? null;
+      select("floor", parent, { ...target.floor, LevelName: rename.to.levelName }, null);
+    } else if (rename.kind === "room" && target.room) {
+      const parentBuilding = siteBuildings.find((item) => item.bl_id === target.room?.bl_id) ?? null;
+      const parentFloor = siteFloors.find((item) => item.bl_id === target.room?.bl_id && item.LevelName === target.room?.LevelName) ?? null;
+      select("room", parentBuilding, parentFloor, { ...target.room, RoomCode: rename.to.roomCode });
+    }
   };
 
   const toggleActive = (kind: Tab) => {
@@ -239,7 +282,11 @@ export function LocationsWorkbench() {
     </div>
 
     {editing && <LocationEditor target={editing} buildings={siteBuildings} floors={siteFloors}
-      validate={(values, target) => validateLocationForm(target.kind, target.mode, values, data, activeSiteId)}
+      validate={(values, target) => validateLocationForm(target.kind, target.mode, values, data, activeSiteId, editIgnore(target))}
+      impactFor={(values, target) => {
+        const rename = formRenameRequest(target, values);
+        return rename ? locationRenameImpact(data, rename).map((item) => `${item.count} ${item.label}`) : null;
+      }}
       onClose={() => setEditing(null)} onApply={applyEditor} />}
   </div>;
 }

@@ -89,6 +89,18 @@ const isPmQaFailedReopen = (old: Wr, next: Wr): boolean =>
     entry.text.startsWith("QA Inspection FAILED by") && entry.text.endsWith(" WR automatically Re-opened and set to 50%.")) &&
   keysEqualOutside(old, next, new Set([...QA_METADATA_KEYS, "Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "ClosedAt"]));
 
+// V53: renaming a building / floor / room rewrites the location keys on every work
+// request in one atomic save (lib/location-rename.ts). Terminal PMs are otherwise
+// frozen (deep-equal or a full administrator reactivation proof); a pure
+// location-key rewrite is a structural edit, not a stage change, so terminal
+// closed (100) and cancelled (27) PMs accept it exactly like the QA metadata path
+// above. Every other field - stage, status, activity log, labor - must stay
+// deep-equal, so this exception cannot smuggle a stage or status change through.
+const isPmLocationKeyChange = (old: Wr, next: Wr): boolean =>
+  ["Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "ClosedAt", "IsFrozen", "FreezeReason"]
+    .every((key) => isDeepStrictEqual(old[key], next[key])) &&
+  keysEqualOutside(old, next, new Set(["bl_id", "LevelName", "RoomCode"]));
+
 export function validateGovernance(existing: State, incoming: State, site: string, actorId: string, proof?: GovernanceProof, globalActor?: GovernanceActor): string | null {
   const actor = globalActor ?? resolveGovernanceActor(existing, site, actorId);
   const overrides = incoming.featurePermissionOverrides ?? {};
@@ -108,6 +120,7 @@ export function validateGovernance(existing: State, incoming: State, site: strin
         "ChecklistResults", "ChecklistInstances", "ChecklistSteps"].some((key) => !isDeepStrictEqual(old[key], next[key])))
       return `PM ${old.WR_ID} labor and checklist answers are read-only at 78%.`;
     if (old.WR_Type === "PM" && (old.Percentage === 100 || old.Percentage === 27) && !isDeepStrictEqual(old, next) &&
+      !(next && isPmLocationKeyChange(old, next)) &&
       !(next && old.Percentage === 100 && (isPmQaMetadataChange(old, next) || isPmQaFailedReopen(old, next)))) {
       if (!next || next.WR_Type !== "PM" || !actor?.isAdmin || ![50, 55, 78].includes(Number(next.Percentage)) ||
         !validProof(proof, old.WR_ID, "pm-reactivation") || !allowedReactivationFields(old, next))

@@ -1,8 +1,8 @@
 // V52 Locations Workbench helpers: stats, deletion guards and form validation for the
 // buildings / floors / rooms management UI (MASTER_SPEC Section 102).
-// Identity fields (bl_id, LevelName, RoomCode) are immutable after creation because
-// equipment, desks, PM schedules and work requests reference them; edits cover every
-// descriptive field (see validateLocationForm for the rules).
+// V53 (Section 103): identity fields (bl_id, LevelName, RoomCode) are editable on the
+// same one-level-uniqueness rules as creation; a rename cascades through every
+// referencing record (lib/location-rename.ts) in one atomic save.
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import { pmTargetType } from "@cafm/shared-schema";
 import type { DemoData } from "./cafm-data";
@@ -162,24 +162,26 @@ function nonNegativeNumberOrEmpty(value: string): number | null {
 
 // Mirrors BuildingSchema / FloorSchema / RoomSchema plus one-level-uniqueness
 // (bl_id unique per site, LevelName unique per building, RoomCode unique per floor).
+// `ignore` excludes the record being edited from those uniqueness checks.
 export function validateLocationForm(
   kind: LocationKind,
   mode: "create" | "edit",
   values: LocationFormValues,
   data: DemoData,
   siteId: string,
+  ignore?: { blId?: string; levelName?: string; roomCode?: string },
 ): Partial<Record<keyof LocationFormValues, string>> {
   const errors: Partial<Record<keyof LocationFormValues, string>> = {};
   const trimmed = (key: keyof LocationFormValues) => String(values[key] ?? "").trim();
 
-  if (mode === "create" && !trimmed("blId")) errors.blId = "Building code is required.";
+  if (!trimmed("blId")) errors.blId = "Building code is required.";
   const hasGps = trimmed("latitude") !== "" || trimmed("longitude") !== "" || trimmed("elevation") !== "";
   const latitude = Number(trimmed("latitude"));
   const longitude = Number(trimmed("longitude"));
 
   if (kind === "building") {
-    if (mode === "create" && data.buildings.some((item) => item.SiteId === siteId && item.bl_id === trimmed("blId")))
-      errors.blId = "A building with this code already exists on this site.";
+    if (data.buildings.some((item) => item.SiteId === siteId && item.bl_id === trimmed("blId") && item.bl_id !== ignore?.blId))
+      errors.blId = mode === "edit" ? "Another building with this code already exists on this site." : "A building with this code already exists on this site.";
     if (!trimmed("name")) errors.name = "Name is required.";
     if (!trimmed("address")) errors.address = "Address is required.";
     if (hasGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude)))
@@ -190,9 +192,11 @@ export function validateLocationForm(
       errors.latitude = "Elevation alone is not a position; enter latitude and longitude too.";
   } else if (kind === "floor") {
     if (!trimmed("blId")) errors.blId = "Building is required.";
-    if (mode === "create" && data.floors.some((item) => item.SiteId === siteId && item.bl_id === trimmed("blId") && item.LevelName === trimmed("levelName")))
-      errors.levelName = "This building already has a floor with this name.";
     if (!trimmed("levelName")) errors.levelName = "Level name is required.";
+    else if (data.floors.some((item) =>
+        item.SiteId === siteId && item.bl_id === trimmed("blId") && item.LevelName === trimmed("levelName") &&
+        !(item.bl_id === ignore?.blId && item.LevelName === ignore?.levelName)))
+      errors.levelName = mode === "edit" ? "This building already has another floor with this name." : "This building already has a floor with this name.";
     const floorNumber = integerOrEmpty(trimmed("floorNumber"));
     if (trimmed("floorNumber") === "") errors.floorNumber = "Floor number is required (a whole number, e.g. -1 for a basement).";
     else if (Number.isNaN(floorNumber)) errors.floorNumber = "Floor number must be a whole number (e.g. -1 for a basement).";
@@ -202,10 +206,11 @@ export function validateLocationForm(
   } else {
     if (!trimmed("blId")) errors.blId = "Building is required.";
     if (!trimmed("levelName")) errors.levelName = "Floor is required.";
-    if (mode === "create" && !trimmed("roomCode")) errors.roomCode = "Room code is required.";
-    if (mode === "create" && data.rooms.some((item) =>
-        item.SiteId === siteId && item.bl_id === trimmed("blId") && item.LevelName === trimmed("levelName") && item.RoomCode === trimmed("roomCode")))
-      errors.roomCode = "This floor already has a room with this code.";
+    if (!trimmed("roomCode")) errors.roomCode = "Room code is required.";
+    else if (data.rooms.some((item) =>
+        item.SiteId === siteId && item.bl_id === trimmed("blId") && item.LevelName === trimmed("levelName") && item.RoomCode === trimmed("roomCode") &&
+        !(item.bl_id === ignore?.blId && item.LevelName === ignore?.levelName && item.RoomCode === ignore?.roomCode)))
+      errors.roomCode = mode === "edit" ? "This floor already has another room with this code." : "This floor already has a room with this code.";
     if (!trimmed("name")) errors.name = "Name is required.";
     const netArea = nonNegativeNumberOrEmpty(trimmed("netArea"));
     if (Number.isNaN(netArea)) errors.netArea = "Net area must be zero or a positive number.";
