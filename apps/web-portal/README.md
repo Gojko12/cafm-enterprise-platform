@@ -234,7 +234,7 @@ apps/web-portal/
 │   │   └── MainLayout.tsx  # Sidebar, TopBar, LocationContextBar
 │   ├── common/             # Reusable UI components
 │   └── modules/
-│       ├── LocationHierarchyManager.tsx
+│       ├── locations/       # V52 Locations Workbench (tabs + split screen + editor)
 │       ├── FloorPlanViewer.tsx
 │       ├── BIMViewer.tsx
 │       ├── EquipmentRegistry.tsx

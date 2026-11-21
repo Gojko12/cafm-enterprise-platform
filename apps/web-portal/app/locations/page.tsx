@@ -1,7 +1,7 @@
 "use client";
 
-import { LocationHierarchyManager } from "@/components/modules/LocationHierarchyManager";
+import { LocationsWorkbench } from "@/components/modules/locations/LocationsWorkbench";
 
 export default function LocationsPage() {
-  return <LocationHierarchyManager />;
+  return <LocationsWorkbench />;
 }
