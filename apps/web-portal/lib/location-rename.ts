@@ -102,7 +102,7 @@ function pmTargetMatch(request: LocationRenameRequest, order: { bl_id?: string; 
 function pmTargetMap<T extends { bl_id?: string; levelName?: string; LevelName?: string; roomCode?: string; RoomCode?: string }>(request: LocationRenameRequest, order: T): T {
   const next = { ...order };
   if (request.kind === "building") next.bl_id = request.to.blId;
-  if (request.kind === "floor") {
+  else if (request.kind === "floor") {
     if (next.levelName !== undefined) next.levelName = request.to.levelName;
     else next.LevelName = request.to.levelName;
   } else {
