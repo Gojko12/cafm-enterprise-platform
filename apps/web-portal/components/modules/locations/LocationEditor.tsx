@@ -32,9 +32,12 @@ export function formValuesFor(target: LocationEditorTarget): LocationFormValues 
   const base = emptyLocationForm();
   if (target.mode !== "edit") {
     // Prefill only the parent context, never an existing level/room identity:
-    // "Add Floor" preloads the selected building, "Add Room" preloads building + floor.
-    if (target.floor) base.blId = target.floor.bl_id;
-    if (target.floor && target.kind === "room") base.levelName = target.floor.LevelName;
+    // "Add Floor" preloads the selected building (from the building panel) or the
+    // building of the selected floor (header button); "Add Room" preloads building
+    // and floor.
+    if (target.kind === "floor" || target.kind === "room")
+      base.blId = target.floor?.bl_id ?? target.building?.bl_id ?? "";
+    if (target.kind === "room" && target.floor) base.levelName = target.floor.LevelName;
     return base;
   }
   const building = target.building;
