@@ -96,10 +96,15 @@ const isPmQaFailedReopen = (old: Wr, next: Wr): boolean =>
 // closed (100) and cancelled (27) PMs accept it exactly like the QA metadata path
 // above. Every other field - stage, status, activity log, labor - must stay
 // deep-equal, so this exception cannot smuggle a stage or status change through.
+// UpdatedAt/updatedAt are V53.1 additions: the store's setData pipeline
+// (stampChangedWorkRequests in lib/state-merge.ts) stamps both automatically on
+// every changed WR, and the QA metadata whitelist has always allowed exactly these
+// two stamps; without them every cascade rename was rejected with "is terminal"
+// on any site that has closed/cancelled PMs.
 const isPmLocationKeyChange = (old: Wr, next: Wr): boolean =>
   ["Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "ClosedAt", "IsFrozen", "FreezeReason"]
     .every((key) => isDeepStrictEqual(old[key], next[key])) &&
-  keysEqualOutside(old, next, new Set(["bl_id", "LevelName", "RoomCode"]));
+  keysEqualOutside(old, next, new Set(["bl_id", "LevelName", "RoomCode", "UpdatedAt", "updatedAt"]));
 
 export function validateGovernance(existing: State, incoming: State, site: string, actorId: string, proof?: GovernanceProof, globalActor?: GovernanceActor): string | null {
   const actor = globalActor ?? resolveGovernanceActor(existing, site, actorId);
