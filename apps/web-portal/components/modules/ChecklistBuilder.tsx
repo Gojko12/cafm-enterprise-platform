@@ -181,8 +181,15 @@ export function ChecklistBuilder({ onSave, initialBlueprint, inheritedSteps = []
             <input
               type="number"
               value={expectedHours}
-              onChange={(e) => setExpectedHours(parseFloat(e.target.value) || 0)}
+              onChange={(e) => {
+                // ExpectedHours is z.number().nonnegative() in the shared schema: clamp
+                // here so the editor can never produce a value the server would reject
+                // (an unsavable negative would trip the V54 stuck-change guard).
+                const n = parseFloat(e.target.value);
+                setExpectedHours(Number.isNaN(n) || n < 0 ? 0 : n);
+              }}
               placeholder="0"
+              min={0}
               step="0.5"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
