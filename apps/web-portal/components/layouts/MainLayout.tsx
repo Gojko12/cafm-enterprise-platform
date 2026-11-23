@@ -14,6 +14,7 @@ import { SiteId, PLATFORM_SITE_IDS, SITE_LABELS } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import type { SiteRoleAssignment } from "@cafm/shared-schema";
 import { PhoneShare } from "@/components/common/PhoneShare";
+import { GlobalSearch } from "@/components/modules/GlobalSearch";
 import { PLATFORM_VERSION } from "@/lib/platform-version";
 
 const NAV_ITEMS = [
@@ -226,6 +227,8 @@ export function TopBar() {
           {!multiSite && <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600" title="Only Mark Meyer and Gregor Kovac (SuperAdmins) may view all five ESA sites.">Single-site access · SuperAdmin required for multi-site</span>}
         </div>
         <button disabled={!governance("canResetOrExportSiteData")} onClick={() => { if (governance("canResetOrExportSiteData")) reset(); }} className="px-3 py-2 border rounded text-sm disabled:opacity-40">Reset Demo Data</button>
+        {/* Global search across the whole platform (press "/" to focus) */}
+        <GlobalSearch />
       </div>
       <div className="flex items-center gap-2"><a href="/mobile/" className="rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white">📱 Open Mobile App</a><button onClick={() => setShareOpen(true)} className="rounded border px-3 py-2 text-sm">QR / Share</button></div>
       {shareOpen && <PhoneShare initialUrl={mobileUrl} onClose={() => setShareOpen(false)} />}

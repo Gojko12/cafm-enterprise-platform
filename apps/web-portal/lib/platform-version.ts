@@ -27,5 +27,14 @@
 // scroll area so the dashboard layout stays stable. Client-side only, the
 // kind `workRequests` Activity streams stay the payload source.
 // MASTER_SPEC Section 113.
+// V64 = Section 114: global search in the TopBar (components/modules/
+// GlobalSearch.tsx, wired into MainLayout): one box searches the live client
+// state across work requests, buildings, floors, rooms, equipment, PM
+// schedules, freeze periods, craftspeople and CIFM people at once; results
+// show grouped with per-category caps, counters and "+N more" module links;
+// "/" focuses the box; ArrowUp/ArrowDown/Enter keyboard navigation; each hit
+// deep-links to the owning module page. V1 navigates to the module; focus
+// hand-off to the exact item inside each module is a future candidate.
+// MASTER_SPEC Section 114.
 
-export const PLATFORM_VERSION = "V63";
+export const PLATFORM_VERSION = "V64";
