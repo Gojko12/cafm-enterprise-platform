@@ -12,13 +12,14 @@ import React, { useMemo, useState } from "react";
 import { Building2, Layers, DoorOpen, Plus } from "lucide-react";
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import { useApp } from "@/lib/hooks/useApp";
-import { useCafmStore } from "@/lib/cafm-store";
+import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
+import { LocationRenameHistory } from "./LocationRenameHistory";
 import { OverviewTable, type TableColumn } from "@/components/common/TableColumns";
 import { LocationDetailsPanel } from "./LocationDetails";
 import { LocationEditor, type LocationEditorTarget } from "./LocationEditor";
 import { numberOrUndefined, validateLocationForm, type LocationFormValues, type LocationKind } from "@/lib/locations";
-import { applyLocationRename, formRenameRequest, locationRenameImpact, renameLabel, type LocationRenameRequest } from "@/lib/location-rename";
+import { appendRenameLog, applyLocationRename, formRenameRequest, locationRenameImpact, renameLabel, type LocationRenameRequest } from "@/lib/location-rename";
 
 type Tab = LocationKind;
 interface Selection {
@@ -57,9 +58,11 @@ const roomColumns: TableColumn<Room>[] = [
 
 export function LocationsWorkbench() {
   const { data, setData } = useCafmStore();
-  const { activeSiteId } = useSiteContext();
+  const { activeSiteId, activePerson } = useSiteContext();
   const { canAccess, setSelectedBuilding, setSelectedFloor, setSelectedRoom } = useApp();
   const canWrite = canAccess("locations.write");
+  const { profile } = useActiveUserPermissions();
+  const actorName = profile?.fullName?.trim() || activePerson;
   const [tab, setTab] = useState<Tab>("building");
   const [selection, setSelection] = useState<Selection>({ kind: "building", buildingKey: null, floorKey: null, roomKey: null });
   const [editing, setEditing] = useState<LocationEditorTarget | null>(null);
@@ -183,7 +186,10 @@ export function LocationsWorkbench() {
               ? { ...room, RoomCode: values.roomCode.trim(), ...roomBody } : room) };
         }
       }
-      if (rename) next = applyLocationRename(next, rename);
+      if (rename) {
+        const result = applyLocationRename(next, rename);
+        next = appendRenameLog(result.next, rename, actorName, result.counts, now);
+      }
       return next;
     });
     if (rename) reselectAfterRename(rename, target);
@@ -279,6 +285,8 @@ export function LocationsWorkbench() {
             onJumpBuilding={selectBuilding} onJumpFloor={selectFloor} onJumpRoom={selectRoom} />
         </section>
       </div>
+      <LocationRenameHistory entries={data.locationRenameLog ?? []} siteId={activeSiteId} />
+
     </div>
 
     {editing && <LocationEditor target={editing} buildings={siteBuildings} floors={siteFloors}

@@ -33,6 +33,16 @@ export interface BimElementLink {
   updatedAt: string;
   updatedBy: string;
 }
+export interface LocationRenameLogEntry {
+  id: string;
+  at: string;
+  actor: string;
+  siteId: string;
+  kind: "building" | "floor" | "room";
+  from: string;
+  to: string;
+  impact: { label: string; count: number }[];
+}
 export interface DemoData {
   pmModelVersion?: 60;
   pmMigrationNotes?: string[];
@@ -67,6 +77,8 @@ export interface DemoData {
   cifmPeople?: CifmPerson[];
   onboardingRequests?: import("@cafm/shared-schema").OnboardingRequest[];
   fjNotifications?: { id: string; wrId: string; recipient: string; createdAt: string; kind: "FJ_DISSATISFACTION"; message: string; read?: boolean }[];
+  /** V59 (Section 109): optional audit trail of applied location renames, oldest-first, capped at 100 entries. */
+  locationRenameLog?: LocationRenameLogEntry[];
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
   siteRoleAssignments: SiteRoleAssignment[];

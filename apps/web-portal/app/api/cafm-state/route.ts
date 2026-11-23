@@ -205,6 +205,11 @@ const stateSchema = z.object({
     id: z.string().min(1), wrId: z.string().min(1), recipient: z.string().min(1), createdAt: z.string().min(1),
     kind: z.literal("FJ_DISSATISFACTION"), message: z.string(), read: z.boolean().optional(),
   })).optional(),
+  locationRenameLog: z.array(z.object({
+    id: z.string().min(1), at: z.string().min(1), actor: z.string().min(1), siteId: z.string().min(1),
+    kind: z.enum(["building", "floor", "room"]), from: z.string().min(1), to: z.string().min(1),
+    impact: z.array(z.object({ label: z.string().min(1), count: z.number().int().nonnegative() })),
+  })).optional(),
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),

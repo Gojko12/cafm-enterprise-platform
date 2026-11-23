@@ -16,7 +16,7 @@
 // (buildingId, roomId must keep matching their equipment) and BIM element links
 // (`buildingId:ifcGlobalId` keys).
 import type { Building, Floor, Room } from "@cafm/shared-schema";
-import type { DemoData, BimElementLink } from "./cafm-data";
+import type { DemoData, BimElementLink, LocationRenameLogEntry } from "./cafm-data";
 import type { AuditAssurance } from "./equipment-inspection";
 import type { LocationKind } from "./locations";
 
@@ -268,9 +268,33 @@ function runCascade(data: DemoData, request: LocationRenameRequest): { next: Dem
 
 // Applies every reference rewrite for one rename to the full site state. The edited
 // location row itself has already been replaced by the caller; this only fixes the
-// rows that point at the old identity.
-export function applyLocationRename(data: DemoData, request: LocationRenameRequest): DemoData {
-  return runCascade(data, request).next;
+// rows that point at the old identity. V59 (Section 109): also returns the impact counts.
+export function applyLocationRename(data: DemoData, request: LocationRenameRequest): { next: DemoData; counts: RenameImpactEntry[] } {
+  return runCascade(data, request);
+}
+
+// V59 (MASTER_SPEC Section 109): the optional audit trail for applied renames is
+// stored oldest-first and capped so the site state stays small. As a blob-style
+// optional collection it flows through the save pipeline into cafm_blocks_store
+// with no database change (same precedent as auditAssurance).
+export const LOCATION_RENAME_LOG_CAP = 100;
+
+// Appends one audit entry for a rename that was just applied. `counts` comes from
+// applyLocationRename; entries keep their append order and only the most recent
+// LOCATION_RENAME_LOG_CAP survive.
+export function appendRenameLog(data: DemoData, request: LocationRenameRequest, actor: string, counts: RenameImpactEntry[], at: string): DemoData {
+  const labels = renameLabel(request);
+  const entry: LocationRenameLogEntry = {
+    id: `rl-${at.replace(/[^0-9]/g, "")}-${request.kind}`,
+    at,
+    actor,
+    siteId: request.siteId,
+    kind: request.kind,
+    from: labels.from,
+    to: labels.to,
+    impact: counts,
+  };
+  return { ...data, locationRenameLog: [...(data.locationRenameLog ?? []), entry].slice(-LOCATION_RENAME_LOG_CAP) };
 }
 
 // Human-readable impact summary for the editor's confirmation UI: which
