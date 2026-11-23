@@ -4,7 +4,7 @@ import React from "react";
 import {
   Armchair, ArrowLeftRight, BarChart3, Box, Building, Calendar, CalendarClock,
   ChevronsLeft, ChevronsRight, ClipboardCheck, Cog, Gauge, Globe, Home,
-  Hourglass, Map, Repeat, Satellite, ShieldCheck, Users, Zap
+  Hourglass, Map, Repeat, Satellite, ScrollText, ShieldCheck, Users, Zap
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -39,6 +39,7 @@ const NAV_ITEMS = [
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/admin/rbac", label: "People & Permissions", icon: Users },
     { href: "/sla-settings", label: "SLA Settings", icon: Gauge },
+    { href: "/change-log", label: "Change Log", icon: ScrollText },
   ]},
 ];
 

@@ -10,7 +10,7 @@ import { QAInspectorAssignmentSchema } from "@cafm/shared-schema/qa-inspector";
 import { AuditCampaignSchema, AuditFindingSchema, AuditInspectionSchema, AuditSettingsSchema, AuditTemplateSchema, AuditImportSchema } from "@/lib/audit-assurance-types";
 import { reconcileAssurance } from "@/lib/assurance-workflow";
 import { AuditAssuranceSchema } from "@/lib/equipment-inspection";
-import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, OnboardingRequestSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields } from "@cafm/shared-schema";
+import { SiteStakeholderTeamSchema, SiteSlaConfigSchema, CifmPersonSchema, OnboardingRequestSchema, PLATFORM_SITE_IDS, normalizeSiteId, migrateLegacySiteIds, SiteCoordinationRequirementSchema, PmCoordinationRecordSchema, PM_LegacyChecklistStandardSchema, PM_LegacyScheduleSchema, SuppressedPmOccurrenceSchema, BlueprintAuditEntrySchema, PMTargetFields, ChangeLogEntrySchema, ChangeLogSettingsSchema } from "@cafm/shared-schema";
 import { migratePmState, uniquePmsOrdersAcrossSites } from "@/lib/pm-orders";
 import { recordBlueprintRevisions } from "@/lib/pm-revisions";
 import { migrateWorkRequestIdsTo10Digits } from "@/lib/wr-id-migration";
@@ -211,6 +211,8 @@ const stateSchema = z.object({
     kind: z.enum(["building", "floor", "room"]), from: z.string().min(1), to: z.string().min(1),
     impact: z.array(z.object({ label: z.string().min(1), count: z.number().int().nonnegative() })),
   })).optional(),
+  changeLog: z.array(ChangeLogEntrySchema).optional(),
+  changeLogSettings: ChangeLogSettingsSchema.optional(),
   siteRoleAssignments: records,
   qaInspectorAssignments: z.array(QAInspectorAssignmentSchema).optional(),
   qaFailureReasons: z.array(z.string().min(1)).optional(),

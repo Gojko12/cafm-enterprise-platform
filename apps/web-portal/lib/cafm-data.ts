@@ -1,7 +1,7 @@
 import type { BaseWorkRequest, Building, CraftpersonAbsence, CraftpersonShift, Equipment, Floor, LocationFreeze, MissionEvent, PM_ChecklistStandard, PM_Schedule, QAInspectorAssignment, QAAuditReport, Room, ShiftType, SiteId, SiteRoleAssignment, UserAccess, UserAccessProfile, RoleDefinition } from "@cafm/shared-schema";
 import type { AuditCampaign, AuditFinding, AuditInspection, AuditSettings, AuditTemplate, AuditImport } from "./audit-assurance-types";
 import type { AuditAssurance } from "./equipment-inspection";
-import type { SuppressedPmOccurrence, BlueprintAuditEntry, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, SiteSlaConfig, CifmPerson } from "@cafm/shared-schema";
+import type { SuppressedPmOccurrence, BlueprintAuditEntry, SiteStakeholderTeam, SiteCoordinationRequirement, PmCoordinationRecord, SiteSlaConfig, CifmPerson, ChangeLogEntry, ChangeLogSettings } from "@cafm/shared-schema";
 
 type AssignmentRole = "ESA_TM" | "ESA_CCM" | "TRADE_TM" | "TRADE_CM" | "ESA_TO" | "ESA_LJM" | "ESA_DO" | "ESA_IM";
 export interface TradeRoleMapping {
@@ -79,6 +79,10 @@ export interface DemoData {
   fjNotifications?: { id: string; wrId: string; recipient: string; createdAt: string; kind: "FJ_DISSATISFACTION"; message: string; read?: boolean }[];
   /** V59 (Section 109): optional audit trail of applied location renames, oldest-first, capped at 100 entries. */
   locationRenameLog?: LocationRenameLogEntry[];
+  /** V62 (Section 112): dedicated change log, newest-first, capped at CHANGE_LOG_CAP entries (record table public.change_log). */
+  changeLog?: ChangeLogEntry[];
+  /** V62 (Section 112): per-site SuperAdmin-editable list of which change types are logged (blob kind). */
+  changeLogSettings?: ChangeLogSettings;
   tradeRoleMappings: TradeRoleMapping[];
   siteRoleMappings: SiteRoleMapping[];
   siteRoleAssignments: SiteRoleAssignment[];

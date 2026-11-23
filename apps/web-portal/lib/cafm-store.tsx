@@ -16,6 +16,7 @@ import type { GovernanceProof } from "./wr-governance-types";
 import { stateRequest, StateRequestError } from "./cafm-state-request";
 import { buildSyncDelta } from "./sync-delta";
 import { permanentPushFailure } from "./stuck-change";
+import { appendChangeLog, diffChangeLog } from "./change-log";
 import { StuckChangeAlert } from "@/components/common/StuckChangeAlert";
 import { resolveGovernanceActor } from "./governance-actor";
 export { stateRequest } from "./cafm-state-request";
@@ -602,7 +603,11 @@ function ScopedStoreProvider({ children, site, person }: { children: React.React
       }
       const nextIds = new Set(next.workRequests.map((wr) => wr.WR_ID));
       for (const wr of previous.workRequests) if (!nextIds.has(wr.WR_ID)) dirtyWrIdsRef.current.add(wr.WR_ID);
-      return workRequests === next.workRequests ? next : { ...next, workRequests };
+      const finalNext = workRequests === next.workRequests ? next : { ...next, workRequests };
+      // V62 (Section 112): record important changes into the dedicated change log
+      // inside the SAME atomic setData; rules come from changeLogSettings (SuperAdmin-editable).
+      const logEntries = diffChangeLog(previous, finalNext, site, personRef.current, now, finalNext.changeLogSettings);
+      return logEntries.length ? appendChangeLog(finalNext, logEntries) : finalNext;
     });
     schedulePush.current();
   };

@@ -17,5 +17,8 @@
 // public.location_rename_log (supabase-v61-location-rename-log-table.sql);
 // cafm_blocks view widened to 35 parts, cafm_save_state diff-saves 34 kinds.
 // App untouched; API payloads byte-identical.
+// V62 = Section 112: dedicated change_log record table (old_key/new_key/old_value/
+// new_value/modified_by/modified_date/modified_time/site_id) + generic logger in
+// the save pipeline + SuperAdmin-editable rule list (changeLogSettings) + /change-log page.
 
-export const PLATFORM_VERSION = "V61";
+export const PLATFORM_VERSION = "V62";
