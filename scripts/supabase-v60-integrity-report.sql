@@ -82,7 +82,7 @@ begin
   select count(*) into n_fb from public.audit_findings where site_id = '02-ESOC' and building_id = 'S01-BL-1';
   select count(*) into n_fr from public.audit_findings where site_id = '02-ESOC' and building_id = 'S01-BL-111' and room_id = 'S01-B1-L0-R1';
   select count(*) into n_ib from public.audit_inspections where site_id = '02-ESOC' and building_id = 'S01-BL-1';
-  select count(*) into n_cb from public.audit_campaigns where site_id = '02-ESOC' and building_ids is not null and building_ids @> array['S01-BL-1'];
+  select count(*) into n_cb from public.audit_campaigns where site_id = '02-ESOC' and jsonb_typeof(building_ids) = 'array' and building_ids @> '["S01-BL-1"]'::jsonb;
   select count(*) into n_pb from public.cifm_people where site_id = '02-ESOC' and stationed_building_id = 'S01-BL-1';
   select count(*) into n_ob from public.onboarding_requests where site_id = '02-ESOC' and stationed_building_id = 'S01-BL-1';
   raise notice 'V60 pre-repair: PM target snapshot drift wr=% dwr=% (expected 6 and 0)', n_wr, n_dwr;
@@ -160,7 +160,7 @@ insert into public.cafm_v60_repair_backup (src, site_id, row_key, old_value)
 select 'audit_campaigns_building', site_id, campaign_id,
        jsonb_build_object('building_ids', to_jsonb(building_ids), 'data_buildingIds', data->'buildingIds')
 from public.audit_campaigns
-where site_id = '02-ESOC' and building_ids is not null and building_ids @> array['S01-BL-1']
+where site_id = '02-ESOC' and jsonb_typeof(building_ids) = 'array' and building_ids @> '["S01-BL-1"]'::jsonb
 on conflict do nothing;
 
 insert into public.cafm_v60_repair_backup (src, site_id, row_key, old_value)
@@ -239,12 +239,15 @@ set building_id = 'S01-BL-111', data = jsonb_set(data, '{buildingId}', '"S01-BL-
 where site_id = '02-ESOC' and building_id = 'S01-BL-1';
 
 update public.audit_campaigns
-set building_ids = array_replace(building_ids, 'S01-BL-1', 'S01-BL-111'),
+set building_ids = (
+      select jsonb_agg(case when elm = to_jsonb('S01-BL-1'::text) then to_jsonb('S01-BL-111'::text) else elm end)
+      from jsonb_array_elements(building_ids) as elm),
     data = jsonb_set(data, '{buildingIds}', (
-      select jsonb_agg(case when elm = to_jsonb('S01-BL-1') then to_jsonb('S01-BL-111') else elm end)
+      select jsonb_agg(case when elm = to_jsonb('S01-BL-1'::text) then to_jsonb('S01-BL-111'::text) else elm end)
       from jsonb_array_elements(data->'buildingIds') as elm))
 where site_id = '02-ESOC'
-  and building_ids is not null and building_ids @> array['S01-BL-1']
+  and jsonb_typeof(building_ids) = 'array'
+  and building_ids @> '["S01-BL-1"]'::jsonb
   and jsonb_typeof(data->'buildingIds') = 'array';
 
 update public.cifm_people
@@ -504,7 +507,8 @@ bad_missions_freeze as (
 bad_campaigns_buildings as (
   select c.campaign_id || ':' || bid as off
   from public.audit_campaigns c
-  cross join lateral unnest(coalesce(c.building_ids, '{}')) as bid
+  cross join lateral jsonb_array_elements_text(
+    case when jsonb_typeof(c.building_ids) = 'array' then c.building_ids else '[]'::jsonb end) as bid
   where c.site_id = p_site
     and not exists (select 1 from public.buildings b where b.site_id = c.site_id and b.bl_id = bid)
 ),
@@ -654,16 +658,20 @@ grant execute on function public.cafm_integrity_report(text) to service_role;
 commit;
 
 -- ============================================================================
--- 9. Verification (read-only; run each block after the commit). All expected
---    numbers below were proven against the live revision-65 state by a
---    server-side probe BEFORE this file was generated.
+-- 9. Verification (read-only; run each block after the commit). The numbers
+--    below are the ACTUAL results of the production paste on 2026-11-23 against
+--    the live revision-65 state (they supersede the pre-generation probe, which
+--    was wrong on three counts; verified again on the wire at revision 66).
 --
--- 9a. Full report for the flagship site. Expected: 31 error checks + 8 warn checks
---     ALL with offender_count = 0; exactly 2 info rows with counts:
---     pm_coordination_without_wr = 1, qa_person_names_unmatched = 3.
+-- 9a. Full report for the flagship site. Actual: all 31 error checks with
+--     offender_count = 0; info rows pm_coordination_without_wr = 1,
+--     qa_person_names_unmatched = 0 (the access profiles do contain Mark,
+--     Thomas and Yvonne); exactly 1 warn family cifm_stationed_building_missing
+--     = 26 (cross-site legacy seed codes S02/S03/S04/S05-BL-1 belonging to
+--     other demo sites; accepted live condition, future cleanup candidate).
 -- select * from public.cafm_integrity_report('02-ESOC') order by severity, check_code;
 --
--- 9b. Hard zero prove (expected 0 and 0):
+-- 9b. Hard zero prove (actual: errors 0; warns 1 = the accepted cifm family):
 -- select count(*) filter (where severity = 'error' and offender_count > 0) as errors,
 --        count(*) filter (where severity = 'warn' and offender_count > 0) as warns
 -- from public.cafm_integrity_report('02-ESOC');
@@ -673,9 +681,11 @@ commit;
 -- select wr_id, target_key, data->>'targetKey' from public.work_requests
 -- where wr_id in ('2026000055','2026000056','2026000057','2026000058','2026000059','2026000060');
 --
--- 9d. Backup census (expected: work_requests_target 6, audit_findings_building 38,
---     audit_findings_room 2, audit_inspections_building 19, audit_campaigns_building 3,
---     cifm_people_building 1, onboarding_requests_building 3; no deleted_work_requests row):
+-- 9d. Backup census (actual: 6 groups / 70 rows = work_requests_target 6,
+--     audit_findings_building 38, audit_inspections_building 19,
+--     audit_campaigns_building 3, cifm_people_building 1,
+--     onboarding_requests_building 3; NO audit_findings_room group, the
+--     predicted 2 room rows did not exist at paste time; no deleted_work_requests row):
 -- select src, count(*) from public.cafm_v60_repair_backup group by src order by src;
 --
 -- 9e. All 43 findings now resolve to a live room (expected 43):
