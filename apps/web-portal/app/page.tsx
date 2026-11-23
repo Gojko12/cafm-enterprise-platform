@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle, Building, Calendar, CheckCircle, Clock, Cog, Map, Users, Wrench, Zap,
@@ -63,14 +63,46 @@ export default function DashboardPage() {
     };
   }, [workRequests, data.craftspeople]);
 
+  const ACTIVITY_PAGE_SIZE = 20;
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityVisible, setActivityVisible] = useState(ACTIVITY_PAGE_SIZE);
+  const activityRef = useRef<HTMLDivElement | null>(null);
+
   const recentActivity = useMemo(() => {
     const entries = workRequests.flatMap((wr) =>
       (wr.Activity ?? []).map((entry) => ({
         wrId: wr.WR_ID, wrType: wr.WR_Type, createdAt: entry.createdAt,
         actorName: entry.actorName, kind: entry.kind, text: entry.text,
       })));
-    return entries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 6);
+    return entries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }, [workRequests]);
+
+  // Keyword filter over the full history (the history itself is never
+  // rendered in one pass, only the batches below are).
+  const filteredActivity = useMemo(() => {
+    const q = activityQuery.trim().toLowerCase();
+    if (!q) return recentActivity;
+    return recentActivity.filter((entry) =>
+      [entry.wrId, entry.actorName, entry.kind, entry.text, entry.createdAt]
+        .some((field) => (field ?? "").toLowerCase().includes(q)));
+  }, [recentActivity, activityQuery]);
+
+  // A new keyword restarts from the first batch.
+  useEffect(() => {
+    setActivityVisible(ACTIVITY_PAGE_SIZE);
+  }, [activityQuery]);
+
+  const shownActivity = filteredActivity.slice(0, activityVisible);
+
+  // Lazy batches: extend the visible window only when the user scrolls
+  // near the bottom of the panel's own scroll area.
+  const handleActivityScroll = () => {
+    const el = activityRef.current;
+    if (!el || activityVisible >= filteredActivity.length) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 48) {
+      setActivityVisible((v) => v + ACTIVITY_PAGE_SIZE);
+    }
+  };
 
   const stats = [
     {
@@ -151,12 +183,33 @@ export default function DashboardPage() {
 
       {/* Recent Activity */}
       <div className="max-w-7xl mx-auto">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity</h2>
-        <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-xl font-bold text-gray-900">Recent Activity</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="text"
+              value={activityQuery}
+              onChange={(e) => setActivityQuery(e.target.value)}
+              placeholder="Search by keyword, ID or user"
+              className="w-72 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+            <span className="text-xs text-gray-500 whitespace-nowrap">
+              Showing {shownActivity.length} of {filteredActivity.length}
+            </span>
+          </div>
+        </div>
+        <div
+          ref={activityRef}
+          onScroll={handleActivityScroll}
+          className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-[480px] overflow-y-auto"
+        >
           {recentActivity.length === 0 && (
             <p className="px-4 py-6 text-sm text-gray-500">No activity recorded for this site yet.</p>
           )}
-          {recentActivity.map((entry) => (
+          {recentActivity.length > 0 && filteredActivity.length === 0 && (
+            <p className="px-4 py-6 text-sm text-gray-500">No entries match your search.</p>
+          )}
+          {shownActivity.map((entry) => (
             <div key={`${entry.wrId}-${entry.createdAt}-${entry.text}`} className="flex items-baseline gap-3 px-4 py-3">
               <span className="font-mono text-xs text-gray-400">{formatDateDDMMYYYY(entry.createdAt)}</span>
               <span className="font-mono text-xs text-gray-600">{entry.wrId}</span>
@@ -164,6 +217,9 @@ export default function DashboardPage() {
               <span className="flex-1 truncate text-sm text-gray-600">{entry.text}</span>
             </div>
           ))}
+          {shownActivity.length < filteredActivity.length && (
+            <p className="px-4 py-2 text-xs text-gray-400">Scroll for more...</p>
+          )}
         </div>
       </div>
 

@@ -20,5 +20,12 @@
 // V62 = Section 112: dedicated change_log record table (old_key/new_key/old_value/
 // new_value/modified_by/modified_date/modified_time/site_id) + generic logger in
 // the save pipeline + SuperAdmin-editable rule list (changeLogSettings) + /change-log page.
+// V63 = Section 113: the dashboard Recent Activity panel became a full history
+// browser: keyword search across WR id, user, kind and text; the first 20
+// matching entries render and further batches render only while you scroll
+// (never the whole history at once); the list keeps its own fixed-height
+// scroll area so the dashboard layout stays stable. Client-side only, the
+// kind `workRequests` Activity streams stay the payload source.
+// MASTER_SPEC Section 113.
 
-export const PLATFORM_VERSION = "V62";
+export const PLATFORM_VERSION = "V63";
