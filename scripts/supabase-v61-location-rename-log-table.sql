@@ -856,6 +856,22 @@ commit;
 
 
 -- 9) Verification (eyeball the results in the SQL editor):
+--
+-- ACTUALS of the production paste, 2026-11-23, run by Gregor in the Supabase
+-- SQL editor (supersede the rehearsal expectations, V60 lesson):
+--   9a: location_rename_log = 1 row (65536 bytes), cafm_blocks_store = 12
+--       rows (253952 bytes), cafm_v61_backup = 1 row (32768 bytes) - the one
+--       live rename entry moved cleanly;
+--   9b: 02-ESOC state_identical = true, 714 = 714 bytes;
+--   9c: 46 kind_rows / 46 distinct kinds on 02-ESOC (12 store rows incl. the
+--       4 scalar kinds + 34 record kinds) - census unchanged vs V60;
+--   9d: 1 row: rl-20261123064921800-building, 2026-11-23T06:49:21.800Z,
+--       Mark Meyer, building S01-BL-11 -> S01-BL-111, impact jsonb intact;
+--   9e: 12 store rows, no locationRenameLog;
+--   9f: expected 34 diff guards (rehearsal via pg_get_functiondef = 34;
+--       Gregor read 35 on production - the file has 35 occurrences of the
+--       phrase because the 9f query text itself contains one; the deployed
+--       function body carries 34).
 -- 9a. Record counts and storage sizes:
 select 'location_rename_log' as table_name, count(*) as rows, pg_total_relation_size('public.location_rename_log') as bytes_on_disk
 from public.location_rename_log
@@ -886,8 +902,11 @@ select o.site_id,
 from old o join new n on n.site_id = o.site_id
 order by o.site_id;
 
--- 9c. Kind census: one row per site+kind (11 store kinds + 34 record kinds = 45
---     distinct kinds for a fully migrated 02-ESOC; was 46 while this kind was a blob).
+-- 9c. Kind census: one row per site+kind. ACTUAL production 2026-11-23: 46
+--     kind_rows / 46 distinct kinds on 02-ESOC = 12 store rows (8 collection
+--     kinds + 4 scalar kinds: blueprintHighWatermark, featureMatrixVersion,
+--     pmModelVersion, pmsOrderHighWatermark) + 34 record kinds - UNCHANGED vs
+--     the V60 census of 46, because this kind swapped store -> record.
 select count(*) as kind_rows, count(distinct kind) as distinct_kinds
 from public.cafm_blocks where site_id = '02-ESOC';
 
@@ -898,8 +917,11 @@ where site_id = '02-ESOC'
 order by seq desc
 limit 15;
 
--- 9e. Blob census: what still lives in cafm_blocks_store (expect 11 kinds, and no
---     locationRenameLog anywhere).
+-- 9e. Blob census: what still lives in cafm_blocks_store. ACTUAL production
+--     2026-11-23: 12 rows (auditAssurance, bimElementLinks, blueprintAuditLog,
+--     blueprintHighWatermark, coordinationRequirements, featureMatrixVersion,
+--     featurePermissionOverrides, mobileMutationIds, pmMigrationNotes,
+--     pmModelVersion, pmsOrderHighWatermark, sites) and NO locationRenameLog.
 select kind, count(*) as rows
 from public.cafm_blocks_store
 group by kind
