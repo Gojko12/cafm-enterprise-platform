@@ -13,5 +13,9 @@
 // cifm_stationed_building_missing now joins buildings on the person's home
 // stationed_site_id instead of the partition site. No data changed; the warn
 // family stays 26 on 02-ESOC until the other four sites are seeded.
+// V61 = Section 111: locationRenameLog blob kind moved to the typed record table
+// public.location_rename_log (supabase-v61-location-rename-log-table.sql);
+// cafm_blocks view widened to 35 parts, cafm_save_state diff-saves 34 kinds.
+// App untouched; API payloads byte-identical.
 
-export const PLATFORM_VERSION = "V60.1";
+export const PLATFORM_VERSION = "V61";
