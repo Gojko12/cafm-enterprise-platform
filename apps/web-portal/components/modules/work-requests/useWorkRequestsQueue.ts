@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { BaseWorkRequest, Building, Floor, Room, WR_Type } from "@cafm/shared-schema";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
@@ -49,6 +50,8 @@ export function useWorkRequestsQueue(requestType: WR_Type) {
   const { currentRole } = useApp();
   const { data, setData } = useCafmStore();
   const { profile, permissions } = useActiveUserPermissions();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const workRequests = data.workRequests;
   const [view, setView] = useState<"grid" | "card">("grid");
   const [isFilterExpanded, setFilterExpanded] = useState(false);
@@ -165,14 +168,22 @@ export function useWorkRequestsQueue(requestType: WR_Type) {
     setDrawerOpen(true);
   };
 
-  // Deep link: /preventive-maintenance?wr=2026000123 opens that WR directly.
+  // Deep link: /preventive-maintenance?wr=2026000123 (global search) opens that
+  // WR's details popup directly. Reactive on the param so it also works when the
+  // search hit is clicked while already on this page; the query is stripped
+  // after applying so closing the popup and re-clicking the same hit reopens it.
+  const deepLinkWr = searchParams.get("wr");
+  const hydrated = workRequests.length > 0;
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("wr");
-    if (!id) return;
-    const target = workRequests.find((wr) => wr.WR_ID === id && wr.SiteId === activeSiteId && wr.WR_Type === requestType);
-    if (target) handleViewWR(target);
+    if (!deepLinkWr || !hydrated) return;
+    const target = workRequests.find((wr) => wr.WR_ID === deepLinkWr && wr.SiteId === activeSiteId && wr.WR_Type === requestType);
+    if (target) {
+      handleViewWR(target);
+      if (requestType === "PM") setPmView("queue");
+      router.replace(requestType === "PM" ? "/preventive-maintenance" : requestType === "FJ" ? "/fast-jobs" : "/long-jobs", { scroll: false });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSiteId, requestType]);
+  }, [deepLinkWr, hydrated, activeSiteId, requestType]);
 
   const handleSubmitWR = (wr: Partial<BaseWorkRequest>) => {
     if (!permissions?.canCreateLJ) { alert("Permission required to create a Long Job."); return; }

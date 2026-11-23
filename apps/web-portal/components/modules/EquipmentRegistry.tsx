@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES, EquipmentSchema, EquipmentStatusSchema, formatDateDDMMYYYY, formatDateTimeDDMMYYYY, TechnicalSpecificationsSchema } from "@cafm/shared-schema";
 import type { BaseWorkRequest, Building, Equipment, Floor, Room } from "@cafm/shared-schema";
 import { OverviewTable } from "@/components/common/TableColumns";
@@ -94,6 +95,8 @@ export function EquipmentRegistry() {
   const { data } = useCafmStore();
   const { permissions } = useActiveUserPermissions();
   const { activeSiteId } = useSiteContext();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("equipment");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -106,14 +109,38 @@ export function EquipmentRegistry() {
       {EQUIPMENT_STATUSES.map((status) => <label key={status} className="block py-1"><input type="checkbox" checked={statuses.includes(status)} onChange={(event) => setStatuses((current) => event.target.checked ? [...current, status] : current.filter((entry) => entry !== status))} /> {status}</label>)}
     </div></details>;
   useEffect(() => { setSelected(null); setCollapsed(new Set()); }, [activeSiteId]);
-  // Deep link from the 3D BIM viewer: /equipment?eq=0000000001 preselects the equipment.
+  // Deep link: /equipment?eq=0000000001 preselects the equipment (3D BIM viewer
+  // and, since V65, the global search). Reactive on the param so clicking a
+  // search hit while already on this page also selects the item; the query is
+  // stripped after applying so closing the details and re-clicking the same
+  // hit selects again.
+  const focusEq = searchParams.get("eq");
+  const hydrated = data.equipment.length > 0;
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get("eq");
-    if (code && data.equipment.some((eq) => eq.SiteId === activeSiteId && eq.EquipmentCode === code)) setSelected(code);
+    if (!focusEq || !hydrated) return;
+    if (data.equipment.some((eq) => eq.SiteId === activeSiteId && eq.EquipmentCode === focusEq)) {
+      setSelected(focusEq);
+      // Prefill the in-page search with the code: the tree views expand on a
+      // search, so the selected row is guaranteed to be visible in view.
+      setSearch(focusEq);
+      setStatuses([]);
+      router.replace("/equipment", { scroll: false });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [focusEq, hydrated, activeSiteId]);
   const equipment = useMemo(() => data.equipment.filter((entry) => entry.SiteId === activeSiteId), [data.equipment, activeSiteId]);
   const item = equipment.find((eq) => eq.EquipmentCode === selected);
+  // The list and the details panel each get their own scrollbar on lg screens
+  // (both fixed to the viewport height, so the page never scrolls as one block
+  // and a selection from row 100 keeps the details visible at the top of the
+  // right pane). Below lg the details stack under the list: jump to the fresh
+  // panel so a selection made deep down the table does not hide the details
+  // below the fold.
+  const detailsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (item && window.matchMedia("(max-width: 1023px)").matches) detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.EquipmentCode]);
   const openWrs = useMemo(() => {
     const counts = new Map<string, number>();
     for (const wr of data.workRequests) {
@@ -202,7 +229,7 @@ export function EquipmentRegistry() {
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
     </div>
     <div className="flex flex-col gap-4 lg:flex-row">
-      <div className={`min-w-0 transition-all ${item ? "lg:w-1/2" : "w-full"}`}>
+      <div className={`min-w-0 transition-all lg:h-[calc(100vh-14rem)] lg:overflow-y-auto ${item ? "lg:w-1/2" : "w-full"}`}>
         {view === "flat" && <OverviewTable preferenceKey="equipment" columns={columns} rows={flat} rowKey={(eq) => eq.EquipmentCode} onRow={(eq) => setSelected(eq.EquipmentCode)}
           rowClassName={(eq) => eq.EquipmentCode === selected ? "bg-blue-100 border-l-4 border-l-blue-600 font-semibold" : ""} />}
         {view === "equipment" && <div className="overflow-x-auto rounded-lg border bg-white"><div className="min-w-[44rem]">{header}
@@ -221,7 +248,11 @@ export function EquipmentRegistry() {
               <span className="w-3 text-slate-500">{row.open ? "▾" : "▸"}</span>{row.label}<span className="rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold">{row.count}</span></button>)}
         </div></div>}
       </div>
-      {item && <EquipmentDetails key={`${activeSiteId}:${item.EquipmentCode}`} item={item} onClose={() => setSelected(null)} onSelect={setSelected} />}
+      {item && (
+        <div ref={detailsRef} className="min-w-0 lg:h-[calc(100vh-14rem)] lg:w-1/2 lg:overflow-y-auto">
+          <EquipmentDetails key={`${activeSiteId}:${item.EquipmentCode}`} item={item} onClose={() => setSelected(null)} onSelect={setSelected} />
+        </div>
+      )}
     </div>
     {adding && <AddEquipmentModal siteId={activeSiteId} onClose={() => setAdding(false)} onCreated={(code) => { setAdding(false); setSelected(code); }} />}
   </div>;
@@ -416,7 +447,7 @@ function EquipmentDetails({ item, onClose, onSelect }: { item: Equipment; onClos
     <label className="text-xs">{label}<input type="number" min="0" value={draft[key] ?? ""} onChange={(event) => {
       const raw = event.target.value; setDraft((current) => ({ ...current, [key]: raw === "" ? undefined : Number(raw) }));
     }} className="mt-1 block w-full rounded border p-1 text-sm" /></label>;
-  return <aside className="min-w-0 space-y-3 rounded-lg border bg-white p-3 lg:w-1/2">
+  return <aside className="min-w-0 w-full space-y-3 rounded-lg border bg-white p-3">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="font-mono text-xs text-slate-500">{item.EquipmentCode}</div><strong className="text-base">{item.EquipmentName}</strong>
       <div className="mt-1 flex gap-1"><LevelPill level={item.HierarchyLevel} /><span className={`rounded-full border px-2 py-0.5 text-[11px] ${statusStyle(item.Status)}`}>{item.Status}</span></div></div>
       <div className="flex items-center gap-2 text-xs">

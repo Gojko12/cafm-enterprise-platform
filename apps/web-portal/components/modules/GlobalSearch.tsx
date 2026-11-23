@@ -26,6 +26,9 @@ interface SearchCategory {
   key: string;
   label: string;
   href: string;
+  // Per-hit href override: when a hit should deep-link to the exact item
+  // (query param + effect on the target page) instead of the plain module page.
+  buildHref?: (item: AnyRow) => string;
   items: AnyRow[];
   fields: string[];
   terms: string[];
@@ -54,6 +57,14 @@ function buildCategories(data: StoreData): SearchCategory[] {
   return [
     {
       key: "wr", label: "Work Requests", href: "/work-requests", items: rows(data.workRequests),
+      // Deep link to the queue that owns the WR; the ?wr= effect on the page
+      // opens the WR details popup right away.
+      buildHref: (item) => {
+        const id = encodeURIComponent(str(item.WR_ID));
+        const type = str(item.WR_Type);
+        const route = type === "PM" ? "/preventive-maintenance" : type === "FJ" ? "/fast-jobs" : "/long-jobs";
+        return `${route}?wr=${id}`;
+      },
       fields: ["WR_ID", "WR_Type", "Description", "WorkRequestStatus", "ProblemLocation", "bl_id", "RoomCode"],
       terms: [],
       title: ["WR_ID"], subtitle: ["WR_Type", "Description"],
@@ -78,6 +89,8 @@ function buildCategories(data: StoreData): SearchCategory[] {
     },
     {
       key: "equipment", label: "Equipment", href: "/equipment", items: rows(data.equipment),
+      // /equipment?eq= preselects the item and opens its details panel.
+      buildHref: (item) => `/equipment?eq=${encodeURIComponent(str(item.EquipmentCode))}`,
       fields: ["EquipmentCode", "EquipmentName", "EquipmentNameLocal", "Category", "Manufacturer", "Model", "bl_id", "RoomCode"],
       terms: [],
       title: ["EquipmentCode"], subtitle: ["EquipmentName", "Category"],
@@ -132,7 +145,7 @@ function searchCategory(category: SearchCategory, query: string): { hits: Search
     matched.push({
       categoryKey: category.key,
       categoryLabel: category.label,
-      href: category.href,
+      href: category.buildHref ? category.buildHref(item) : category.href,
       title,
       subtitle,
       score: scoreHit(item, category.title, q),

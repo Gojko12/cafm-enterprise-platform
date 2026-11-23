@@ -36,5 +36,17 @@
 // deep-links to the owning module page. V1 navigates to the module; focus
 // hand-off to the exact item inside each module is a future candidate.
 // MASTER_SPEC Section 114.
+// V65 = Section 115: global search focus hand-off + equipment split-pane
+// scroll. Work request search hits now deep-link to the queue that owns
+// the WR (/preventive-maintenance, /fast-jobs, /long-jobs) and the ?wr=
+// effect opens the WR details popup right away, also when the hit is
+// clicked while already on that page (the query is stripped after
+// applying, so re-clicking the same hit reopens it). Equipment hits go
+// to /equipment?eq=<code>, which preselects the item and opens its
+// details panel. The equipment registry list and details panel now each
+// get their own viewport-height scrollbar on lg screens, so selecting a
+// row deep down the table never requires scrolling the page to find the
+// details; below lg the details panel scrolls into view on selection.
+// MASTER_SPEC Section 115.
 
-export const PLATFORM_VERSION = "V64";
+export const PLATFORM_VERSION = "V65";
