@@ -49,8 +49,8 @@
 --     02-ESOC: 42 checks, 0 errors, warn cifm_stationed_building_missing = 26
 --     (UNCHANGED count - the cross-site stations can only resolve once their
 --     home sites have buildings rows). This is the production prediction.
---   Production post-paste numbers must be recorded in section 9 comments after
---   the real paste, replacing these rehearsal expectations (V60 lesson).
+--   Production post-paste ACTUALS were recorded in section 9 below after the
+--   real paste on 2026-11-23 (V60 lesson: actuals replace expectations).
 --
 -- Rollback: the previous function version is replaced, not accumulated, so
 -- rollback = re-paste scripts/supabase-v60-integrity-report.sql section 3
@@ -481,6 +481,16 @@ commit;
 
 -- ============================================================================
 -- 9. Verification (read-only; run each block after the commit).
+--
+-- ACTUALS of the production paste, 2026-11-23, wire-verified by Gregor in the
+-- Supabase SQL editor (these supersede the expectations below, V60 lesson):
+--   paste itself: Success (file ends in comment lines, so "no rows returned");
+--   pre-paste notice: partition-site missing = 26, home-site missing = 26;
+--   9a: 42 rows returned; 9b: errors = 0, warn_families = 1;
+--   9d: cifm_stationed_building_missing offender_count = 26 (expected: stays
+--        until 01-ESTEC/03-HQ/04-ESRIN/05-ESAC are seeded);
+--   9c: count = 33 (expected: 29 x 02-S_V1, 2 x S01-BL-2, 1 x S01-BL-3,
+--        1 x S01-BL-111); 9f: 42 checks (31 error, 8 warn, 3 info).
 --
 -- 9a. Full report for the flagship site. Expected after this paste in
 --     PRODUCTION (only 02-ESOC has rows today): every error check
