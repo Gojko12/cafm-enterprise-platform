@@ -873,6 +873,20 @@ commit;
 
 
 -- 9) Verification (eyeball the results in the SQL editor):
+--
+-- ACTUALS of the production paste, 2026-11-23, run by Gregor in the Supabase
+-- SQL editor (supersede the rehearsal expectations, V60 lesson):
+--   9a: change_log = 0 rows (40960 bytes, empty table is correct - the log
+--       starts empty), cafm_blocks_store = 12 rows (253952 bytes),
+--       cafm_v62_backup = 0 rows (no changeLog blob existed before the paste);
+--   9b: no rows (backup empty, round-trip vacuously identical);
+--   9c: 47 kind_rows / 47 distinct kinds on 02-ESOC (12 store + 35 record);
+--   9d: 0 rows (empty log);
+--   9e: 12 store rows, no changeLog;
+--   9f: diff guards = 35.
+--   App after deploy: sidebar Enterprise Edition · V62, /change-log live, and a
+--   real WR status change (2026000006, Issued 50% -> Technically Completed 78%,
+--   Mark, 23-11-2026 14:09:01) was logged automatically.
 -- 9a. Record counts and storage sizes:
 select 'change_log' as table_name, count(*) as rows, pg_total_relation_size('public.change_log') as bytes_on_disk
 from public.change_log
@@ -903,8 +917,10 @@ select o.site_id,
 from old o join new n on n.site_id = o.site_id
 order by o.site_id;
 
--- 9c. Kind census on 02-ESOC (12 store rows + 35 record kinds; unchanged total
---     vs V61 because this kind swaps store -> record).
+-- 9c. Kind census on 02-ESOC. ACTUAL production 2026-11-23: 47 kind_rows /
+--     47 distinct kinds = 12 store rows + 35 record kinds (+1 vs V61's 46,
+--     because record kinds are always emitted by the view even when empty,
+--     while the old blob only appeared once present).
 select count(*) as kind_rows, count(distinct kind) as distinct_kinds
 from public.cafm_blocks where site_id = '02-ESOC';
 
