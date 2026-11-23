@@ -1,10 +1,11 @@
 // Bump this on every platform release, in the same rhythm as apps/mobile-app/src/version.ts.
-// V59 = Rename audit logging (Section 109): every applied building/floor/room
-// rename appends one entry to the new locationRenameLog blob collection
-// (actor, from, to, per-collection impact counts, capped at 100 entries, no
-// database change), and the Locations workbench shows a persistent Rename
-// history panel below the 50/50 split. The rename cascade itself is untouched;
-// the cafm_save_state pipeline stores the new blob kind in cafm_blocks_store
-// automatically. Plain Postgres + PostgREST only.
-// MASTER_SPEC Section 109.
-export const PLATFORM_VERSION = "V59";
+// V60 = Data integrity health check (Section 110): the rename cascade now also
+// rewrites the PM targetKey snapshot on work requests (and the location-keyed
+// audit family: campaigns, findings, inspections, CIFM people, onboarding),
+// a server-side heal keeps stale browser copies consistent, and the
+// supabase-v60-integrity-report.sql migration repairs the six drifted PM
+// snapshots plus the frozen legacy audit rows, backs every repaired row up,
+// and installs the 42-check cafm_integrity_report function backed by
+// cafm_v60_repair_backup. Plain Postgres + PostgREST only.
+// MASTER_SPEC Section 110.
+export const PLATFORM_VERSION = "V60";

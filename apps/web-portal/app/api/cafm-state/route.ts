@@ -17,6 +17,7 @@ import { migrateWorkRequestIdsTo10Digits } from "@/lib/wr-id-migration";
 import { sanitizeStateForSite } from "@/lib/site-state-sanitize";
 import { acquireWriteLock } from "@/lib/state-write-lock";
 import { migrateFeatureMatrix } from "@/lib/feature-migration";
+import { migrateWorkRequestTargetKeys } from "@/lib/wr-target-repair";
 import { hasInvalidLockedOverrides, validateGovernance } from "@/lib/wr-governance";
 import { applySyncDelta } from "@/lib/sync-delta";
 import { resolveGovernanceActor } from "@/lib/governance-actor";
@@ -231,7 +232,7 @@ const stateSchema = z.object({
     equipmentCode: z.string().min(1), buildingId: z.string().min(1), updatedAt: z.string().min(1), updatedBy: z.string().min(1),
   })).optional(),
 }).strict().transform((state, context) => {
-  try { return migrateFeatureMatrix(migrateWorkRequestIdsTo10Digits(migratePmState(state))); }
+  try { return migrateFeatureMatrix(migrateWorkRequestIdsTo10Digits(migrateWorkRequestTargetKeys(migratePmState(state)))); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
 });
 const governanceProofSchema = z.object({ wrId: z.string().min(1), kind: z.enum(["pm-reactivation", "lj-override"]), reason: z.string(),

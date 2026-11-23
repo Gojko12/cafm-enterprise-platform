@@ -15,10 +15,17 @@
 // mission events (buildingIds/floorIds/roomIds), equipment inspection sheets
 // (buildingId, roomId must keep matching their equipment) and BIM element links
 // (`buildingId:ifcGlobalId` keys).
+// V60 (Section 110) additionally rewrites the PM targetKey snapshot on work
+// requests and deleted work requests (healed from the row's own mapped
+// location fields), and covers the location-keyed audit family: audit
+// campaigns (buildingIds), audit findings (buildingId, roomId), audit
+// inspections (buildingId), CIFM people and onboarding requests
+// (stationedBuildingId).
 import type { Building, Floor, Room } from "@cafm/shared-schema";
 import type { DemoData, BimElementLink, LocationRenameLogEntry } from "./cafm-data";
 import type { AuditAssurance } from "./equipment-inspection";
 import type { LocationKind } from "./locations";
+import { healWorkRequestTargetKey } from "./wr-target-repair";
 
 export interface LocationRenameRequest {
   kind: LocationKind;
@@ -165,12 +172,12 @@ function runCascade(data: DemoData, request: LocationRenameRequest): { next: Dem
     push("equipment", pass.changed);
   }
   {
-    const pass = rewrite(next.workRequests, (row) => row.SiteId === request.siteId && refMatch(request, row), (row) => refMap(request, row));
+    const pass = rewrite(next.workRequests, (row) => row.SiteId === request.siteId && refMatch(request, row), (row) => healWorkRequestTargetKey(refMap(request, row)));
     if (pass.rows) next = { ...next, workRequests: pass.rows };
     push("work requests", pass.changed);
   }
   {
-    const pass = rewrite(next.deletedWorkRequests, (row) => row.SiteId === request.siteId && refMatch(request, row), (row) => refMap(request, row));
+    const pass = rewrite(next.deletedWorkRequests, (row) => row.SiteId === request.siteId && refMatch(request, row), (row) => healWorkRequestTargetKey(refMap(request, row)));
     if (pass.rows) next = { ...next, deletedWorkRequests: pass.rows };
     push("deleted work requests", pass.changed);
   }
@@ -248,6 +255,40 @@ function runCascade(data: DemoData, request: LocationRenameRequest): { next: Dem
         push("equipment inspection sheets", pass.changed);
       }
     }
+  }
+
+  {
+    const pass = rewrite(next.auditCampaigns, (row) => row.siteId === request.siteId && request.kind === "building" && row.buildingIds.includes(request.from.blId),
+      (row) => ({ ...row, buildingIds: row.buildingIds.map((id) => id === request.from.blId ? request.to.blId : id) }));
+    if (pass.rows) next = { ...next, auditCampaigns: pass.rows };
+    push("audit campaigns", pass.changed);
+  }
+  {
+    // Findings reference a building and (when scoped to one room) its room code;
+    // floor renames cannot reach them because they store no level.
+    const pass = rewrite(next.auditFindings, (row) => row.siteId === request.siteId && row.buildingId === request.from.blId &&
+      (request.kind === "building" || request.kind === "room" && row.roomId === request.from.roomCode),
+      (row) => request.kind === "building" ? { ...row, buildingId: request.to.blId } : { ...row, roomId: request.to.roomCode });
+    if (pass.rows) next = { ...next, auditFindings: pass.rows };
+    push("audit findings", pass.changed);
+  }
+  {
+    const pass = rewrite(next.auditInspections, (row) => row.siteId === request.siteId && request.kind === "building" && row.buildingId === request.from.blId,
+      (row) => ({ ...row, buildingId: request.to.blId }));
+    if (pass.rows) next = { ...next, auditInspections: pass.rows };
+    push("audit inspections", pass.changed);
+  }
+  {
+    const pass = rewrite(next.cifmPeople, (row) => row.stationedSiteId === request.siteId && request.kind === "building" && row.stationedBuildingId === request.from.blId,
+      (row) => ({ ...row, stationedBuildingId: request.to.blId }));
+    if (pass.rows) next = { ...next, cifmPeople: pass.rows };
+    push("CIFM people", pass.changed);
+  }
+  {
+    const pass = rewrite(next.onboardingRequests, (row) => row.stationedSiteId === request.siteId && request.kind === "building" && row.stationedBuildingId === request.from.blId,
+      (row) => ({ ...row, stationedBuildingId: request.to.blId }));
+    if (pass.rows) next = { ...next, onboardingRequests: pass.rows };
+    push("onboarding requests", pass.changed);
   }
 
   if (request.kind === "building" && data.bimElementLinks) {

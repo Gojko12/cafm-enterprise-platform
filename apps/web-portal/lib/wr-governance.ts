@@ -101,10 +101,13 @@ const isPmQaFailedReopen = (old: Wr, next: Wr): boolean =>
 // every changed WR, and the QA metadata whitelist has always allowed exactly these
 // two stamps; without them every cascade rename was rejected with "is terminal"
 // on any site that has closed/cancelled PMs.
+// V60: the rename cascade also rewrites the PM targetKey snapshot, so it joins
+// the location-key whitelist; the server-side heal (lib/wr-target-repair.ts)
+// keeps incoming copies consistent with the mapped location fields.
 const isPmLocationKeyChange = (old: Wr, next: Wr): boolean =>
   ["Percentage", "WorkRequestStatus", "WorkRequestSubstatus", "ClosedAt", "IsFrozen", "FreezeReason"]
     .every((key) => isDeepStrictEqual(old[key], next[key])) &&
-  keysEqualOutside(old, next, new Set(["bl_id", "LevelName", "RoomCode", "UpdatedAt", "updatedAt"]));
+  keysEqualOutside(old, next, new Set(["bl_id", "LevelName", "RoomCode", "targetKey", "UpdatedAt", "updatedAt"]));
 
 export function validateGovernance(existing: State, incoming: State, site: string, actorId: string, proof?: GovernanceProof, globalActor?: GovernanceActor): string | null {
   const actor = globalActor ?? resolveGovernanceActor(existing, site, actorId);
