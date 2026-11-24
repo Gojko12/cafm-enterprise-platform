@@ -78,6 +78,18 @@ export const UserAccessProfileSchema = z.object({
   vpaTrades: z.array(ClassicalTradeSchema),
   vpaBuildingIds: z.array(z.string().min(1)),
   assignedRoleIds: z.array(z.string().min(1)).optional(),
+  /** V66 (Section 116): per-person exceptions layered on top of the role defaults.
+   * `added` = keys this person gets although their roles would not grant them;
+   * `removed` = keys this person is denied although their roles would grant them.
+   * Keys are operational capability flags ("canCreateFJ" ...), feature permission
+   * strings ("workRequests.readAll" ...) or module open keys ("module.fastJobs" ...).
+   * Never applied to Super Admins. */
+  permissionExceptions: z.object({
+    added: z.array(z.string().min(1)),
+    removed: z.array(z.string().min(1)),
+    updatedBy: z.string().min(1).optional(),
+    updatedAt: z.string().min(1).optional(),
+  }).optional(),
   permissions: UserGranularPermissionsSchema,
 });
 export type UserAccessProfile = z.infer<typeof UserAccessProfileSchema>;

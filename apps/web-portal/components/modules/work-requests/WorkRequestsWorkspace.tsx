@@ -10,6 +10,7 @@ import { FJWorkRequestPopup } from "@/components/modules/FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "@/components/modules/LJWorkRequestPopup";
 import { WRDataGrid } from "@/components/modules/WRDataGrid";
 import { useWorkRequestsQueue } from "./useWorkRequestsQueue";
+import { useApp } from "@/lib/hooks/useApp";
 import { WorkRequestsFilterBar, WorkRequestSignalFilters } from "./WorkRequestsFilterBar";
 import { WorkRequestCards } from "./WorkRequestCards";
 
@@ -19,6 +20,10 @@ import { WorkRequestCards } from "./WorkRequestCards";
  */
 export function WorkRequestsWorkspace({ fixedType }: { fixedType: WR_Type }) {
   const queue = useWorkRequestsQueue(fixedType);
+  // V66 (Section 116): a per-person module revocation hides the page entirely.
+  const { moduleAccessDenied } = useApp();
+  const moduleLabel = fixedType === "PM" ? "Preventive Maintenance" : fixedType === "FJ" ? "Fast Jobs" : "Long Jobs";
+  const moduleKey = fixedType === "PM" ? "preventiveMaintenance" : fixedType === "FJ" ? "fastJobs" : "longJobs";
   const {
     workRequests, activeSiteId, view, filterVersion, groupLJ, pmView, setPmView, initialTab, setInitialTab,
     drawerOpen, setDrawerOpen, fastJobOpen, setFastJobOpen, drawerMode, setDrawerMode,
@@ -26,6 +31,18 @@ export function WorkRequestsWorkspace({ fixedType }: { fixedType: WR_Type }) {
     handleViewWR, handleEscalateToLJ, handleSubmitWR, handleSubmitFJ,
   } = queue;
   const coordinationActionCount = useCoordinationActionCount(90);
+
+  if (moduleAccessDenied(moduleKey)) {
+    return (
+      <div className="space-y-4 p-6">
+        <h1 className="text-xl font-semibold">{moduleLabel} · no access</h1>
+        <p className="text-sm text-slate-600">
+          Your access profile does not include this module. Ask an administrator to restore it
+          under People &amp; Permissions &rarr; Person Permission Exceptions.
+        </p>
+      </div>
+    );
+  }
 
   const signalFilters = <WorkRequestSignalFilters queue={queue} requestType={fixedType} />;
   const pmViewSwitcher = fixedType === "PM" ? <div className="flex flex-wrap gap-2" role="group" aria-label="PM view">

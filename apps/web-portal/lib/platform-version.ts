@@ -48,5 +48,18 @@
 // row deep down the table never requires scrolling the page to find the
 // details; below lg the details panel scrolls into view on selection.
 // MASTER_SPEC Section 115.
+// V66 = Section 116: per-person permission exceptions. The new brainstorm
+// tab in People & Permissions ("6. Person Permission Exceptions") layers
+// exceptions on top of the role defaults: emerald = granted beyond the
+// roles, rose = denied despite the roles, slate = exactly the role
+// defaults. Covers module access (sidebar entry hidden + page blocked,
+// e.g. Fast Jobs), feature permissions (useApp.canAccess) and the
+// operational capability flags (resolveEffectivePermissions). Grants are
+// protect-railed: QA/audit and strictly role-determined capabilities can
+// be denied but never granted, hard-locked features are never granted, and
+// Super Admins are never restricted. New optional profile field
+// permissionExceptions, accepted by the save route (no DB migration;
+// userAccessProfiles stays a blob kind). Role editing is untouched.
+// MASTER_SPEC Section 116.
 
-export const PLATFORM_VERSION = "V65";
+export const PLATFORM_VERSION = "V66";

@@ -60,6 +60,9 @@ const permissionFlags: Array<Exclude<keyof UserGranularPermissions, "auditTrades
 ];
 export const checklistDefinitionFlags = ["canDefineChecklistPM", "canDefineChecklistFJ", "canDefineChecklistLJ"] as const;
 export const auditPermissionFlags = ["canAuditChooseWRs", "canAuditDoInspection", "canAuditReopenWR", "canManageFailureReasons"] as const;
+/** Flags whose values are strictly role-determined (Sections 81/82): per-person
+ * exceptions may deny them but never grant them. */
+export const roleDeterminedFlags = ["canCloseWR100", "canReopenCancelledWR", "canEditSlaDates", "canChangeIssuedWRChecklist"] as const;
 export function canRoleInspect(role: RoleDefinition): boolean {
   return role.baseRoleType === "QAInspector" || role.baseRoleType === "SuperAdmin";
 }
@@ -119,6 +122,40 @@ export function resolveEffectivePermissions(profile: UserAccessProfile, definiti
   if (!authorizedQA) {
     result.canAuditChooseWRs = false; result.canAuditDoInspection = false; result.canAuditReopenWR = false;
     result.canManageFailureReasons = false; result.auditTrades = []; result.auditWRTypes = [];
+  }
+  // V66 (Section 116): the person's exceptions are layered on top of the role union.
+  return applyPersonExceptions(result, profile);
+}
+
+/** Resolve the signed-in person's profile: personName / fullName / username, then an
+ * unambiguous first-name match. Extracted so useActiveUserPermissions, useApp and the
+ * Person Exceptions console all resolve the profile the same way. */
+export function resolveActiveProfile(profiles: UserAccessProfile[], activePerson: string): UserAccessProfile | undefined {
+  const person = activePerson.trim().toLowerCase();
+  const firstNameMatches = profiles.filter((item) =>
+    item.personName.trim().split(/\s+/)[0].toLowerCase() === person || item.fullName.trim().split(/\s+/)[0].toLowerCase() === person);
+  return profiles.find((item) => item.personName.trim().toLowerCase() === person ||
+      item.fullName.trim().toLowerCase() === person || item.username?.trim().toLowerCase() === person) ??
+    (firstNameMatches.length === 1 ? firstNameMatches[0] : undefined) ??
+    (activePerson === "Gregor" ? profiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined) ??
+    (firstNameMatches.length > 1 ? firstNameMatches[0] : undefined);
+}
+
+/** V66 (Section 116): apply a person's per-permission exceptions after the role union.
+ * Denies always apply; grants apply only to boolean flags that are not strictly
+ * role-determined and not QA-gated (those follow the role laws instead). Feature
+ * permission strings and `module.*` keys are consumed by useApp, not here. */
+export function applyPersonExceptions(permissions: UserGranularPermissions, profile: UserAccessProfile): UserGranularPermissions {
+  const exceptions = profile.permissionExceptions;
+  if (!exceptions || profile.isSuperAdmin) return permissions;
+  const strict: readonly string[] = [...roleDeterminedFlags, ...auditPermissionFlags];
+  const record = permissions as unknown as Record<string, unknown>;
+  const result = { ...permissions };
+  const target = result as unknown as Record<string, unknown>;
+  for (const key of exceptions.removed) if (key in record && typeof record[key] === "boolean") target[key] = false;
+  for (const key of exceptions.added) {
+    if (!(key in record) || typeof record[key] !== "boolean" || strict.includes(key)) continue;
+    target[key] = true;
   }
   return result;
 }

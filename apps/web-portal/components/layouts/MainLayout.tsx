@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/lib/hooks/useApp";
+import { moduleKeyForRoute } from "@/lib/person-modules";
 import { useSiteContext } from "@/lib/contexts/SiteContext";
 import { SiteId, PLATFORM_SITE_IDS, SITE_LABELS } from "@cafm/shared-schema";
 import { useActiveUserPermissions, useCafmStore } from "@/lib/cafm-store";
@@ -61,6 +62,12 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = React.useState(false);
   const { alertsMuted, setAlertsMuted } = useCafmStore();
+  const { moduleAccessDenied } = useApp();
+  // V66 (Section 116): hide the modules this person's exceptions revoke.
+  const moduleVisible = (href: string) => {
+    const moduleKey = moduleKeyForRoute(href);
+    return !moduleKey || !moduleAccessDenied(moduleKey);
+  };
 
   React.useEffect(() => {
     setCollapsed(readSidebarCollapsed());
@@ -129,7 +136,7 @@ export function Sidebar() {
                   </p>
                 )}
                 <div className="space-y-1">
-                  {item.items.map(({ href, label, icon: Icon }) => {
+                  {item.items.filter((navItem) => moduleVisible(navItem.href)).map(({ href, label, icon: Icon }) => {
                     const isActive = pathname === href || pathname.startsWith(href + "/");
                     return (
                       <Link

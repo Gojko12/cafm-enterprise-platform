@@ -3,22 +3,13 @@
 import { useCafmStore } from "./cafm-store";
 import { useSiteContext } from "./contexts/SiteContext";
 import { resolveGovernanceActor } from "./governance-actor";
-import { resolveEffectivePermissions, permissionsForPreset } from "./access-profiles";
+import { resolveEffectivePermissions, permissionsForPreset, resolveActiveProfile } from "./access-profiles";
 
 export function useActiveUserPermissions() {
   const { data } = useCafmStore();
   const { activeSiteId, activePerson } = useSiteContext();
   const siteProfiles = data.userAccessProfiles.filter((item) => item.siteId === activeSiteId);
-  const person = activePerson.trim().toLowerCase();
-  // Resolve by personName, fullName, username, then by unambiguous first-name prefix
-  // so "Mark" -> "Mark Meyer", "Thomas" -> "Thomas Wagner", "Claudia" -> "Claudia Fischer".
-  const firstNameMatches = siteProfiles.filter((item) =>
-    item.personName.trim().split(/\s+/)[0].toLowerCase() === person || item.fullName.trim().split(/\s+/)[0].toLowerCase() === person);
-  const profile = siteProfiles.find((item) => item.personName.trim().toLowerCase() === person ||
-      item.fullName.trim().toLowerCase() === person || item.username?.trim().toLowerCase() === person) ??
-    (firstNameMatches.length === 1 ? firstNameMatches[0] : undefined) ??
-    (activePerson === "Gregor" ? siteProfiles.find((item) => item.linkedCraftpersonId && item.personName.toLowerCase().startsWith("gregor ")) : undefined) ??
-    (firstNameMatches.length > 1 ? firstNameMatches[0] : undefined);
+  const profile = resolveActiveProfile(siteProfiles, activePerson);
   const superAdmin = resolveGovernanceActor(data, activeSiteId, activePerson)?.roles.includes("SuperAdmin");
   const siteAdmin = profile?.isSiteAdmin && !superAdmin && !profile.isSuperAdmin;
   const siteAllowed = !siteAdmin || (!!profile.managedSiteIds?.includes(activeSiteId));

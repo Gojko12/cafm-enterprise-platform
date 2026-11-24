@@ -69,6 +69,11 @@ const UserAccessProfileSchema = z.object({
   siteAdminGovernance: z.object({ canManageUsersAndVPA: z.boolean(), canManageRoleAssignments: z.boolean(), canManageAuditQuotas: z.boolean(), canManageFreezesAndShifts: z.boolean(), canResetOrExportSiteData: z.boolean() }).optional(),
   vpaTrades: z.array(tradeSchema), vpaBuildingIds: z.array(z.string().min(1)), permissions: permissionsSchema,
   assignedRoleIds: z.array(z.string().min(1)).optional(),
+  // V66 (Section 116): per-person exceptions on top of the role defaults (see shared-schema).
+  permissionExceptions: z.object({
+    added: z.array(z.string().min(1)), removed: z.array(z.string().min(1)),
+    updatedBy: z.string().min(1).optional(), updatedAt: z.string().min(1).optional(),
+  }).optional(),
 });
 const roleDefinitionSchema = z.object({
   id: z.string().min(1), name: z.string().trim().min(1), description: z.string(),

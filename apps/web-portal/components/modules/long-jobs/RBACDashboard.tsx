@@ -35,6 +35,7 @@ import { TradeManagerAssignments } from "@/components/modules/TradeManagerAssign
 import { OnboardingQueue, OnboardPersonModal } from "./OnboardingQueue";
 import { pendingOnboardingCount } from "@/lib/onboarding";
 import { UserAccessMatrix } from "@/components/modules/UserAccessMatrix";
+import { PersonPermissionExceptions } from "./PersonPermissionExceptions";
 
 const LJ_ROLES: LJRole[] = [
   "ESA_TO",
@@ -74,13 +75,14 @@ const LJ_ROLE_ACTIONS: Record<LJRole, string[]> = {
   ],
 };
 
-type ConsoleTab = "directory" | "fm-roles" | "capabilities" | "stages" | "teams" | "onboarding";
+type ConsoleTab = "directory" | "fm-roles" | "capabilities" | "stages" | "teams" | "onboarding" | "exceptions";
 const CONSOLE_TABS: { id: ConsoleTab; label: string }[] = [
   { id: "directory", label: "1. CIFM People Directory (All Employees)" },
   { id: "fm-roles", label: "2. FM Roles, Trades & Site Admins" },
   { id: "capabilities", label: "3. Role Capabilities & Permissions" },
   { id: "stages", label: "4. Long Job Stage Matrix (0%–100%)" },
   { id: "teams", label: "5. Teams & Notices (Newsflash)" },
+  { id: "exceptions", label: "6. Person Permission Exceptions (Brainstorm)" },
   { id: "onboarding", label: "Onboarding Queue" },
 ];
 const LEGACY_TAB_IDS: Record<string, ConsoleTab> = { users: "directory", features: "capabilities", "trade-managers": "fm-roles" };
@@ -196,6 +198,8 @@ export function RBACDashboard() {
       </>}
 
       {activeTab === "stages" && <LJRoleActionMatrix canEdit={canEditMatrices} />}
+
+      {activeTab === "exceptions" && <PersonPermissionExceptions />}
 
       {activeTab === "fm-roles" && fmView === "trades" && <>
       <section className="bg-white border rounded-lg p-4 space-y-3">
