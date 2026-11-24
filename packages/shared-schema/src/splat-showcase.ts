@@ -45,6 +45,10 @@ export const SplatShowcaseSchema = z.object({
   addedBy: z.string().min(1),
   /** ISO timestamp. */
   addedAt: z.string().min(1),
+  /** V69 (Section 119): last editor if the entry was edited after creation. */
+  editedBy: z.string().min(1).optional(),
+  /** ISO timestamp. */
+  editedAt: z.string().min(1).optional(),
 }).refine((entry) => !!entry.sceneUrl || !!entry.embedSrc, "Provide a scene URL or an embed code.");
 
 export type SplatShowcase = z.infer<typeof SplatShowcaseSchema>;

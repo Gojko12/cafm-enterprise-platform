@@ -80,6 +80,7 @@ export const FEATURE_GROUPS: Array<{ title: string; items: Array<[Permission, st
     ["locations.read", "View Buildings, Floors & Rooms"], ["locations.write", "Edit Buildings, Floors & Rooms"],
     ["equipment.read", "View Equipment"], ["equipment.write", "Create & Edit Equipment"], ["trades.write", "Manage Trades"],
     ["people.onboardNonFm", "Onboard & Edit Non-FM Employees (HR)"],
+    ["groundStations.manage", "Manage Ground Stations & Splat Library"],
   ] },
   { title: "Work Requests", items: [
     ["workRequests.readAll", "View All Work Requests"], ["workRequests.readAssigned", "View Own Assigned Work Requests"],

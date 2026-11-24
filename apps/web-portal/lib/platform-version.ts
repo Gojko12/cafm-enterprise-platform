@@ -108,5 +108,26 @@
 // the viewer test in the other project concludes; embedded examples serve
 // the management demo and future technician training.
 // MASTER_SPEC Section 118.
+// V69 = Section 119: splat library editing + annotated share links + a real
+// manage permission. Investigation (2026-11-24, wire-verified): superspl.at
+// share links (https://superspl.at/s?id=<splat-hash>) are complete standalone
+// viewer pages with NO frame restrictions; the sse-bootstrap JSON carries
+// the owner's settings including the numbered annotation points with their
+// own click-to-zoom cameras, so embedding the SHARE link (not the plain
+// Embed-dialog iframe, whose splat may have no annotations) is the right
+// training artefact. SplatLibrary: paste accepts share links, scene links
+// and iframe code (unchanged superspl.at-only host rule); iframes now send
+// allow="fullscreen; xr-spatial-tracking"; every card gained Open-full-page,
+// Edit (pencil, prefilled form, saves editedBy/editedAt on the entry while
+// addedBy/addedAt stay the creation record) and the unchanged delete; the
+// explainer box tells the training story; training cards show the click-
+// the-numbered-points hint. New permission groundStations.manage (shared-
+// schema Permission enum + SiteAdministrator default; FEATURE_GROUPS row):
+// editing the library is no longer hardwired to SuperAdmin/SiteAdmin roles
+// but follows canAccess, so it is configurable per role in the Feature
+// Matrix and per person (+ / -) in the V66 exceptions tab, which both pick
+// the new row up automatically. Seeing the module was already revocable per
+// person (module.groundStations, V68).
+// MASTER_SPEC Section 119.
 
-export const PLATFORM_VERSION = "V68";
+export const PLATFORM_VERSION = "V69";

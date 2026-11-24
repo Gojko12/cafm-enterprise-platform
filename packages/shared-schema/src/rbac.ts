@@ -92,6 +92,7 @@ export const Permission = z.enum([
   "longJobs.approveAcceptanceGates",
   "longJobs.manageSiteContext",
   "people.onboardNonFm",
+  "groundStations.manage",
 ]);
 
 export type Permission = z.infer<typeof Permission>;
@@ -136,6 +137,7 @@ export const ROLE_PERMISSIONS = {
     "longJobs.approveAcceptanceGates",
     "longJobs.manageSiteContext",
     "people.onboardNonFm",
+    "groundStations.manage",
   ],
   ESA_TO: [
     "deskReservations.manageOwn",
