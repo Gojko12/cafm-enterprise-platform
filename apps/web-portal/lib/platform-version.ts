@@ -61,5 +61,26 @@
 // permissionExceptions, accepted by the save route (no DB migration;
 // userAccessProfiles stays a blob kind). Role editing is untouched.
 // MASTER_SPEC Section 116.
+// V67 = Section 117: person permission exceptions normalized for SQL and for
+// the audit trail (the first recorded graduation item of Section 116).
+// scripts/supabase-v67-person-permission-exceptions.sql adds the
+// public.person_permission_exceptions VIEW: one row per person and permission
+// key (person, role, permission_key, mode added/removed, updated_by,
+// updated_at, all sites at once) as a pure projection of the
+// user_access_profiles guaranteed source - deliberately no synced child table
+// and no triggers, because cafm_save_state deletes and reinserts every
+// profile row of a site on each save; a projection cannot drift. The app
+// never reads the view (SQL-editor query surface); rollback = drop view.
+// The history rides the existing change log: CHANGE_LOG_TYPES gained
+// person.permissionException, the save-pipeline diff now compares prev vs
+// next userAccessProfiles per person (recordKey = personName with id
+// fallback), so every exception set/change/reset lands in change_log with
+// who/when/old->new and shows on /change-log; recordKey person, cap 500
+// unchanged. change_log.change_type is free text, so no SQL table change is
+// needed for the history part; the view paste is the single SQL step.
+// ChangeLogSettingsCard now merges the full type catalogue into the shown /
+// toggled rules, so sites with pre-V67 saved settings still see and switch
+// the new rule (missing rules stay enabled by default).
+// MASTER_SPEC Section 117.
 
-export const PLATFORM_VERSION = "V66";
+export const PLATFORM_VERSION = "V67";

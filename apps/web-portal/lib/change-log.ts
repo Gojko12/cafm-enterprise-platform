@@ -118,6 +118,9 @@ function diffLocationRenames(
 
 const wrStatus = (row: AnyRecord) => `${String(row.WorkRequestStatus ?? "")} · ${String(row.WorkRequestSubstatus ?? "")} · ${String(row.Percentage ?? "")}%`;
 const wrAssignment = (row: AnyRecord) => (row.AssignedCraftpersonIds as string[] | undefined)?.join(", ") ?? "";
+/** V67: watch ONLY the exceptions object, so a profile edit that does not touch
+ *  permissionExceptions never logs (reset-to-defaults logs as a removal). */
+const personExceptions = (row: AnyRecord) => row.permissionExceptions ?? null;
 
 /** Computes the log entries for one state transition. Never throws on odd rows. */
 export function diffChangeLog(prev: DemoData, next: DemoData, siteId: SiteId, actor: string, atISO: string, settings?: ChangeLogSettings): ChangeLogEntry[] {
@@ -135,6 +138,7 @@ export function diffChangeLog(prev: DemoData, next: DemoData, siteId: SiteId, ac
     entries.push(...diffCollection(prev.blueprints, next.blueprints, (r) => String(r.ChecklistCode ?? ""), { ...ctx, changeType: "blueprint.change", collection: "blueprints", valueOf: (r) => r }));
     entries.push(...diffCollection(prev.schedules, next.schedules, (r) => String(r.ScheduleId ?? ""), { ...ctx, changeType: "pmSchedule.change", collection: "schedules", valueOf: (r) => r }));
     entries.push(...diffCollection(prev.cifmPeople, next.cifmPeople, (r) => String(r.id ?? ""), { ...ctx, changeType: "person.change", collection: "cifmPeople", valueOf: (r) => r }));
+    entries.push(...diffCollection(prev.userAccessProfiles, next.userAccessProfiles, (r) => String(r.personName ?? r.id ?? ""), { ...ctx, changeType: "person.permissionException", collection: "userAccessProfiles", valueOf: personExceptions }));
     if (isChangeTypeEnabled(settings, "sla.change") && JSON.stringify(prev.siteSlaConfig ?? null) !== JSON.stringify(next.siteSlaConfig ?? null)) {
       entries.push(makeEntry(siteId, actor, atISO, "sla.change", "siteSlaConfig", "siteSlaConfig", "siteSlaConfig", "siteSlaConfig", short(prev.siteSlaConfig ?? ""), short(next.siteSlaConfig ?? "")));
     }

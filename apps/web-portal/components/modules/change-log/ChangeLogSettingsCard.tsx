@@ -2,7 +2,7 @@
 
 import React from "react";
 
-import { CHANGE_LOG_TYPES, defaultChangeLogSettings, type ChangeLogSettings, type ChangeLogType, type SiteId } from "@cafm/shared-schema";
+import { CHANGE_LOG_TYPE_LABELS, CHANGE_LOG_TYPES, defaultChangeLogSettings, type ChangeLogSettings, type ChangeLogType, type SiteId } from "@cafm/shared-schema";
 
 import { useCafmStore } from "@/lib/cafm-store";
 
@@ -15,12 +15,16 @@ interface Props {
 export function ChangeLogSettingsCard({ siteId, canEdit }: Props) {
   const { data, setData } = useCafmStore();
   const settings: ChangeLogSettings = data.changeLogSettings?.siteId === siteId ? data.changeLogSettings : defaultChangeLogSettings(siteId);
-  const enabledCount = settings.rules.filter((rule) => rule.enabled).length;
+  // V67: saved settings can predate the newest CHANGE_LOG_TYPES entry; missing rules
+  // stay enabled by default (isChangeTypeEnabled), so show and toggle the full catalogue.
+  const rules = CHANGE_LOG_TYPES.map((changeType) =>
+    settings.rules.find((rule) => rule.changeType === changeType) ?? { changeType, label: CHANGE_LOG_TYPE_LABELS[changeType], enabled: true });
+  const enabledCount = rules.filter((rule) => rule.enabled).length;
 
   const toggle = (changeType: ChangeLogType) => {
     if (!canEdit) return;
-    const rules = settings.rules.map((rule) => rule.changeType === changeType ? { ...rule, enabled: !rule.enabled } : rule);
-    setData((current) => ({ ...current, changeLogSettings: { siteId, rules } }));
+    const nextRules = rules.map((rule) => rule.changeType === changeType ? { ...rule, enabled: !rule.enabled } : rule);
+    setData((current) => ({ ...current, changeLogSettings: { siteId, rules: nextRules } }));
   };
 
   const reset = () => {
@@ -37,7 +41,7 @@ export function ChangeLogSettingsCard({ siteId, canEdit }: Props) {
         {!canEdit && " 🔒 Read-only — only the CAFM SuperAdmin can change this list."}
       </p>
       <ul className="grid gap-1 sm:grid-cols-2">
-        {settings.rules.map((rule) => (
+        {rules.map((rule) => (
           <li key={rule.changeType}>
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" disabled={!canEdit} checked={rule.enabled} onChange={() => toggle(rule.changeType)} />

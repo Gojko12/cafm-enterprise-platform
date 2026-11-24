@@ -19,6 +19,7 @@ export const CHANGE_LOG_TYPES = [
   "pmSchedule.change",
   "sla.change",
   "person.change",
+  "person.permissionException",
 ] as const;
 
 export type ChangeLogType = (typeof CHANGE_LOG_TYPES)[number];
@@ -34,6 +35,7 @@ export const CHANGE_LOG_TYPE_LABELS: Record<ChangeLogType, string> = {
   "pmSchedule.change": "PM schedule changed",
   "sla.change": "SLA settings changed",
   "person.change": "Person (directory / access profile) changed",
+  "person.permissionException": "Person permission exception added / changed / removed",
 };
 
 /** One row of the change_log table. oldKey === newKey unless the record key itself was renamed. */
