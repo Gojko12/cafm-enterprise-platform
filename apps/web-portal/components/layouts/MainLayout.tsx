@@ -4,7 +4,7 @@ import React from "react";
 import {
   Armchair, ArrowLeftRight, BarChart3, Box, Building, Calendar, CalendarClock,
   ChevronsLeft, ChevronsRight, ClipboardCheck, Cog, Gauge, Globe, Home,
-  Hourglass, Map, Repeat, Satellite, ScrollText, ShieldCheck, Users, Zap
+  Hourglass, Map, Radio, Repeat, Satellite, ScrollText, ShieldCheck, Users, Zap
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -23,6 +23,7 @@ const NAV_ITEMS = [
     { href: "/locations", label: "Locations", icon: Building },
     { href: "/floor-plans", label: "Floor Plans", icon: Map },
     { href: "/bim-viewer", label: "3D BIM Viewer", icon: Box },
+    { href: "/ground-stations", label: "Ground Stations", icon: Radio },
     { href: "/equipment", label: "Equipment Registry", icon: Cog },
     { href: "/desk-reservations", label: "Desk Reservations", icon: Armchair },
   ]},

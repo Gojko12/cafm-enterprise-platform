@@ -82,5 +82,31 @@
 // toggled rules, so sites with pre-V67 saved settings still see and switch
 // the new rule (missing rules stay enabled by default).
 // MASTER_SPEC Section 117.
+// V68 = Section 118: remote ESA ground stations catalogue + Gaussian-splats
+// showcase library (management-demo preparation; requested after V66/V67).
+// New page /ground-stations (Workspace section, module key groundStations,
+// revocable through the V66 person exceptions like every other module):
+// tab 1 is the typed read-only station catalogue lib/remote-stations.ts -
+// the seven ESA-owned ESTRACK stations (Kourou, Santa Maria, Kiruna, Redu/
+// ESEC, Cebreros, Malargue, New Norcia; ESA public material, Nov 2026) with
+// coordinates (OpenStreetMap link), timezone, antennas (id/dish/bands/
+// purpose), the max-5-rooms technical building, helipad where known and the
+// STANDARD STATION KIT checklist (antenna+RF+timing, UPS + diesel generator
+// + distribution, ops computers + ESOC links, KaBa access, fire + intruder
+// alarm, CCTV, HVAC, fence, lightning protection) - the same kit at every
+// station because they are unstaffed day to day and visited by selected
+// technicians (clearance management is planned on top of the V66 person
+// exceptions). Tab 2 is the splat library: a NEW persisted collection
+// splatShowcases (SplatShowcaseSchema in shared-schema; blob kind stored via
+// the generic cafm_blocks_store fallback, no SQL migration) whose entries
+// frame superspl.at (PlayCanvas SuperSplat public gallery) scenes as
+// iframes - paste the Embed-dialog iframe code or a scene URL; only
+// superspl.at hosts may be framed; categories showcase / training /
+// stationCapture, optional binding to a station or a free-text room target
+// (ESOC power plant, EAC ISS rooms), per-site partitioned, SiteAdmin+
+// managed. The in-app splat viewer itself is deliberately OUT of scope until
+// the viewer test in the other project concludes; embedded examples serve
+// the management demo and future technician training.
+// MASTER_SPEC Section 118.
 
-export const PLATFORM_VERSION = "V67";
+export const PLATFORM_VERSION = "V68";

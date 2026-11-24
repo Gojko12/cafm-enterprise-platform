@@ -18,6 +18,7 @@ export * from "./cifm-person.js";
 export * from "./onboarding.js";
 export * from "./date-format.js";
 export * from "./change-log.js";
+export * from "./splat-showcase.js";
 export * from "./pm-coordination.js";
 export { QAInspectorAssignmentSchema } from "./qa-inspector.js";
 export type { QAInspectorAssignment } from "./qa-inspector.js";

@@ -10,6 +10,7 @@ export const PERSON_MODULE_CATALOG: Array<{ key: string; label: string; href: st
   { key: "locations", label: "Locations", href: "/locations" },
   { key: "floorPlans", label: "Floor Plans", href: "/floor-plans" },
   { key: "bimViewer", label: "3D BIM Viewer", href: "/bim-viewer" },
+  { key: "groundStations", label: "Ground Stations", href: "/ground-stations" },
   { key: "equipment", label: "Equipment Registry", href: "/equipment" },
   { key: "deskReservations", label: "Desk Reservations", href: "/desk-reservations" },
   { key: "preventiveMaintenance", label: "Preventive Maintenance", href: "/preventive-maintenance" },
