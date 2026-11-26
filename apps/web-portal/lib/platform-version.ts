@@ -160,5 +160,18 @@
 // local_equipment_code mirror and bumps the per-site revision. Data-only;
 // no schema and no mobile change.
 // MASTER_SPEC Section 121.
+// V72 = Section 122: filter popover layout fix + loud active-filter
+// indicator (two follow-ups from V71 live use). (1) In the popover the
+// field select took its full natural width so the "contains" label, the
+// value input and the remove button collapsed away; every select now has
+// a fixed width (shrink-0), the value inputs keep a minimum width and the
+// popover widened to 34rem, so a filter row is always fully visible.
+// (2) Active filters are now impossible to miss: while any filter is on,
+// the Filters button turns solid blue and reads "⚑ Filters (n)", and an
+// amber strip appears under the toolbar in every registry view with the
+// active filter count, the live "showing X of Y equipment" count and a
+// Clear all filters button (the search box included), so nobody forgets
+// that a filter is hiding equipment.
+// MASTER_SPEC Section 122.
 
-export const PLATFORM_VERSION = "V71";
+export const PLATFORM_VERSION = "V72";

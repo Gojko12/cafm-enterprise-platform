@@ -16,8 +16,17 @@ import type { FieldFilterRow, FilterCondition } from "@/lib/equipment-filters";
 // full-width band that pushes the registry content down; the explanation
 // sentences became hover tooltips and the match counter only renders
 // while a filter is active.
+// V72 Section 122: two follow-ups from live use. (1) The popover rows can
+// never collapse again: every select got a fixed width (shrink-0), the
+// value inputs keep a minimum width and the popover widened to 34rem, so
+// the field, the "contains" label, the input and the remove button are
+// always visible. (2) Active filters are now LOUD: while any filter is
+// on, the Filters button turns solid blue with a flag and the count, and
+// an amber strip under the toolbar shows the flag, the active filter
+// count, the live match count and a Clear-all button, so nobody forgets
+// that a filter is hiding equipment.
 
-const INPUT_CLASS = "min-w-0 flex-1 rounded border p-1 text-xs";
+const INPUT_CLASS = "min-w-[5rem] flex-1 rounded border p-1 text-xs";
 const SELECT_CLASS = "rounded border bg-white p-1 text-xs";
 const VALUELESS_OPERATORS: string[] = ["isEmpty", "isNotEmpty"];
 
@@ -75,22 +84,22 @@ export function useEquipmentFilters(equipment: Equipment[]) {
     </details>
     <details className="relative text-left text-xs">
       <summary aria-label="Equipment filters"
-        className={`cursor-pointer truncate rounded-lg border px-3 py-1.5 font-medium ${activeCount ? "border-blue-600 bg-blue-50 text-blue-700" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-        ⚙ Filters{activeCount ? ` (${activeCount})` : ""}</summary>
-      <div className="absolute left-0 top-full z-30 mt-1 w-[min(28rem,calc(100vw-3rem))] rounded-lg border bg-white p-2.5 shadow-lg">
+        className={`cursor-pointer truncate rounded-lg border px-3 py-1.5 font-medium ${activeCount ? "border-blue-700 bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+        {activeCount ? `⚑ Filters (${activeCount})` : "⚙ Filters"}</summary>
+      <div className="absolute left-0 top-full z-30 mt-1 w-[min(34rem,calc(100vw-3rem))] rounded-lg border bg-white p-2.5 shadow-lg">
         <section aria-label="Field filters" className="space-y-1">
           <span title="Every active row must match (AND), combined with the search and status filters."
             className="block text-[11px] font-medium text-slate-500">Field filters</span>
           {fieldFilters.map((row) => <div key={row.id} className="flex flex-wrap items-center gap-1">
-            <select aria-label="Filter field" value={row.fieldId} className={SELECT_CLASS}
+            <select aria-label="Filter field" value={row.fieldId} className={`${SELECT_CLASS} w-44 shrink-0`}
               onChange={(event) => updateFieldFilter(row.id, { fieldId: event.target.value })}>
               {EQUIPMENT_FILTER_FIELDS.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
             </select>
-            <span className="text-[11px] text-slate-500">contains</span>
+            <span className="shrink-0 text-[11px] text-slate-500">contains</span>
             <input aria-label="Field filter value" value={row.value} placeholder="contains…"
               onChange={(event) => updateFieldFilter(row.id, { value: event.target.value })} className={INPUT_CLASS} />
             <button aria-label="Remove field filter" onClick={() => setFieldFilters((rows) => rows.filter((entry) => entry.id !== row.id))}
-              className="rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
+              className="shrink-0 rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
           </div>)}
           <button onClick={() => setFieldFilters((rows) => [...rows, newFieldFilter()])}
             className="text-xs text-blue-700 hover:underline">+ Add field filter</button>
@@ -104,10 +113,10 @@ export function useEquipmentFilters(equipment: Equipment[]) {
             const needsValue = !VALUELESS_OPERATORS.includes(condition.operator);
             return <div key={condition.id} className="flex flex-wrap items-center gap-1">
               {index === 0 ? <span aria-hidden="true" className="w-11 text-center text-[11px] text-slate-400">where</span>
-                : <select aria-label="Combine with previous conditions" value={condition.connector} className={SELECT_CLASS}
+                : <select aria-label="Combine with previous conditions" value={condition.connector} className={`${SELECT_CLASS} w-14 shrink-0`}
                   onChange={(event) => updateCondition(condition.id, { connector: event.target.value === "or" ? "or" : "and" })}>
                   <option value="and">and</option><option value="or">or</option></select>}
-              <select aria-label="Condition field" value={condition.fieldId} className={SELECT_CLASS}
+              <select aria-label="Condition field" value={condition.fieldId} className={`${SELECT_CLASS} w-40 shrink-0`}
                 onChange={(event) => {
                   const nextFieldId = event.target.value;
                   const nextField = findEquipmentFilterField(nextFieldId);
@@ -116,7 +125,7 @@ export function useEquipmentFilters(equipment: Equipment[]) {
                 }}>
                 {EQUIPMENT_FILTER_FIELDS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
               </select>
-              <select aria-label="Condition operator" value={condition.operator} className={SELECT_CLASS}
+              <select aria-label="Condition operator" value={condition.operator} className={`${SELECT_CLASS} w-32 shrink-0`}
                 onChange={(event) => updateCondition(condition.id, { operator: event.target.value as FilterCondition["operator"], value: VALUELESS_OPERATORS.includes(event.target.value) ? "" : condition.value })}>
                 {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.label}</option>)}
               </select>
@@ -125,7 +134,7 @@ export function useEquipmentFilters(equipment: Equipment[]) {
                     onChange={(event) => updateCondition(condition.id, { value: event.target.value })} className={INPUT_CLASS} />
                 : <span className="text-[11px] text-slate-400">no value needed</span>}
               <button aria-label="Remove condition" onClick={() => setConditions((rows) => rows.filter((entry) => entry.id !== condition.id))}
-                className="rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
+                className="shrink-0 rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
             </div>;
           })}
           <button onClick={() => setConditions((rows) => [...rows, newCondition()])}
@@ -139,6 +148,11 @@ export function useEquipmentFilters(equipment: Equipment[]) {
         </div>}
       </div>
     </details>
+    {filtering && <div className="basis-full flex flex-wrap items-center gap-2 rounded-lg border border-amber-400 bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-900">
+      <span aria-live="polite">⚑ {activeCount} filter{activeCount === 1 ? "" : "s"} active: showing {matchCount} of {equipment.length} equipment</span>
+      <button onClick={() => { setSearch(""); setStatuses([]); setFieldFilters([]); setConditions([]); }}
+        className="rounded border border-amber-600 bg-white px-2 py-0.5 text-amber-900 hover:bg-amber-50">Clear all filters</button>
+    </div>}
   </>;
 
   return { matches, filtering, signature, activeCount, toolbar, applyFocusSearch };
