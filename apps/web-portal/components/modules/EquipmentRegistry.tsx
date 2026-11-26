@@ -219,7 +219,6 @@ export function EquipmentRegistry() {
       <div className="inline-flex overflow-hidden rounded-lg border" role="group" aria-label="Registry view">
         {segment("equipment", "🌳 Equipment Tree")}{segment("location", "🏢 Location Tree")}{segment("flat", "☰ Flat Table")}</div>
       {filters.toolbar}
-      {filters.panel}
       {view !== "flat" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
     </div>

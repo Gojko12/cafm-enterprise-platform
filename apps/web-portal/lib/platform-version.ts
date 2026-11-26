@@ -145,5 +145,20 @@
 // table. AddEquipmentModal extracted to components/modules/equipment/.
 // No schema, DB, SQL or mobile change.
 // MASTER_SPEC Section 120.
+// V71 = Section 121: discreet filter UI + demo Local Equipment Code
+// seeding. The V70 filter panel was a full-width band that pushed the
+// registry content down; the filter rows now live in a compact dropdown
+// popover anchored to the Filters button (a details element, the same
+// pattern as the status dropdown), the long explanation sentences became
+// hover tooltips, the match counter only renders while a filter is active,
+// and the hook no longer returns a separate panel element. Addendum
+// scripts/supabase-v70-1-local-equipment-codes.sql (belongs to Section 120,
+// no new section number): generates [Location]_[Installation]_
+// [Subcomponent] demo codes for every equipment row from a recognisable-
+// abbreviation dictionary (DOOR, LADD, WIND, ALAR, FEXT, UV, CHIL, AHU,
+// GEN, P, FT, ...), writes them to the data jsonb plus the
+// local_equipment_code mirror and bumps the per-site revision. Data-only;
+// no schema and no mobile change.
+// MASTER_SPEC Section 121.
 
-export const PLATFORM_VERSION = "V70";
+export const PLATFORM_VERSION = "V71";

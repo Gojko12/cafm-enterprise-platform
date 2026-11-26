@@ -9,7 +9,13 @@ import type { FieldFilterRow, FilterCondition } from "@/lib/equipment-filters";
 // V70 Section 120: the Equipment Registry filter bar and advanced filter.
 // The hook owns every piece of filter state (quick search, status
 // checkboxes, per-field rows, advanced AND/OR conditions) so the registry
-// itself only consumes { toolbar, panel, matches, filtering, signature }.
+// itself only consumes { toolbar, matches, filtering, signature }.
+// V71 Section 121 made the UI discreet: the filter rows now live in a
+// compact dropdown popover anchored to the Filters button (a details
+// element, the same pattern as the status dropdown) instead of a
+// full-width band that pushes the registry content down; the explanation
+// sentences became hover tooltips and the match counter only renders
+// while a filter is active.
 
 const INPUT_CLASS = "min-w-0 flex-1 rounded border p-1 text-xs";
 const SELECT_CLASS = "rounded border bg-white p-1 text-xs";
@@ -28,7 +34,6 @@ export function useEquipmentFilters(equipment: Equipment[]) {
   const [statuses, setStatuses] = useState<string[]>([]);
   const [fieldFilters, setFieldFilters] = useState<FieldFilterRow[]>([]);
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
-  const [open, setOpen] = useState(false);
 
   const query = search.trim().toLowerCase();
   // One string that changes whenever any filter changes: stable useMemo dep.
@@ -68,75 +73,73 @@ export function useEquipmentFilters(equipment: Equipment[]) {
             onChange={(event) => setStatuses((current) => event.target.checked ? [...current, status] : current.filter((entry) => entry !== status))} /> {status}</label>)}
       </div>
     </details>
-    <button aria-expanded={open} aria-pressed={open} onClick={() => setOpen((current) => !current)}
-      className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${open || activeCount ? "border-blue-600 bg-blue-50 text-blue-700" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-      ⚙ Filters{activeCount ? ` (${activeCount})` : ""}</button>
+    <details className="relative text-left text-xs">
+      <summary aria-label="Equipment filters"
+        className={`cursor-pointer truncate rounded-lg border px-3 py-1.5 font-medium ${activeCount ? "border-blue-600 bg-blue-50 text-blue-700" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+        ⚙ Filters{activeCount ? ` (${activeCount})` : ""}</summary>
+      <div className="absolute left-0 top-full z-30 mt-1 w-[min(28rem,calc(100vw-3rem))] rounded-lg border bg-white p-2.5 shadow-lg">
+        <section aria-label="Field filters" className="space-y-1">
+          <span title="Every active row must match (AND), combined with the search and status filters."
+            className="block text-[11px] font-medium text-slate-500">Field filters</span>
+          {fieldFilters.map((row) => <div key={row.id} className="flex flex-wrap items-center gap-1">
+            <select aria-label="Filter field" value={row.fieldId} className={SELECT_CLASS}
+              onChange={(event) => updateFieldFilter(row.id, { fieldId: event.target.value })}>
+              {EQUIPMENT_FILTER_FIELDS.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
+            </select>
+            <span className="text-[11px] text-slate-500">contains</span>
+            <input aria-label="Field filter value" value={row.value} placeholder="contains…"
+              onChange={(event) => updateFieldFilter(row.id, { value: event.target.value })} className={INPUT_CLASS} />
+            <button aria-label="Remove field filter" onClick={() => setFieldFilters((rows) => rows.filter((entry) => entry.id !== row.id))}
+              className="rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
+          </div>)}
+          <button onClick={() => setFieldFilters((rows) => [...rows, newFieldFilter()])}
+            className="text-xs text-blue-700 hover:underline">+ Add field filter</button>
+        </section>
+        <section aria-label="Advanced filter" className="mt-2 space-y-1 border-t pt-2">
+          <span title="Rows combine top to bottom using the connector in front of each row, e.g. A or B and C means (A or B) and C."
+            className="block text-[11px] font-medium text-slate-500">Advanced filter (and / or)</span>
+          {conditions.map((condition, index) => {
+            const field = findEquipmentFilterField(condition.fieldId);
+            const operators = operatorsForField(field);
+            const needsValue = !VALUELESS_OPERATORS.includes(condition.operator);
+            return <div key={condition.id} className="flex flex-wrap items-center gap-1">
+              {index === 0 ? <span aria-hidden="true" className="w-11 text-center text-[11px] text-slate-400">where</span>
+                : <select aria-label="Combine with previous conditions" value={condition.connector} className={SELECT_CLASS}
+                  onChange={(event) => updateCondition(condition.id, { connector: event.target.value === "or" ? "or" : "and" })}>
+                  <option value="and">and</option><option value="or">or</option></select>}
+              <select aria-label="Condition field" value={condition.fieldId} className={SELECT_CLASS}
+                onChange={(event) => {
+                  const nextFieldId = event.target.value;
+                  const nextField = findEquipmentFilterField(nextFieldId);
+                  const stillValid = operatorsForField(nextField).some((operator) => operator.id === condition.operator);
+                  updateCondition(condition.id, { fieldId: nextFieldId, operator: stillValid ? condition.operator : operatorsForField(nextField)[0].id });
+                }}>
+                {EQUIPMENT_FILTER_FIELDS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+              </select>
+              <select aria-label="Condition operator" value={condition.operator} className={SELECT_CLASS}
+                onChange={(event) => updateCondition(condition.id, { operator: event.target.value as FilterCondition["operator"], value: VALUELESS_OPERATORS.includes(event.target.value) ? "" : condition.value })}>
+                {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.label}</option>)}
+              </select>
+              {needsValue
+                ? <input aria-label="Condition value" value={condition.value} placeholder="value…"
+                    onChange={(event) => updateCondition(condition.id, { value: event.target.value })} className={INPUT_CLASS} />
+                : <span className="text-[11px] text-slate-400">no value needed</span>}
+              <button aria-label="Remove condition" onClick={() => setConditions((rows) => rows.filter((entry) => entry.id !== condition.id))}
+                className="rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
+            </div>;
+          })}
+          <button onClick={() => setConditions((rows) => [...rows, newCondition()])}
+            className="text-xs text-blue-700 hover:underline">+ Add condition</button>
+        </section>
+        {filtering && <div className="mt-2 flex items-center justify-between border-t pt-2 text-[11px] text-slate-500">
+          <span aria-live="polite">{matchCount} of {equipment.length} match</span>
+          <button onClick={() => { setFieldFilters([]); setConditions([]); setStatuses([]); }}
+            title="Keeps the search box; clears the status, field and advanced filters."
+            className="text-slate-600 hover:underline">Clear filters</button>
+        </div>}
+      </div>
+    </details>
   </>;
 
-  const panel = <div className="basis-full rounded-lg border bg-slate-50 p-3 space-y-3">
-    <section aria-label="Field filters" className="space-y-1">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <strong className="text-xs uppercase tracking-wide text-slate-500">Field filters</strong>
-        <span className="text-[11px] text-slate-500">Every active row must match (AND), combined with the search and status filters.</span>
-      </div>
-      {fieldFilters.map((row) => <div key={row.id} className="flex flex-wrap items-center gap-1">
-        <select aria-label="Filter field" value={row.fieldId} className={SELECT_CLASS}
-          onChange={(event) => updateFieldFilter(row.id, { fieldId: event.target.value })}>
-          {EQUIPMENT_FILTER_FIELDS.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
-        </select>
-        <span className="text-[11px] text-slate-500">contains</span>
-        <input aria-label="Field filter value" value={row.value} placeholder="contains…"
-          onChange={(event) => updateFieldFilter(row.id, { value: event.target.value })} className={INPUT_CLASS} />
-        <button aria-label="Remove field filter" onClick={() => setFieldFilters((rows) => rows.filter((entry) => entry.id !== row.id))}
-          className="rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
-      </div>)}
-      <button onClick={() => setFieldFilters((rows) => [...rows, newFieldFilter()])}
-        className="rounded border bg-white px-2 py-1 text-xs text-blue-700">+ Add field filter</button>
-    </section>
-    <section aria-label="Advanced filter" className="space-y-1 border-t pt-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <strong className="text-xs uppercase tracking-wide text-slate-500">Advanced filter (AND / OR)</strong>
-        <span className="text-[11px] text-slate-500">Rows combine top to bottom using the connector in front of each row, e.g. A or B and C means (A or B) and C.</span>
-      </div>
-      {conditions.map((condition, index) => {
-        const field = findEquipmentFilterField(condition.fieldId);
-        const operators = operatorsForField(field);
-        const needsValue = !VALUELESS_OPERATORS.includes(condition.operator);
-        return <div key={condition.id} className="flex flex-wrap items-center gap-1">
-          {index === 0 ? <span aria-hidden="true" className="w-11 text-center text-[11px] text-slate-400">where</span>
-            : <select aria-label="Combine with previous conditions" value={condition.connector} className={SELECT_CLASS}
-              onChange={(event) => updateCondition(condition.id, { connector: event.target.value === "or" ? "or" : "and" })}>
-              <option value="and">and</option><option value="or">or</option></select>}
-          <select aria-label="Condition field" value={condition.fieldId} className={SELECT_CLASS}
-            onChange={(event) => {
-              const nextFieldId = event.target.value;
-              const nextField = findEquipmentFilterField(nextFieldId);
-              const stillValid = operatorsForField(nextField).some((operator) => operator.id === condition.operator);
-              updateCondition(condition.id, { fieldId: nextFieldId, operator: stillValid ? condition.operator : operatorsForField(nextField)[0].id });
-            }}>
-            {EQUIPMENT_FILTER_FIELDS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-          </select>
-          <select aria-label="Condition operator" value={condition.operator} className={SELECT_CLASS}
-            onChange={(event) => updateCondition(condition.id, { operator: event.target.value as FilterCondition["operator"], value: VALUELESS_OPERATORS.includes(event.target.value) ? "" : condition.value })}>
-            {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.label}</option>)}
-          </select>
-          {needsValue
-            ? <input aria-label="Condition value" value={condition.value} placeholder="value…"
-                onChange={(event) => updateCondition(condition.id, { value: event.target.value })} className={INPUT_CLASS} />
-            : <span className="text-[11px] text-slate-400">no value needed</span>}
-          <button aria-label="Remove condition" onClick={() => setConditions((rows) => rows.filter((entry) => entry.id !== condition.id))}
-            className="rounded border bg-white px-2 py-0.5 text-xs text-slate-500">×</button>
-        </div>;
-      })}
-      <button onClick={() => setConditions((rows) => [...rows, newCondition()])}
-        className="rounded border bg-white px-2 py-1 text-xs text-blue-700">+ Add condition</button>
-    </section>
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-[11px] text-slate-500">
-      <span aria-live="polite">{matchCount} of {equipment.length} equipment match the active filters.</span>
-      <button onClick={() => { setFieldFilters([]); setConditions([]); setStatuses([]); setOpen(true); }}
-        className="rounded border bg-white px-2 py-1 text-xs text-slate-600">Clear field and advanced filters</button>
-    </div>
-  </div>;
-
-  return { matches, filtering, signature, activeCount, toolbar, panel, applyFocusSearch };
+  return { matches, filtering, signature, activeCount, toolbar, applyFocusSearch };
 }
