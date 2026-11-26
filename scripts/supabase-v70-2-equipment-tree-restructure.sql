@@ -250,7 +250,7 @@ begin
         '{EquipmentName}',     to_jsonb(coalesce(regexp_replace(e.equipment_name, '\s*Installation\s*$', '', 'i'), ''))),
         '{EquipmentNameLocal}', to_jsonb(case when e.equipment_name_local is null then ''
                                   else regexp_replace(e.equipment_name_local, '\s*·\s*Installation\s*$', '', 'i') end)),
-        '{HierarchyLevel}',   to_jsonb('Installation'))
+        '{HierarchyLevel}',    to_jsonb('Installation'::text))
     where e.site_id = v_inst.site_id and e.equipment_code = v_inst.equipment_code;
 
     insert into kit_stat (site_id, renamed, updated, added) values (v_inst.site_id, 1, 0, 0)
