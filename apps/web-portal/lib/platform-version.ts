@@ -192,5 +192,27 @@
 // list and details lets you squeeze the details panel to any width
 // (15-85%, persisted per browser).
 // MASTER_SPEC Section 123.
+// V74 = Section 124: deeper equipment kits + flat table always fits the
+// panel (two follow-ups from V73 live use). (1) The kits got much more
+// realistic: every one of the 16 systems now carries 4 to 8 subequipment
+// rows with their own components, e.g. the diesel generator gained Fuel
+// tank (Level gauge), Starter battery (Battery monitor), Control panel
+// (Relay) and Exhaust muffler on top of Gas pump/Cooling/Oil pump; the
+// chiller gained Oil separator and Control panel (Controller); the AHU
+// gained Return fan (Fan motor), Humidifier (Steam valve), Damper set
+// (Actuator) and Heat recovery wheel; lift, boiler, UPS and the rest
+// equally. Addendum scripts/supabase-v70-3-equipment-kit-expansion.sql
+// (belongs to Section 120, no new section number) inserts ONLY the new
+// rows into the live database: each slot resolves to its expected local
+// code and is skipped when the row already exists, existing rows are
+// never renamed or deleted, and installations that V70.2 did not
+// normalise are skipped. (2) The flat table (all registries, shared
+// OverviewTable) now always fills the available width instead of using
+// fixed pixel column widths that overflowed the panel: column sizes stay
+// stored in pixels but render as relative shares, so the headers, the
+// per-column filter row and every column are fully visible at any panel
+// width without scrolling right; resizing a column just shifts the
+// shares.
+// MASTER_SPEC Section 124.
 
-export const PLATFORM_VERSION = "V73";
+export const PLATFORM_VERSION = "V74";
