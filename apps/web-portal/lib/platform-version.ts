@@ -129,5 +129,21 @@
 // the new row up automatically. Seeing the module was already revocable per
 // person (module.groundStations, V68).
 // MASTER_SPEC Section 119.
+// V70 = Section 120: Local Equipment Code + full equipment filtering. The
+// LocalEquipmentCode field (already in the shared schema, never the primary
+// key: EquipmentCode stays the immutable internal ID) becomes a first-class
+// operational identifier: flat-table column, quick-search and global-search
+// field, editable in the details panel and settable at creation, with the
+// [Location]_[Installation]_[Subcomponent] structure as guidance (soft
+// amber warning, never a hard block, so legacy values keep parsing and
+// renaming stays free). New filter engine (lib/equipment-filters.ts +
+// components/modules/equipment/EquipmentFilterPanel.tsx) shared by all
+// three registry views (equipment tree, location tree, flat table):
+// per-field "contains" rows (AND with search and status) and an advanced
+// AND/OR condition builder evaluated top to bottom, with a live match
+// count; tree views therefore filter by any field exactly like the flat
+// table. AddEquipmentModal extracted to components/modules/equipment/.
+// No schema, DB, SQL or mobile change.
+// MASTER_SPEC Section 120.
 
-export const PLATFORM_VERSION = "V69";
+export const PLATFORM_VERSION = "V70";

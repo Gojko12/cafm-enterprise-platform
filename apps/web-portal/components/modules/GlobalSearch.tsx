@@ -91,7 +91,7 @@ function buildCategories(data: StoreData): SearchCategory[] {
       key: "equipment", label: "Equipment", href: "/equipment", items: rows(data.equipment),
       // /equipment?eq= preselects the item and opens its details panel.
       buildHref: (item) => `/equipment?eq=${encodeURIComponent(str(item.EquipmentCode))}`,
-      fields: ["EquipmentCode", "EquipmentName", "EquipmentNameLocal", "Category", "Manufacturer", "Model", "bl_id", "RoomCode"],
+      fields: ["EquipmentCode", "LocalEquipmentCode", "EquipmentName", "EquipmentNameLocal", "Category", "Manufacturer", "Model", "bl_id", "RoomCode"],
       terms: [],
       title: ["EquipmentCode"], subtitle: ["EquipmentName", "Category"],
     },

@@ -17,9 +17,13 @@ import { PMWorkRequestPopup } from "./PMWorkRequestPopup";
 import { FJWorkRequestPopup } from "./FJWorkRequestPopup";
 import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
+import { useEquipmentFilters } from "./equipment/EquipmentFilterPanel";
+import { AddEquipmentModal } from "./equipment/AddEquipmentModal";
+import { LOCAL_EQUIPMENT_CODE_HINT, localEquipmentCodeIssue } from "@/lib/equipment-filters";
 
 const columns = [
   { id: "code", label: "EQ ID", value: (eq: Equipment) => eq.EquipmentCode, render: (eq: Equipment) => <span className="font-mono font-semibold">{eq.EquipmentCode}</span> },
+  { id: "lecode", label: "Local Code", value: (eq: Equipment) => eq.LocalEquipmentCode },
   { id: "name", label: "Name", value: (eq: Equipment) => eq.EquipmentName },
   { id: "local", label: "Local name", value: (eq: Equipment) => eq.EquipmentNameLocal },
   { id: "category", label: "Category", value: (eq: Equipment) => eq.Category ? `${eq.Category} - ${EQUIPMENT_CATEGORIES[eq.Category]}` : undefined },
@@ -100,14 +104,7 @@ export function EquipmentRegistry() {
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("equipment");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [statuses, setStatuses] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
-  const statusFilter = <details className="relative text-left text-xs"><summary aria-label="Equipment status filter" className="cursor-pointer truncate rounded-lg border bg-white px-3 py-1.5">Status: {statuses.length ? statuses.join(", ") : "All Statuses"}</summary>
-    <div className="absolute z-20 w-48 rounded border bg-white p-2 shadow">
-      <button onClick={() => setStatuses([])} className="block underline">All Statuses</button>
-      {EQUIPMENT_STATUSES.map((status) => <label key={status} className="block py-1"><input type="checkbox" checked={statuses.includes(status)} onChange={(event) => setStatuses((current) => event.target.checked ? [...current, status] : current.filter((entry) => entry !== status))} /> {status}</label>)}
-    </div></details>;
   useEffect(() => { setSelected(null); setCollapsed(new Set()); }, [activeSiteId]);
   // Deep link: /equipment?eq=0000000001 preselects the equipment (3D BIM viewer
   // and, since V65, the global search). Reactive on the param so clicking a
@@ -116,19 +113,19 @@ export function EquipmentRegistry() {
   // hit selects again.
   const focusEq = searchParams.get("eq");
   const hydrated = data.equipment.length > 0;
+  const equipment = useMemo(() => data.equipment.filter((entry) => entry.SiteId === activeSiteId), [data.equipment, activeSiteId]);
+  const filters = useEquipmentFilters(equipment);
   useEffect(() => {
     if (!focusEq || !hydrated) return;
     if (data.equipment.some((eq) => eq.SiteId === activeSiteId && eq.EquipmentCode === focusEq)) {
       setSelected(focusEq);
       // Prefill the in-page search with the code: the tree views expand on a
       // search, so the selected row is guaranteed to be visible in view.
-      setSearch(focusEq);
-      setStatuses([]);
+      filters.applyFocusSearch(focusEq);
       router.replace("/equipment", { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusEq, hydrated, activeSiteId]);
-  const equipment = useMemo(() => data.equipment.filter((entry) => entry.SiteId === activeSiteId), [data.equipment, activeSiteId]);
   const item = equipment.find((eq) => eq.EquipmentCode === selected);
   // The list and the details panel each get their own scrollbar on lg screens
   // (both fixed to the viewport height, so the page never scrolls as one block
@@ -149,13 +146,11 @@ export function EquipmentRegistry() {
     }
     return counts;
   }, [data.workRequests, activeSiteId]);
-  const query = search.trim().toLowerCase();
-  const filtering = !!query || statuses.length > 0;
-  const matches = (eq: Equipment) => (!statuses.length || statuses.includes(eq.Status)) && (!query ||
-    [eq.EquipmentCode, eq.EquipmentName, eq.EquipmentNameLocal, eq.Category, eq.PrimaryTradeId, eq.bl_id, eq.LevelName, eq.RoomCode, eq.ParentEquipmentCode].some((value) => value?.toLowerCase().includes(query)));
+  const filtering = filters.filtering;
+  const matches = filters.matches;
   const tree = useMemo(() => buildTreeRows(equipment, matches, filtering, collapsed),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [equipment, query, statuses, collapsed]);
+    [equipment, filters.signature, collapsed]);
   const flat = equipment.filter(matches);
   const locationRows = useMemo(() => {
     const rows: { key: string; depth: number; kind: "building" | "floor" | "room" | "eq"; label: string; count: number; eq?: Equipment; open: boolean }[] = [];
@@ -188,7 +183,7 @@ export function EquipmentRegistry() {
     }
     return { rows, groupKeys };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [equipment, query, statuses, collapsed, data.buildings, activeSiteId]);
+  }, [equipment, filters.signature, collapsed, data.buildings, activeSiteId]);
   const toggle = (key: string) => setCollapsed((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
   const expandAll = () => setCollapsed(new Set());
   const collapseAll = () => setCollapsed(new Set(view === "location" ? locationRows.groupKeys : tree.parentCodes));
@@ -223,8 +218,8 @@ export function EquipmentRegistry() {
     <div className="flex flex-wrap items-center gap-2">
       <div className="inline-flex overflow-hidden rounded-lg border" role="group" aria-label="Registry view">
         {segment("equipment", "🌳 Equipment Tree")}{segment("location", "🏢 Location Tree")}{segment("flat", "☰ Flat Table")}</div>
-      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search code, name, trade, room…" aria-label="Search equipment" className="min-w-[14rem] flex-1 rounded-lg border px-3 py-1.5 text-sm" />
-      {statusFilter}
+      {filters.toolbar}
+      {filters.panel}
       {view !== "flat" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
     </div>
@@ -255,66 +250,6 @@ export function EquipmentRegistry() {
       )}
     </div>
     {adding && <AddEquipmentModal siteId={activeSiteId} onClose={() => setAdding(false)} onCreated={(code) => { setAdding(false); setSelected(code); }} />}
-  </div>;
-}
-
-function AddEquipmentModal({ siteId, onClose, onCreated }: { siteId: Equipment["SiteId"]; onClose: () => void; onCreated: (code: string) => void }) {
-  const { data, setData } = useCafmStore();
-  const { permissions } = useActiveUserPermissions();
-  const { activePerson } = useSiteContext();
-  const siteEquipment = data.equipment.filter((eq) => eq.SiteId === siteId);
-  const buildings = data.buildings.filter((entry) => entry.SiteId === siteId);
-  const floors = data.floors.filter((entry) => entry.SiteId === siteId);
-  const rooms = data.rooms.filter((entry) => entry.SiteId === siteId);
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("");
-  const [level, setLevel] = useState<Level>("Installation");
-  const [parent, setParent] = useState("");
-  const [trade, setTrade] = useState("");
-  const [location, setLocation] = useState<{ building: Building | null; floor: Floor | null; room: Room | null }>({ building: null, floor: null, room: null });
-  const [error, setError] = useState("");
-  const parentLevel = level === "SubEquipment" ? "Installation" : level === "Component" ? "SubEquipment" : undefined;
-  const parents = parentLevel ? siteEquipment.filter((eq) => eq.HierarchyLevel === parentLevel) : [];
-  const trades = [...new Set(siteEquipment.map((eq) => eq.PrimaryTradeId).filter((value): value is string => !!value))];
-  const create = () => {
-    if (!permissions?.canManageEquipment) { setError("Permission required: Manage Equipment."); return; }
-    if (!name.trim()) { setError("Equipment name is required."); return; }
-    if (!category) { setError("Select a category."); return; }
-    const parentItem = parents.find((eq) => eq.EquipmentCode === parent);
-    if (parentLevel && !parentItem) { setError(`Select a parent ${parentLevel}.`); return; }
-    const place = parentItem ? { bl_id: parentItem.bl_id, LevelName: parentItem.LevelName, RoomCode: parentItem.RoomCode }
-      : location.building && location.floor && location.room ? { bl_id: location.building.bl_id, LevelName: location.floor.LevelName, RoomCode: location.room.RoomCode } : null;
-    if (!place) { setError("Select a building, floor and room."); return; }
-    const maxCode = data.equipment.reduce((max, eq) => /^\d{10}$/.test(eq.EquipmentCode) ? Math.max(max, Number(eq.EquipmentCode)) : max, 0);
-    const code = String(maxCode + 1).padStart(10, "0");
-    const parsed = EquipmentSchema.safeParse({
-      EquipmentCode: code, EquipmentName: name.trim(), Category: category, HierarchyLevel: level, IsInstallation: level === "Installation",
-      ParentEquipmentCode: parentItem?.EquipmentCode, Status: "In Service", TechnicalSpecifications: {}, SiteId: siteId, ...place,
-      PrimaryTradeId: trade.trim() || parentItem?.PrimaryTradeId,
-      Activity: [{ id: crypto.randomUUID(), kind: "log", actorId: activePerson, actorName: activePerson, actorRole: "", createdAt: new Date().toISOString(), text: "Equipment created in the registry." }],
-    });
-    if (!parsed.success) { setError(parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")); return; }
-    setData((state) => ({ ...state, equipment: [...state.equipment, parsed.data] }));
-    onCreated(code);
-  };
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3" role="dialog" aria-label="Add equipment">
-    <div className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-      <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5"><strong>Add Equipment</strong>
-        <button aria-label="Close" onClick={onClose} className="rounded px-2 text-slate-500 hover:bg-slate-100">×</button></div>
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-y-auto px-4 py-3 text-xs">
-        <label className="col-span-2">Name *<input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 block w-full rounded border p-1.5 text-sm" /></label>
-        <label>Hierarchy level<select value={level} onChange={(event) => { setLevel(event.target.value as Level); setParent(""); }} className="mt-1 block w-full rounded border p-1.5 text-sm"><option>Installation</option><option>SubEquipment</option><option>Component</option></select></label>
-        <label>Category *<select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-1 block w-full rounded border p-1.5 text-sm"><option value="">Select</option>{Object.entries(EQUIPMENT_CATEGORIES).map(([code, label]) => <option key={code} value={code}>{code} · {label}</option>)}</select></label>
-        {parentLevel && <label className="col-span-2">Parent {parentLevel} * (location is inherited)<select value={parent} onChange={(event) => setParent(event.target.value)} className="mt-1 block w-full rounded border p-1.5 text-sm"><option value="">Select</option>{parents.map((eq) => <option key={eq.EquipmentCode} value={eq.EquipmentCode}>{eq.EquipmentCode} · {eq.EquipmentName}</option>)}</select></label>}
-        <label>Trade<input list="equipment-trades" value={trade} onChange={(event) => setTrade(event.target.value)} className="mt-1 block w-full rounded border p-1.5 text-sm" /><datalist id="equipment-trades">{trades.map((value) => <option key={value} value={value} />)}</datalist></label>
-        {!parentLevel && <div className="col-span-2"><LocationEquipmentPickerGroup buildings={buildings} floors={floors} rooms={rooms} showEquipment={false}
-          selectedBuilding={location.building} selectedFloor={location.floor} selectedRoom={location.room} onLocationChange={(next) => { setError(""); setLocation(next); }} /></div>}
-        {error && <p role="alert" className="col-span-2 text-sm text-red-700">{error}</p>}
-      </div>
-      <div className="flex shrink-0 items-center justify-between border-t bg-slate-50 px-4 py-2.5">
-        <button onClick={onClose} className="rounded border bg-white px-3 py-1.5 text-sm">Cancel</button>
-        <button onClick={create} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white">Create Equipment</button></div>
-    </div>
   </div>;
 }
 
@@ -414,7 +349,7 @@ function EquipmentDetails({ item, onClose, onSelect }: { item: Equipment; onClos
     try { specs = JSON.parse(specifications); } catch { setError("Technical specifications must be valid JSON."); return; }
     const validatedSpecs = TechnicalSpecificationsSchema.safeParse(specs);
     if (!validatedSpecs.success) { setError("Technical specifications must be an object with string, number, boolean or string-array values."); return; }
-    const parsed = EquipmentSchema.safeParse({ ...draft, TechnicalSpecifications: validatedSpecs.data, bl_id: location.building.bl_id, LevelName: location.floor.LevelName,
+    const parsed = EquipmentSchema.safeParse({ ...draft, LocalEquipmentCode: draft.LocalEquipmentCode?.trim() || undefined, TechnicalSpecifications: validatedSpecs.data, bl_id: location.building.bl_id, LevelName: location.floor.LevelName,
       RoomCode: location.room.RoomCode, IsInstallation: draft.HierarchyLevel === "Installation" });
     if (!parsed.success) { setError(parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")); return; }
     if (JSON.stringify(baseline) !== JSON.stringify(data.equipment.find((eq) => eq.SiteId === item.SiteId && eq.EquipmentCode === item.EquipmentCode))) {
@@ -448,7 +383,7 @@ function EquipmentDetails({ item, onClose, onSelect }: { item: Equipment; onClos
       const raw = event.target.value; setDraft((current) => ({ ...current, [key]: raw === "" ? undefined : Number(raw) }));
     }} className="mt-1 block w-full rounded border p-1 text-sm" /></label>;
   return <aside className="min-w-0 w-full space-y-3 rounded-lg border bg-white p-3">
-    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="font-mono text-xs text-slate-500">{item.EquipmentCode}</div><strong className="text-base">{item.EquipmentName}</strong>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="font-mono text-xs text-slate-500">{item.EquipmentCode}{item.LocalEquipmentCode ? ` · ${item.LocalEquipmentCode}` : ""}</div><strong className="text-base">{item.EquipmentName}</strong>
       <div className="mt-1 flex gap-1"><LevelPill level={item.HierarchyLevel} /><span className={`rounded-full border px-2 py-0.5 text-[11px] ${statusStyle(item.Status)}`}>{item.Status}</span></div></div>
       <div className="flex items-center gap-2 text-xs">
         {locator ? <a href={locator} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">2D Floor Plan</a> : <span title="No room polygon is available" className="rounded-full border px-3 py-1 text-slate-400">2D N/A</span>}
@@ -462,6 +397,8 @@ function EquipmentDetails({ item, onClose, onSelect }: { item: Equipment; onClos
       <div className="grid gap-2 sm:grid-cols-2">
         {text("EQ Name (English)", draft.EquipmentName, (value) => setDraft({ ...draft, EquipmentName: value }))}
         {text("EQ Name (Local Language)", draft.EquipmentNameLocal, (value) => setDraft({ ...draft, EquipmentNameLocal: value }))}
+        {text("Local Equipment Code (operational)", draft.LocalEquipmentCode, (value) => setDraft({ ...draft, LocalEquipmentCode: value }))}
+        <p className={`col-span-2 text-[11px] ${localEquipmentCodeIssue(draft.LocalEquipmentCode) ? "text-amber-700" : "text-slate-400"}`}>{localEquipmentCodeIssue(draft.LocalEquipmentCode) ?? LOCAL_EQUIPMENT_CODE_HINT}</p>
         <label className="text-xs">Category<select value={draft.Category ?? ""} onChange={(e) => {
           const value = e.target.value; const category = Object.keys(EQUIPMENT_CATEGORIES).find((key) => key === value);
           if (category && category in EQUIPMENT_CATEGORIES) setDraft({ ...draft, Category: category as keyof typeof EQUIPMENT_CATEGORIES });
