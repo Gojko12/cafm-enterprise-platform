@@ -163,6 +163,12 @@ function activity(id: string, type: string, stage: number): NonNullable<BaseWork
 export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "floors" | "rooms" | "equipment" | "blueprints" | "schedules" | "craftspeople" | "workRequests"> {
   const buildings: Building[] = [], floors: Floor[] = [], rooms: Room[] = [], equipment: Equipment[] = [];
   const blueprints: PM_ChecklistStandard[] = [], schedules: PM_Schedule[] = [], craftspeople: DemoData["craftspeople"] = [], workRequests: BaseWorkRequest[] = [];
+  // V75 Section 125: every site occupies one contiguous numeric code block:
+  // 48 trio rows (16 systems x 3) followed by the extra kit rows, so fresh
+  // sites get small sequential EQ IDs (site 01 uses 0000000001..0000000145)
+  // instead of the old 9000xx codes.
+  const kitSlots = systemKits.reduce((sum, kit) => sum + kit.subs.reduce((n, sub) => n + sub.comps.length, kit.subs.length), 0);
+  const siteBlock = systems.length * 3 + (kitSlots - systems.length * 2);
   for (const site of sites) {
     const tag = site.slice(-2);
     for (let b = 1; b <= 4; b++) {
@@ -204,13 +210,16 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     // (work requests, schedules and analytics reference it) but now carries a
     // domain-correct kit. The first subequipment and first component reuse
     // the old generic codes (base+2 / base+3) so historical references keep
-    // resolving; every further kit row takes a fresh 9000xx code.
-    let kitCounter = 900001;
+    // resolving.
+    // V75 Section 125: every further kit row continues the site's own block
+    // right after its 48 trio rows, so codes stay small and sequential
+    // (0000000049, 0000000050, ...) in creation order.
+    let kitCounter = (Number(tag) - 1) * siteBlock + systems.length * 3 + 1;
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
       const system = systems[i];
       const kit = systemKits[i];
-      const base = (Number(tag) - 1) * systems.length * 3 + i * 3;
+      const base = (Number(tag) - 1) * siteBlock + i * 3;
       const codeFor = (number: number) => String(number).padStart(10, "0");
       const rootCode = codeFor(base + 1);
       const localCode = `${room.bl_id}_${kit.key}1`;

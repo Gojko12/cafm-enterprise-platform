@@ -214,5 +214,22 @@
 // width without scrolling right; resizing a column just shifts the
 // shares.
 // MASTER_SPEC Section 124.
+// V75 = Section 125: sequential equipment codes + flat table sorting and
+// filter placement (follow-ups from V74 live use). (1) The V70.2/V70.3 kit
+// inserts took "max numeric code + 1" codes, which a pre-existing huge
+// real-asset code hijacked into values like 9047930756; the seed now gives
+// every site one contiguous small block (48 trio rows followed by the
+// extra kit rows, site 01 uses 0000000001..0000000145) and the addendum
+// scripts/supabase-v70-4-equipment-code-renumber.sql renumbers the
+// already-inserted live rows to continue each site's own small sequence
+// (0000000049, 0000000050, ...) in creation order, with children, work
+// request and schedule references following automatically. (2) The flat
+// equipment table now defaults to Local Equipment Code order (column
+// renamed from "Local Code"), so every installation sits together with
+// its subequipment and components; header-click sorting still overrides
+// it. (3) The ⚙ Filters dropdown moved next to the "N shown" counter
+// above the flat table, so it is always visible without scrolling right;
+// the tree and location views keep it in the toolbar.
+// MASTER_SPEC Section 125.
 
-export const PLATFORM_VERSION = "V74";
+export const PLATFORM_VERSION = "V75";

@@ -23,7 +23,7 @@ import { LOCAL_EQUIPMENT_CODE_HINT, localEquipmentCodeIssue } from "@/lib/equipm
 
 const columns = [
   { id: "code", label: "EQ ID", value: (eq: Equipment) => eq.EquipmentCode, render: (eq: Equipment) => <span className="font-mono font-semibold">{eq.EquipmentCode}</span> },
-  { id: "lecode", label: "Local Code", value: (eq: Equipment) => eq.LocalEquipmentCode },
+  { id: "lecode", label: "Local Equipment Code", value: (eq: Equipment) => eq.LocalEquipmentCode },
   { id: "name", label: "Name", value: (eq: Equipment) => eq.EquipmentName },
   { id: "local", label: "Local name", value: (eq: Equipment) => eq.EquipmentNameLocal },
   { id: "category", label: "Category", value: (eq: Equipment) => eq.Category ? `${eq.Category} - ${EQUIPMENT_CATEGORIES[eq.Category]}` : undefined },
@@ -162,7 +162,12 @@ export function EquipmentRegistry() {
   const tree = useMemo(() => buildTreeRows(equipment, matches, filtering, collapsed),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [equipment, filters.signature, collapsed]);
-  const flat = equipment.filter(matches);
+  // V75 Section 125: the flat table defaults to Local Equipment Code order
+  // so every installation sits together with its subequipment and
+  // components; rows without a local code sort last. Column-header sorting
+  // (click a label, click again to reverse) still overrides this.
+  const flat = [...equipment].filter(matches).sort((a, b) =>
+    (a.LocalEquipmentCode ?? "~~~").localeCompare(b.LocalEquipmentCode ?? "~~~") || (a.EquipmentCode ?? "").localeCompare(b.EquipmentCode ?? ""));
   const locationRows = useMemo(() => {
     const rows: { key: string; depth: number; kind: "building" | "floor" | "room" | "eq"; label: string; count: number; eq?: Equipment; open: boolean }[] = [];
     const groupKeys: string[] = [];
@@ -229,6 +234,7 @@ export function EquipmentRegistry() {
     <div className="flex flex-wrap items-center gap-2">
       <div className="inline-flex overflow-hidden rounded-lg border" role="group" aria-label="Registry view">
         {segment("equipment", "🌳 Equipment Tree")}{segment("location", "🏢 Location Tree")}{segment("flat", "☰ Flat Table")}</div>
+      {view !== "flat" && filters.toggle}
       {filters.toolbar}
       {view !== "flat" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
@@ -236,7 +242,7 @@ export function EquipmentRegistry() {
     <div ref={splitRef} className="flex flex-col gap-4 lg:flex-row" style={{ "--eq-split": `${splitPct}%` } as React.CSSProperties}>
       <div className={`min-w-0 transition-all lg:h-[calc(100vh-14rem)] lg:overflow-auto ${item ? "lg:w-[var(--eq-split)]" : "w-full"}`}>
         {view === "flat" && <OverviewTable preferenceKey="equipment" columns={columns} rows={flat} rowKey={(eq) => eq.EquipmentCode} onRow={(eq) => setSelected(eq.EquipmentCode)}
-          viewportClassName="overflow-auto rounded border lg:max-h-[calc(100vh-14rem)]"
+          viewportClassName="overflow-auto rounded border lg:max-h-[calc(100vh-14rem)]" infoExtra={filters.toggle}
           rowClassName={(eq) => eq.EquipmentCode === selected ? "bg-blue-100 border-l-4 border-l-blue-600 font-semibold" : ""} />}
         {view === "equipment" && <div className="overflow-auto rounded-lg border bg-white lg:max-h-[calc(100vh-14rem)]"><div className="min-w-[44rem]">{header}
           {tree.rows.length === 0 && <p className="p-4 text-sm text-slate-500">No equipment matches the current filters.</p>}

@@ -68,11 +68,11 @@ export function useEquipmentFilters(equipment: Equipment[]) {
   const updateCondition = (id: string, next: Partial<FilterCondition>) =>
     setConditions((rows) => rows.map((row) => row.id === id ? { ...row, ...next } : row));
 
-  const toolbar = <>
-    <input value={search} onChange={(event) => setSearch(event.target.value)}
+  const searchInput = <input value={search} onChange={(event) => setSearch(event.target.value)}
       placeholder="Search code, local code, name, trade, room…" aria-label="Search equipment"
-      className="min-w-[14rem] flex-1 rounded-lg border px-3 py-1.5 text-sm" />
-    <details className="relative text-left text-xs">
+      className="min-w-[14rem] flex-1 rounded-lg border px-3 py-1.5 text-sm" />;
+
+  const statusDropdown = <details className="relative text-left text-xs">
       <summary aria-label="Equipment status filter" className="cursor-pointer truncate rounded-lg border bg-white px-3 py-1.5">
         Status: {statuses.length ? statuses.join(", ") : "All Statuses"}</summary>
       <div className="absolute z-20 w-48 rounded border bg-white p-2 shadow">
@@ -81,8 +81,12 @@ export function useEquipmentFilters(equipment: Equipment[]) {
           <input type="checkbox" checked={statuses.includes(status)}
             onChange={(event) => setStatuses((current) => event.target.checked ? [...current, status] : current.filter((entry) => entry !== status))} /> {status}</label>)}
       </div>
-    </details>
-    <details className="relative text-left text-xs">
+    </details>;
+
+  // V75 Section 125: the ⚙ Filters dropdown is also exposed as `toggle` so
+  // the flat view can place it next to the "N shown" counter above the
+  // table; the tree and location views keep it in the toolbar row.
+  const filtersToggle = <details className="relative text-left text-xs">
       <summary aria-label="Equipment filters"
         className={`cursor-pointer truncate rounded-lg border px-3 py-1.5 font-medium ${activeCount ? "border-blue-700 bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
         {activeCount ? `⚑ Filters (${activeCount})` : "⚙ Filters"}</summary>
@@ -147,7 +151,11 @@ export function useEquipmentFilters(equipment: Equipment[]) {
             className="text-slate-600 hover:underline">Clear filters</button>
         </div>}
       </div>
-    </details>
+    </details>;
+
+  const toolbar = <>
+    {searchInput}
+    {statusDropdown}
     {filtering && <div className="basis-full flex flex-wrap items-center gap-2 rounded-lg border border-amber-400 bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-900">
       <span aria-live="polite">⚑ {activeCount} filter{activeCount === 1 ? "" : "s"} active: showing {matchCount} of {equipment.length} equipment</span>
       <button onClick={() => { setSearch(""); setStatuses([]); setFieldFilters([]); setConditions([]); }}
@@ -155,5 +163,5 @@ export function useEquipmentFilters(equipment: Equipment[]) {
     </div>}
   </>;
 
-  return { matches, filtering, signature, activeCount, toolbar, applyFocusSearch };
+  return { matches, filtering, signature, activeCount, toolbar, toggle: filtersToggle, applyFocusSearch };
 }
