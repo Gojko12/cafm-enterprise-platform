@@ -173,5 +173,24 @@
 // Clear all filters button (the search box included), so nobody forgets
 // that a filter is hiding equipment.
 // MASTER_SPEC Section 122.
+// V73 = Section 123: domain-correct equipment kits + registry layout
+// follow-ups (three fixes from V72 live use). (1) Equipment kits: the demo
+// seed no longer generates the generic "<System> Installation /
+// SubEquipment / Component" trio (which produced rows like "Diesel
+// Generator SubEquipment" and codes like GEN1_GEN1); every installation
+// now carries a small, domain-correct kit, e.g. the diesel generator gets
+// Gas pump (Gas meter, Gas filter), Cooling (Thermometer), Oil pump (Oil
+// filter), with local codes S01-BL-111_GEN1_PUMP_MET and so on; section20
+// seed + Addendum scripts/supabase-v70-2-equipment-tree-restructure.sql
+// (belongs to Section 120, no new section number) restructures the live
+// database the same way: installations renamed ("Installation" suffix
+// dropped, codes [building]_[TYPE][seq]), old child rows renamed and
+// re-pointed keeping their EquipmentCode and history, missing kit rows
+// inserted, hand-built trees of more than 3 rows left untouched, nothing
+// deleted. (2) Registry layout: tree/location/flat headers are sticky while
+// scrolling, the left list scrolls horizontally, and a drag handle between
+// list and details lets you squeeze the details panel to any width
+// (15-85%, persisted per browser).
+// MASTER_SPEC Section 123.
 
-export const PLATFORM_VERSION = "V72";
+export const PLATFORM_VERSION = "V73";

@@ -105,6 +105,17 @@ export function EquipmentRegistry() {
   const [view, setView] = useState<ViewMode>("equipment");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+  // V73 Section 123: the split between the list and the details panel is
+  // draggable on lg screens (thin handle between them, 15 to 85 percent,
+  // remembered per browser) so the details can be squeezed to the right to
+  // see more table columns. The list area scrolls on its own, vertically
+  // AND horizontally, and the column headers stay visible while scrolling.
+  const [splitPct, setSplitPct] = useState(() => {
+    const stored = Number(localStorage.getItem("cafm-equipment-split-v1"));
+    return Number.isFinite(stored) && stored >= 15 && stored <= 85 ? stored : 50;
+  });
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { localStorage.setItem("cafm-equipment-split-v1", String(splitPct)); }, [splitPct]);
   useEffect(() => { setSelected(null); setCollapsed(new Set()); }, [activeSiteId]);
   // Deep link: /equipment?eq=0000000001 preselects the equipment (3D BIM viewer
   // and, since V65, the global search). Reactive on the param so clicking a
@@ -203,7 +214,7 @@ export function EquipmentRegistry() {
     <span title={eq.bimGlobalId ? "Linked in 3D BIM" : "Not linked in 3D BIM"} className={eq.bimGlobalId ? "text-cyan-600" : "text-slate-300"}>⬡</span>
   </>;
   const rowTone = (eq: Equipment) => eq.EquipmentCode === selected ? "border-l-4 border-l-blue-600 bg-blue-100" : "border-l-4 border-l-transparent hover:bg-slate-50";
-  const header = <div className={`${TREE_GRID} border-b bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
+  const header = <div className={`${TREE_GRID} sticky top-0 z-20 border-b bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
     <span>EQ ID</span><span>Name</span><span>Level</span><span>Trade</span><span>Status</span><span>WRs</span><span>3D</span></div>;
   const segment = (mode: ViewMode, label: string) => <button key={mode} aria-pressed={view === mode} onClick={() => setView(mode)}
     className={`px-3 py-1.5 text-xs font-medium ${view === mode ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>;
@@ -222,11 +233,12 @@ export function EquipmentRegistry() {
       {view !== "flat" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
     </div>
-    <div className="flex flex-col gap-4 lg:flex-row">
-      <div className={`min-w-0 transition-all lg:h-[calc(100vh-14rem)] lg:overflow-y-auto ${item ? "lg:w-1/2" : "w-full"}`}>
+    <div ref={splitRef} className="flex flex-col gap-4 lg:flex-row" style={{ "--eq-split": `${splitPct}%` } as React.CSSProperties}>
+      <div className={`min-w-0 transition-all lg:h-[calc(100vh-14rem)] lg:overflow-auto ${item ? "lg:w-[var(--eq-split)]" : "w-full"}`}>
         {view === "flat" && <OverviewTable preferenceKey="equipment" columns={columns} rows={flat} rowKey={(eq) => eq.EquipmentCode} onRow={(eq) => setSelected(eq.EquipmentCode)}
+          viewportClassName="overflow-auto rounded border lg:max-h-[calc(100vh-14rem)]"
           rowClassName={(eq) => eq.EquipmentCode === selected ? "bg-blue-100 border-l-4 border-l-blue-600 font-semibold" : ""} />}
-        {view === "equipment" && <div className="overflow-x-auto rounded-lg border bg-white"><div className="min-w-[44rem]">{header}
+        {view === "equipment" && <div className="overflow-auto rounded-lg border bg-white lg:max-h-[calc(100vh-14rem)]"><div className="min-w-[44rem]">{header}
           {tree.rows.length === 0 && <p className="p-4 text-sm text-slate-500">No equipment matches the current filters.</p>}
           {tree.rows.map(({ eq, prefix, childCount, open }) => <div key={eq.EquipmentCode} role="row" onClick={() => setSelected(eq.EquipmentCode)} className={`${TREE_GRID} cursor-pointer border-b px-3 py-1.5 text-sm ${rowTone(eq)}`}>
             <span className="flex items-center whitespace-nowrap font-mono text-xs"><span className="whitespace-pre text-slate-300">{prefix}</span>
@@ -234,7 +246,7 @@ export function EquipmentRegistry() {
               <span className="font-semibold text-slate-900">{eq.EquipmentCode}</span>
               {childCount > 0 && <span className="ml-1.5 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-700">{childCount}</span>}</span>
             {cells(eq)}</div>)}</div></div>}
-        {view === "location" && <div className="overflow-x-auto rounded-lg border bg-white"><div className="min-w-[44rem]">
+        {view === "location" && <div className="overflow-auto rounded-lg border bg-white lg:max-h-[calc(100vh-14rem)]"><div className="min-w-[44rem]">
           {locationRows.rows.length === 0 && <p className="p-4 text-sm text-slate-500">No equipment matches the current filters.</p>}
           {locationRows.rows.map((row) => row.eq ? <div key={row.key} role="row" onClick={() => setSelected(row.eq!.EquipmentCode)} className={`${TREE_GRID} cursor-pointer border-b px-3 py-1.5 text-sm ${rowTone(row.eq)}`}>
             <span className="font-mono text-xs font-semibold" style={{ paddingLeft: row.depth * 14 }}>{row.eq.EquipmentCode}</span>{cells(row.eq)}</div>
@@ -242,8 +254,18 @@ export function EquipmentRegistry() {
               <span className="w-3 text-slate-500">{row.open ? "▾" : "▸"}</span>{row.label}<span className="rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold">{row.count}</span></button>)}
         </div></div>}
       </div>
+      {item && <div aria-hidden="true" title="Drag to resize the split between list and details"
+        className="hidden w-1.5 shrink-0 cursor-col-resize rounded bg-slate-200 hover:bg-blue-400 active:bg-blue-500 lg:block"
+        onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+          const rect = splitRef.current?.getBoundingClientRect();
+          if (!rect || !rect.width) return;
+          setSplitPct(Math.min(85, Math.max(15, ((event.clientX - rect.left) / rect.width) * 100)));
+        }}
+        onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />}
       {item && (
-        <div ref={detailsRef} className="min-w-0 lg:h-[calc(100vh-14rem)] lg:w-1/2 lg:overflow-y-auto">
+        <div ref={detailsRef} className="min-w-0 lg:h-[calc(100vh-14rem)] lg:flex-1 lg:overflow-y-auto">
           <EquipmentDetails key={`${activeSiteId}:${item.EquipmentCode}`} item={item} onClose={() => setSelected(null)} onSelect={setSelected} />
         </div>
       )}

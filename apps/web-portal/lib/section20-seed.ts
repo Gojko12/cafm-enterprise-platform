@@ -32,6 +32,76 @@ const stages: Array<[number, string]> = [
 ];
 const people = ["Mark", "Claudia", "Thomas", "Yvonne", "Bastian", "Marko", "Lidija"];
 
+// V73 Section 123: every installation grows a small, domain-correct kit of
+// subequipment and components instead of the old generic
+// "<System> Installation / SubEquipment / Component" trio (which produced
+// rows like "Diesel Generator SubEquipment"). The kit order matches the
+// systems array above, and the abbreviations are the Local Equipment Code
+// segments: [building]_[installation][n]_[subcomponent]_[component], e.g.
+// S01-BL-1_GEN1_PUMP_MET = the gas meter of the gas pump of generator 1.
+type SystemKit = { key: string; subs: { name: string; abbr: string; comps: [string, string][] }[] };
+const systemKits: SystemKit[] = [
+  { key: "CHIL", subs: [ // Chiller
+    { name: "Compressor", abbr: "COMP", comps: [["Oil filter", "OILF"]] },
+    { name: "Condenser", abbr: "COND", comps: [["Condenser fan", "FAN"]] },
+    { name: "Evaporator", abbr: "EVAP", comps: [["Refrigerant filter", "FILT"]] },
+    { name: "Chilled water pump", abbr: "CHWP", comps: [["Flow meter", "MET"]] } ] },
+  { key: "GEN", subs: [ // Diesel Generator
+    { name: "Gas pump", abbr: "PUMP", comps: [["Gas meter", "MET"], ["Gas filter", "FIL"]] },
+    { name: "Cooling", abbr: "COOL", comps: [["Thermometer", "TEMP"]] },
+    { name: "Oil pump", abbr: "OPUMP", comps: [["Oil filter", "FIL"]] } ] },
+  { key: "UPS", subs: [ // UPS System
+    { name: "Battery bank", abbr: "BATT", comps: [["Battery monitor", "MON"]] },
+    { name: "Inverter", abbr: "INV", comps: [["Cooling fan", "FAN"]] },
+    { name: "Static bypass", abbr: "BYP", comps: [] } ] },
+  { key: "FDMP", subs: [ // Fire Damper
+    { name: "Actuator", abbr: "ACT", comps: [["Position sensor", "SENS"]] },
+    { name: "Blade set", abbr: "BLAD", comps: [] } ] },
+  { key: "AHU", subs: [ // Cleanroom AHU
+    { name: "Supply fan", abbr: "SFAN", comps: [["Vibration sensor", "VIB"]] },
+    { name: "Filter stage", abbr: "FILT", comps: [["Pre-filter", "PRE"], ["Final filter", "FIN"]] },
+    { name: "Heating coil", abbr: "HEAT", comps: [["Control valve", "VALV"]] },
+    { name: "Cooling coil", abbr: "CCOIL", comps: [["Temperature sensor", "TEMP"]] } ] },
+  { key: "RDRN", subs: [ // Roof Drain
+    { name: "Drain grate", abbr: "GRAT", comps: [] },
+    { name: "Downpipe", abbr: "DPIP", comps: [["Leaf filter", "FIL"]] } ] },
+  { key: "CRAN", subs: [ // Heavy Crane
+    { name: "Hoist winch", abbr: "HOIST", comps: [["Brake", "BRK"]] },
+    { name: "Trolley drive", abbr: "TROL", comps: [["Drive motor", "MOT"]] },
+    { name: "Crane control panel", abbr: "CPNL", comps: [] } ] },
+  { key: "KEXT", subs: [ // Kitchen Extraction
+    { name: "Extraction fan", abbr: "EFAN", comps: [["Fan motor", "MOT"]] },
+    { name: "Grease filter", abbr: "GFIL", comps: [] },
+    { name: "Extraction duct", abbr: "DUCT", comps: [] } ] },
+  { key: "LIFT", subs: [ // Lift Controller
+    { name: "Drive motor", abbr: "DMOT", comps: [] },
+    { name: "Door operator", abbr: "DOP", comps: [["Door sensor", "SENS"]] },
+    { name: "Safety gear", abbr: "SGEAR", comps: [] } ] },
+  { key: "WPUMP", subs: [ // Domestic Water Pump
+    { name: "Pump set", abbr: "PSET", comps: [["Pressure sensor", "PRESS"], ["Flow meter", "MET"]] },
+    { name: "Pressure vessel", abbr: "PVES", comps: [] } ] },
+  { key: "CLEAN", subs: [ // Cleaning Equipment
+    { name: "Scrubber dryer", abbr: "SCRB", comps: [["Brush motor", "MOT"]] },
+    { name: "Wet vacuum", abbr: "WVAC", comps: [] } ] },
+  { key: "ELGT", subs: [ // Emergency Lighting
+    { name: "Central battery", abbr: "CBAT", comps: [["Battery monitor", "MON"]] },
+    { name: "Luminaire circuit", abbr: "LCIRC", comps: [] } ] },
+  { key: "CAIR", subs: [ // Compressed Air Compressor
+    { name: "Air end", abbr: "AEND", comps: [] },
+    { name: "Air dryer", abbr: "DRY", comps: [["Auto drain valve", "VALV"]] },
+    { name: "Receiver tank", abbr: "RCV", comps: [["Pressure gauge", "GAUG"]] } ] },
+  { key: "SITE", subs: [ // Site Installation
+    { name: "Site transformer", abbr: "STRF", comps: [] },
+    { name: "Site distribution", abbr: "SDIST", comps: [["Meter", "MET"]] } ] },
+  { key: "BOIL", subs: [ // Heating Boiler
+    { name: "Burner", abbr: "BURN", comps: [["Gas valve", "VALV"]] },
+    { name: "Circulation pump", abbr: "CPUMP", comps: [] },
+    { name: "Expansion vessel", abbr: "EXPV", comps: [] } ] },
+  { key: "FOIL", subs: [ // Fuel Oil System
+    { name: "Storage tank", abbr: "TANK", comps: [["Level gauge", "GAUG"]] },
+    { name: "Transfer pump", abbr: "TPUMP", comps: [["Suction filter", "FIL"]] } ] },
+];
+
 function activity(id: string, type: string, stage: number): NonNullable<BaseWorkRequest["Activity"]> {
   const date = "2026-10-12T08:00:00.000Z";
   const logs = [
@@ -89,20 +159,40 @@ export function section20Seed(sites: SiteId[]): Pick<DemoData, "buildings" | "fl
     ].entries()) {
       craftspeople.push({ id: `S${tag}-C${index + 13}`, SiteId: site, ...person, HourlyRate: 45, ShiftHours: 8, SkillLevel: 3 });
     }
+    // V73 Section 123: the installation keeps its stable EquipmentCode
+    // (work requests, schedules and analytics reference it) but now carries a
+    // domain-correct kit. The first subequipment and first component reuse
+    // the old generic codes (base+2 / base+3) so historical references keep
+    // resolving; every further kit row takes a fresh 9000xx code.
+    let kitCounter = 900001;
     for (let i = 0; i < systems.length; i++) {
       const room = siteRooms[i];
-      const system = systems[i % systems.length];
+      const system = systems[i];
+      const kit = systemKits[i];
       const base = (Number(tag) - 1) * systems.length * 3 + i * 3;
       const codeFor = (number: number) => String(number).padStart(10, "0");
-      const root = codeFor(base + 1), child = codeFor(base + 2);
-      for (const [level, code, parent] of [["Installation", root, undefined], ["SubEquipment", child, root], ["Component", codeFor(base + 3), child]] as const) {
+      const rootCode = codeFor(base + 1);
+      const localCode = `${room.bl_id}_${kit.key}1`;
+      const childStatus = i >= 7 ? "In Service" : EQUIPMENT_STATUSES[i + 1];
+      let usedSub = false, usedComp = false;
+      const push = (code: string, name: string, level: "Installation" | "SubEquipment" | "Component", parent: string | undefined, lec: string, status: (typeof EQUIPMENT_STATUSES)[number]) => {
         equipment.push({ SiteId: site, bl_id: room.bl_id, LevelName: room.LevelName, RoomCode: room.RoomCode, EquipmentCode: code,
-          EquipmentName: `${system[0]} ${level}`, EquipmentNameLocal: `${localNames[(Number(tag) - 1) % localNames.length][i]} · ${level}`, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation",
-          Status: level === "Installation" || i >= 7 ? "In Service" : EQUIPMENT_STATUSES[i + 1],
+          EquipmentName: name, EquipmentNameLocal: level === "Installation" ? localNames[(Number(tag) - 1) % localNames.length][i] : undefined,
+          LocalEquipmentCode: lec, Category: categories[i], HierarchyLevel: level, IsInstallation: level === "Installation", Status: status,
           Activity: [{ id: `${code}-log`, kind: "log", actorId: "Mark", actorName: "Mark", actorRole: "ESA_TM", createdAt: "2026-10-10T09:00:00Z", text: "Equipment registered for maintenance." },
             { id: `${code}-comment`, kind: "comment", actorId: "Thomas", actorName: "Thomas", actorRole: "ESA_TO", createdAt: "2026-10-11T09:00:00Z", text: "Inspection access confirmed.", editedAt: "2026-10-12T09:00:00Z", editHistory: [{ text: "Confirm inspection access.", timestamp: "2026-10-11T09:00:00Z" }] }],
           ParentEquipmentCode: parent, PrimaryTradeId: system[1], Manufacturer: "Campus Systems", Model: `CS-${100 + i}`,
-          TechnicalSpecifications: { service: system[0], location: room.RoomCode }, Criticality: i % 3 === 0 ? "High" : "Medium" });
+          TechnicalSpecifications: { service: name, location: room.RoomCode }, Criticality: level === "Installation" && i % 3 === 0 ? "High" : "Medium" });
+      };
+      push(rootCode, system[0], "Installation", undefined, localCode, "In Service");
+      for (const sub of kit.subs) {
+        const subCode = usedSub ? codeFor(kitCounter++) : (usedSub = true, codeFor(base + 2));
+        const subLocal = `${localCode}_${sub.abbr}`;
+        push(subCode, sub.name, "SubEquipment", rootCode, subLocal, childStatus);
+        for (const [compName, compAbbr] of sub.comps) {
+          const compCode = usedComp ? codeFor(kitCounter++) : (usedComp = true, codeFor(base + 3));
+          push(compCode, compName, "Component", subCode, `${subLocal}_${compAbbr}`, childStatus);
+        }
       }
     }
     for (let i = 0; i < systems.length; i++) {
