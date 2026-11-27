@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Equipment } from "@cafm/shared-schema";
 import type { EquipmentAssociation } from "@/lib/cafm-data";
 import { useCafmStore } from "@/lib/cafm-store";
@@ -22,30 +23,40 @@ export const KIND_LABEL: Record<EquipmentAssociationKind, string> = {
 
 /** Read-only badges for work request popups: shows the shared links that
  *  involve any of the request's equipment codes. Renders nothing when the
- *  site has no matching associations. */
-export function EquipmentAssociationBadges({ siteId, codes }: { siteId: string; codes: string[] }) {
+ *  site has no matching associations. V78 (Section 128): every badge opens
+ *  the other equipment's details (deep link by default, in-place when the
+ *  parent passes onOpen). */
+export function EquipmentAssociationBadges({ siteId, codes, onOpen }: { siteId: string; codes: string[]; onOpen?: (code: string) => void }) {
   const { data } = useCafmStore();
+  const router = useRouter();
   const links = (data.equipmentAssociations ?? []).filter((entry) =>
     entry.siteId === siteId && (codes.includes(entry.fromCode) || codes.includes(entry.toCode)));
   if (links.length === 0) return null;
   const name = (code: string) =>
     data.equipment.find((eq) => eq.SiteId === siteId && eq.EquipmentCode === code)?.EquipmentName ?? code;
+  const open = (code: string) => { if (onOpen) onOpen(code); else router.push(`/equipment?eq=${encodeURIComponent(code)}`); };
   return (
     <div className="mt-1 flex flex-wrap gap-1" aria-label="Shared equipment links">
       {links.map((entry) => {
         const outgoing = codes.includes(entry.fromCode);
+        const other = outgoing ? entry.toCode : entry.fromCode;
         const text = outgoing ? `${KIND_LABEL[entry.kind]} ${name(entry.toCode)}` : `${name(entry.fromCode)} ${KIND_LABEL[entry.kind]} this`;
-        return <span key={entry.id} title={entry.note} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">{text}</span>;
+        return <button key={entry.id} type="button" onClick={() => open(other)}
+          title={`${text}${entry.note ? ` · ${entry.note}` : ""} · Click to open this equipment`}
+          className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-100">{text}</button>;
       })}
     </div>
   );
 }
 
 /** Editable card for the equipment details panel (Hierarchy tab): lists and
- *  manages the side-links of one equipment item. */
-export function EquipmentAssociationsPanel({ item, equipment, canEdit }: { item: Equipment; equipment: Equipment[]; canEdit: boolean }) {
+ *  manages the side-links of one equipment item. V78 (Section 128): chips
+ *  open the linked equipment's details (in-place via onSelect when
+ *  provided), and removing a link asks for confirmation first. */
+export function EquipmentAssociationsPanel({ item, equipment, canEdit, onSelect }: { item: Equipment; equipment: Equipment[]; canEdit: boolean; onSelect?: (code: string) => void }) {
   const { data, setData } = useCafmStore();
   const { activePerson } = useSiteContext();
+  const router = useRouter();
   const [target, setTarget] = useState("");
   const [kind, setKind] = useState<EquipmentAssociationKind>("serves");
   const [note, setNote] = useState("");
@@ -69,8 +80,17 @@ export function EquipmentAssociationsPanel({ item, equipment, canEdit }: { item:
   };
   const remove = (id: string) => {
     if (!canEdit) return;
-    setData((state) => ({ ...state, equipmentAssociations: (state.equipmentAssociations ?? []).filter((entry) => entry.id !== id) }));
+    // V78 Section 128: removing a shared link always asks first.
+    const entry = links.find((candidate) => candidate.id === id);
+    if (!entry) return;
+    const outgoingRow = entry.fromCode === item.EquipmentCode;
+    const summary = outgoingRow
+      ? `${item.EquipmentName} ${KIND_LABEL[entry.kind]} ${name(entry.toCode)}`
+      : `${name(entry.fromCode)} ${KIND_LABEL[entry.kind]} ${item.EquipmentName}`;
+    if (!window.confirm(`Remove this shared link?\n${summary}${entry.note ? `\nNote: ${entry.note}` : ""}`)) return;
+    setData((state) => ({ ...state, equipmentAssociations: (state.equipmentAssociations ?? []).filter((candidate) => candidate.id !== id) }));
   };
+  const open = (code: string) => { if (onSelect) onSelect(code); else router.push(`/equipment?eq=${encodeURIComponent(code)}`); };
   return (
     <section className="rounded-lg border bg-white p-3 text-sm" aria-label="Equipment shared links">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Shared links (multiple installations)</h4>
@@ -79,8 +99,10 @@ export function EquipmentAssociationsPanel({ item, equipment, canEdit }: { item:
         {outgoing.length === 0 && <p className="text-xs text-slate-400">serves no other equipment yet.</p>}
         {outgoing.map((entry) => (
           <div key={entry.id} className="flex items-center gap-2">
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800" title={entry.note}>
-              {KIND_LABEL[entry.kind]} <strong>{name(entry.toCode)}</strong>{entry.note ? ` · ${entry.note}` : ""}</span>
+            <button type="button" onClick={() => open(entry.toCode)}
+              title={`Open ${name(entry.toCode)}${entry.note ? ` · ${entry.note}` : ""}`}
+              className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-100">
+              {KIND_LABEL[entry.kind]} <strong>{name(entry.toCode)}</strong>{entry.note ? ` · ${entry.note}` : ""}</button>
             {canEdit && <button aria-label={`Remove link to ${name(entry.toCode)}`} onClick={() => remove(entry.id)} className="text-xs text-red-700">✕ remove</button>}
           </div>
         ))}
@@ -90,8 +112,10 @@ export function EquipmentAssociationsPanel({ item, equipment, canEdit }: { item:
         {incoming.length === 0 && <p className="text-xs text-slate-400">no other equipment links to this item yet.</p>}
         {incoming.map((entry) => (
           <div key={entry.id} className="flex items-center gap-2">
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700" title={entry.note}>
-              <strong>{name(entry.fromCode)}</strong> {KIND_LABEL[entry.kind]} this{entry.note ? ` · ${entry.note}` : ""}</span>
+            <button type="button" onClick={() => open(entry.fromCode)}
+              title={`Open ${name(entry.fromCode)}${entry.note ? ` · ${entry.note}` : ""}`}
+              className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100">
+              <strong>{name(entry.fromCode)}</strong> {KIND_LABEL[entry.kind]} this{entry.note ? ` · ${entry.note}` : ""}</button>
             {canEdit && <button aria-label={`Remove link from ${name(entry.fromCode)}`} onClick={() => remove(entry.id)} className="text-xs text-red-700">✕ remove</button>}
           </div>
         ))}

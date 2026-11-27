@@ -20,6 +20,7 @@ import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { useEquipmentFilters } from "./equipment/EquipmentFilterPanel";
 import { AddEquipmentModal } from "./equipment/AddEquipmentModal";
 import { EquipmentAssociationsPanel, KIND_LABEL, type EquipmentAssociationKind } from "./equipment/EquipmentAssociations";
+import { EquipmentHierarchyExplorer } from "./equipment/EquipmentHierarchyExplorer";
 import { LOCAL_EQUIPMENT_CODE_HINT, localEquipmentCodeIssue } from "@/lib/equipment-filters";
 
 const columns = [
@@ -37,7 +38,7 @@ const columns = [
   { id: "criticality", label: "Criticality", value: (eq: Equipment) => eq.Criticality },
 ];
 
-type ViewMode = "equipment" | "location" | "flat";
+type ViewMode = "equipment" | "location" | "flat" | "explorer";
 type Level = "Installation" | "SubEquipment" | "Component";
 
 const LEVEL_STYLE: Record<Level, string> = {
@@ -272,10 +273,10 @@ export function EquipmentRegistry() {
       <div className={`text-lg font-semibold ${tone}`}>{value}</div><div className="text-[11px] text-slate-500">{label}</div></div>)}</div>
     <div className="flex flex-wrap items-center gap-2">
       <div className="inline-flex overflow-hidden rounded-lg border" role="group" aria-label="Registry view">
-        {segment("equipment", "🌳 Equipment Tree")}{segment("location", "🏢 Location Tree")}{segment("flat", "☰ Flat Table")}</div>
+        {segment("equipment", "🌳 Equipment Tree")}{segment("location", "🏢 Location Tree")}{segment("flat", "☰ Flat Table")}{segment("explorer", "🧭 Explorer")}</div>
       {filters.toggle}
       {filters.toolbar}
-      {view !== "flat" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
+      {view !== "flat" && view !== "explorer" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
     </div>
     <div ref={splitRef} className="flex flex-col gap-4 lg:flex-row" style={{ "--eq-split": `${splitPct}%` } as React.CSSProperties}>
@@ -302,6 +303,9 @@ export function EquipmentRegistry() {
             : <button key={row.key} aria-expanded={row.open} onClick={() => toggle(row.key)} className="flex w-full items-center gap-2 border-b bg-slate-50 px-3 py-1.5 text-left text-sm font-medium text-slate-700" style={{ paddingLeft: 12 + row.depth * 14 }}>
               <span className="w-3 text-slate-500">{row.open ? "▾" : "▸"}</span>{row.label}<span className="rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold">{row.count}</span></button>)}
         </div></div>}
+        {/* V78 Section 128: centered graph explorer; the tree shows the whole
+            site, the explorer walks one item's neighbourhood step by step. */}
+        {view === "explorer" && <EquipmentHierarchyExplorer equipment={equipment} associations={associations} centerCode={selected} onSelect={setSelected} />}
       </div>
       {item && <div aria-hidden="true" title="Drag to resize the split between list and details"
         className="hidden w-1.5 shrink-0 cursor-col-resize rounded bg-slate-200 hover:bg-blue-400 active:bg-blue-500 lg:block"
@@ -496,7 +500,7 @@ function EquipmentDetails({ item, onClose, onSelect }: { item: Equipment; onClos
         installations) are managed next to the hierarchy card. */}
     {tab === "Hierarchy" && <div className="space-y-3">
       <HierarchyCard item={item} equipment={siteEquipment} onSelect={onSelect} />
-      <EquipmentAssociationsPanel item={item} equipment={siteEquipment} canEdit={!!permissions?.canManageEquipment} />
+      <EquipmentAssociationsPanel item={item} equipment={siteEquipment} canEdit={!!permissions?.canManageEquipment} onSelect={onSelect} />
     </div>}
     {tab === "SmartPM" && <div className="space-y-2 text-xs">{schedules.length === 0 ? <p className="text-slate-500">No SmartPM schedules cover this equipment.</p> :
       schedules.map((schedule) => <div key={schedule.ScheduleId} className="flex flex-wrap items-center gap-2 rounded-lg border p-2"><span className="font-mono font-semibold">PMS {schedule.ScheduleId}</span>

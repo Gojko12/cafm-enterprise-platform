@@ -256,4 +256,17 @@
 // row per asset, always.
 // MASTER_SPEC Section 127.
 
-export const PLATFORM_VERSION = "V77";
+// V78 (Section 128) association polish and graph explorer: removing a
+// shared link now always asks for confirmation (the button was already
+// limited to users with the Manage Equipment permission, and the action
+// re-checks it). Every association chip and badge is clickable and opens
+// the linked equipment's details, both in the details panel (in place)
+// and in the work request popups (deep link to the Equipment page with
+// the item preselected). New "Explorer" view in the Equipment Registry:
+// an MS Teams-style centered graph of one equipment's neighbourhood,
+// parent chain above, children below with connector lines, shared links
+// as amber chips; clicking any node re-centers the explorer so you can
+// walk the whole structure step by step.
+// MASTER_SPEC Section 128.
+
+export const PLATFORM_VERSION = "V78";
