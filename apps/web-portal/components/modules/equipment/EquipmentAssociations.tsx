@@ -16,7 +16,7 @@ import { useSiteContext } from "@/lib/contexts/SiteContext";
 export const EQUIPMENT_ASSOCIATION_KINDS = ["serves", "feeds", "cools", "backsup"] as const;
 export type EquipmentAssociationKind = typeof EQUIPMENT_ASSOCIATION_KINDS[number];
 
-const KIND_LABEL: Record<EquipmentAssociationKind, string> = {
+export const KIND_LABEL: Record<EquipmentAssociationKind, string> = {
   serves: "serves", feeds: "feeds", cools: "cools", backsup: "backs up",
 };
 

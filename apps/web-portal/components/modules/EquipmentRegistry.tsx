@@ -19,7 +19,7 @@ import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { useEquipmentFilters } from "./equipment/EquipmentFilterPanel";
 import { AddEquipmentModal } from "./equipment/AddEquipmentModal";
-import { EquipmentAssociationsPanel } from "./equipment/EquipmentAssociations";
+import { EquipmentAssociationsPanel, KIND_LABEL, type EquipmentAssociationKind } from "./equipment/EquipmentAssociations";
 import { LOCAL_EQUIPMENT_CODE_HINT, localEquipmentCodeIssue } from "@/lib/equipment-filters";
 
 const columns = [
@@ -53,10 +53,13 @@ function LevelPill({ level }: { level?: string }) {
   return <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${level ? LEVEL_STYLE[level as Level] ?? "" : ""}`}>{level ?? "—"}</span>;
 }
 
-interface TreeRow { eq: Equipment; depth: number; prefix: string; childCount: number; open: boolean }
+interface SharedRow { asset: Equipment; kind: EquipmentAssociationKind }
+interface TreeRow { eq: Equipment; depth: number; prefix: string; childCount: number; open: boolean; rowKey: string; sharedKind?: EquipmentAssociationKind }
 
 // Keeps a node when it matches or has a matching descendant; filtered branches are always expanded.
-function buildTreeRows(equipment: Equipment[], matches: (eq: Equipment) => boolean, filtering: boolean, collapsed: Set<string>) {
+// V77 Section 127: sharedByTarget adds duplicate rows under every installation
+// an asset serves (Equipment Tree only, never the flat table).
+function buildTreeRows(equipment: Equipment[], matches: (eq: Equipment) => boolean, filtering: boolean, collapsed: Set<string>, sharedByTarget?: Map<string, SharedRow[]>) {
   const codes = new Set(equipment.map((eq) => eq.EquipmentCode));
   const children = new Map<string, Equipment[]>();
   const roots: Equipment[] = [];
@@ -85,10 +88,20 @@ function buildTreeRows(equipment: Equipment[], matches: (eq: Equipment) => boole
     const open = visible.length > 0 && (filtering || !collapsed.has(eq.EquipmentCode));
     if (all.length) parentCodes.push(eq.EquipmentCode);
     const prefix = trail.map((last) => last ? "   " : "│  ").join("") + (depth > 0 ? (isLast ? "└─ " : "├─ ") : "");
-    rows.push({ eq, depth, prefix, childCount: all.length, open });
+    rows.push({ eq, depth, prefix, childCount: all.length, open, rowKey: eq.EquipmentCode });
     if (!open || depth >= 5) return;
     const nextTrail = depth > 0 ? [...trail, isLast] : [];
-    visible.forEach((child, index) => walk(child, depth + 1, nextTrail, index === visible.length - 1));
+    // V77 Section 127: after the real children, every shared asset that
+    // serves this row appears once more, clearly marked (chain badge +
+    // amber tone). Duplicates stay leaves: their own components live under
+    // their home row. They obey the same filter as everything else.
+    const shared = (sharedByTarget?.get(eq.EquipmentCode) ?? []).filter((pair) => hit(pair.asset));
+    const connector = (isLastRow: boolean) => nextTrail.map((last) => last ? "   " : "│  ").join("") + (isLastRow ? "└─ " : "├─ ");
+    visible.forEach((child, index) => walk(child, depth + 1, nextTrail, index === visible.length - 1 && shared.length === 0));
+    shared.forEach((pair, index) => rows.push({
+      eq: pair.asset, depth: depth + 1, prefix: connector(index === shared.length - 1),
+      childCount: 0, open: false, rowKey: `${pair.asset.EquipmentCode}@shared:${eq.EquipmentCode}`, sharedKind: pair.kind,
+    }));
   };
   roots.filter(hit).forEach((root, index, list) => walk(root, 0, [], index === list.length - 1));
   return { rows, parentCodes };
@@ -160,9 +173,27 @@ export function EquipmentRegistry() {
   }, [data.workRequests, activeSiteId]);
   const filtering = filters.filtering;
   const matches = filters.matches;
-  const tree = useMemo(() => buildTreeRows(equipment, matches, filtering, collapsed),
+  // V76 Section 126 + V77 Section 127: the association side-links power the
+  // flat table's Serves column, the home-row chain badges and the shared
+  // duplicate rows in the Equipment Tree.
+  const associations = data.equipmentAssociations?.filter((entry) => entry.siteId === activeSiteId) ?? [];
+  const sharedByTarget = useMemo(() => {
+    const map = new Map<string, { asset: Equipment; kind: EquipmentAssociationKind }[]>();
+    for (const entry of associations) {
+      const asset = equipment.find((eq) => eq.EquipmentCode === entry.fromCode);
+      if (!asset || asset.ParentEquipmentCode === entry.toCode) continue;
+      map.set(entry.toCode, [...(map.get(entry.toCode) ?? []), { asset, kind: entry.kind }]);
+    }
+    return map;
+  }, [associations, equipment]);
+  const servedCount = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of associations) counts.set(entry.fromCode, (counts.get(entry.fromCode) ?? 0) + 1);
+    return counts;
+  }, [associations]);
+  const tree = useMemo(() => buildTreeRows(equipment, matches, filtering, collapsed, sharedByTarget),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [equipment, filters.signature, collapsed]);
+    [equipment, filters.signature, collapsed, sharedByTarget]);
   // V75 Section 125: the flat table defaults to Local Equipment Code order
   // so every installation sits together with its subequipment and
   // components; rows without a local code sort last. Column-header sorting
@@ -172,7 +203,7 @@ export function EquipmentRegistry() {
   // V76 Section 126: the flat table gains a "Serves" column built from the
   // equipment association side-links, so one scan shows which shared asset
   // keeps several installations running. Empty when the site has no links.
-  const associations = data.equipmentAssociations?.filter((entry) => entry.siteId === activeSiteId) ?? [];
+  // The flat table never duplicates rows: one row per asset, always.
   const servedLabel = (code: string) => associations.filter((entry) => entry.fromCode === code)
     .map((entry) => equipment.find((eq) => eq.EquipmentCode === entry.toCode)?.EquipmentName ?? entry.toCode).join(", ");
   const flatColumns = [...columns, { id: "serves", label: "Serves", value: (eq: Equipment) => servedLabel(eq.EquipmentCode) || undefined }];
@@ -254,11 +285,15 @@ export function EquipmentRegistry() {
           rowClassName={(eq) => eq.EquipmentCode === selected ? "bg-blue-100 border-l-4 border-l-blue-600 font-semibold" : ""} />}
         {view === "equipment" && <div className="overflow-auto rounded-lg border bg-white lg:max-h-[calc(100vh-14rem)]"><div className="min-w-[44rem]">{header}
           {tree.rows.length === 0 && <p className="p-4 text-sm text-slate-500">No equipment matches the current filters.</p>}
-          {tree.rows.map(({ eq, prefix, childCount, open }) => <div key={eq.EquipmentCode} role="row" onClick={() => setSelected(eq.EquipmentCode)} className={`${TREE_GRID} cursor-pointer border-b px-3 py-1.5 text-sm ${rowTone(eq)}`}>
+          {tree.rows.map(({ eq, prefix, childCount, open, rowKey, sharedKind }) => <div key={rowKey} role="row" onClick={() => setSelected(eq.EquipmentCode)}
+            title={sharedKind ? `Shared duplicate: this asset ${KIND_LABEL[sharedKind]} this installation; its home row sits under its own parent. Click to open the real entry.` : undefined}
+            className={`${TREE_GRID} cursor-pointer border-b px-3 py-1.5 text-sm ${sharedKind ? "border-l-2 border-l-amber-400 bg-amber-50/60" : rowTone(eq)}`}>
             <span className="flex items-center whitespace-nowrap font-mono text-xs"><span className="whitespace-pre text-slate-300">{prefix}</span>
-              {childCount > 0 ? <button aria-expanded={open} aria-label={open ? "Collapse" : "Expand"} className="mr-1 w-4 text-slate-500" onClick={(event) => { event.stopPropagation(); toggle(eq.EquipmentCode); }}>{open ? "▾" : "▸"}</button> : <span className="mr-1 inline-block w-4" />}
-              <span className="font-semibold text-slate-900">{eq.EquipmentCode}</span>
-              {childCount > 0 && <span className="ml-1.5 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-700">{childCount}</span>}</span>
+              {sharedKind ? <span aria-hidden className="mr-1 w-4 text-center text-amber-500">⛓</span> : childCount > 0 ? <button aria-expanded={open} aria-label={open ? "Collapse" : "Expand"} className="mr-1 w-4 text-slate-500" onClick={(event) => { event.stopPropagation(); toggle(eq.EquipmentCode); }}>{open ? "▾" : "▸"}</button> : <span className="mr-1 inline-block w-4" />}
+              <span className={sharedKind ? "text-slate-700" : "font-semibold text-slate-900"}>{eq.EquipmentCode}</span>
+              {sharedKind && <span className="ml-1.5 rounded-full border border-amber-300 bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800">⛓ {KIND_LABEL[sharedKind]} this</span>}
+              {childCount > 0 && <span className="ml-1.5 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-700">{childCount}</span>}
+              {!sharedKind && (servedCount.get(eq.EquipmentCode) ?? 0) > 0 && <span title="Shared asset: appears again under the installations it serves" className="ml-1.5 rounded-full border border-amber-300 bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800">⛓ {servedCount.get(eq.EquipmentCode)}</span>}</span>
             {cells(eq)}</div>)}</div></div>}
         {view === "location" && <div className="overflow-auto rounded-lg border bg-white lg:max-h-[calc(100vh-14rem)]"><div className="min-w-[44rem]">
           {locationRows.rows.length === 0 && <p className="p-4 text-sm text-slate-500">No equipment matches the current filters.</p>}

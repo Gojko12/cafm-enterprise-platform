@@ -244,4 +244,16 @@
 // commit and run scripts/supabase-v76-1-associations-rollback.sql.
 // MASTER_SPEC Section 126.
 
-export const PLATFORM_VERSION = "V76";
+// V77 (Section 127) shared rows in the Equipment Tree: an asset that
+// serves several installations now appears again under every installation
+// it serves, not only as a side-link card. The duplicate rows are clearly
+// marked: a chain badge with the link kind (serves / feeds / cools /
+// backs up), an amber tone and a tooltip explaining the duplication.
+// They stay leaves, obey the search filters, and clicking one opens the
+// real entry. The home row carries a chain badge with the number of
+// installations the asset serves, so the duplication is visible from both
+// sides. The flat table and the location tree never duplicate rows: one
+// row per asset, always.
+// MASTER_SPEC Section 127.
+
+export const PLATFORM_VERSION = "V77";
