@@ -75,17 +75,29 @@ const LJ_ROLE_ACTIONS: Record<LJRole, string[]> = {
   ],
 };
 
-type ConsoleTab = "directory" | "fm-roles" | "capabilities" | "stages" | "teams" | "onboarding" | "exceptions";
+// V81 (Section 131): the page has four tabs: People Directory (with the
+// onboarding queue merged in at the top), Roles & Permissions (five flat
+// sub-views replacing the old FM Roles / Capabilities / Exceptions tabs and
+// their nested toggles), LJ Stage Matrix and Teams & Notices. The numbered
+// "1., 2., ..." tab labels are gone; legacy ?tab= URLs keep redirecting.
+type ConsoleTab = "directory" | "roles" | "stages" | "teams";
+type RolesView = "people" | "trades" | "modules" | "operations" | "exceptions";
 const CONSOLE_TABS: { id: ConsoleTab; label: string }[] = [
-  { id: "directory", label: "1. CIFM People Directory (All Employees)" },
-  { id: "fm-roles", label: "2. FM Roles, Trades & Site Admins" },
-  { id: "capabilities", label: "3. Role Capabilities & Permissions" },
-  { id: "stages", label: "4. Long Job Stage Matrix (0%–100%)" },
-  { id: "teams", label: "5. Teams & Notices (Newsflash)" },
-  { id: "exceptions", label: "6. Person Permission Exceptions (Brainstorm)" },
-  { id: "onboarding", label: "Onboarding Queue" },
+  { id: "directory", label: "People Directory" },
+  { id: "roles", label: "Roles & Permissions" },
+  { id: "stages", label: "LJ Stage Matrix" },
+  { id: "teams", label: "Teams & Notices" },
 ];
-const LEGACY_TAB_IDS: Record<string, ConsoleTab> = { users: "directory", features: "capabilities", "trade-managers": "fm-roles" };
+const ROLES_VIEWS: { id: RolesView; label: string }[] = [
+  { id: "people", label: "FM People & Access" },
+  { id: "trades", label: "Trades: Main & Deputy" },
+  { id: "modules", label: "Feature Permissions" },
+  { id: "operations", label: "Operational Capabilities" },
+  { id: "exceptions", label: "Exceptions" },
+];
+const LEGACY_TAB_IDS: Record<string, ConsoleTab> = {
+  users: "directory", onboarding: "directory", features: "roles", "trade-managers": "roles", "fm-roles": "roles", capabilities: "roles", exceptions: "roles",
+};
 
 export function RBACDashboard() {
   const { data, setData } = useCafmStore();
@@ -95,8 +107,7 @@ export function RBACDashboard() {
   const [activeTab, setActiveTabState] = useState<ConsoleTab>(
     CONSOLE_TABS.some((tab) => tab.id === requestedTab) ? (requestedTab as ConsoleTab) : LEGACY_TAB_IDS[requestedTab] ?? "directory",
   );
-  const [fmView, setFmView] = useState<"people" | "trades">("people");
-  const [capView, setCapView] = useState<"modules" | "operations">("modules");
+  const [rolesView, setRolesView] = useState<RolesView>("people");
   const [fmEditing, setFmEditing] = useState<CifmPerson | null>(null);
   const setActiveTab = (tab: ConsoleTab) => {
     setActiveTabState(tab);
@@ -147,25 +158,37 @@ export function RBACDashboard() {
                 : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            {tab.id === "onboarding" ? `Onboarding Queue (${pendingCount} Pending)` : tab.label}
-            {tab.id === "onboarding" && pendingCount > 0 && <span className="ml-2 rounded-full bg-rose-600 px-1.5 py-0.5 text-xs text-white">{pendingCount}</span>}
+            {tab.label}
+            {tab.id === "directory" && pendingCount > 0 && <span className="ml-2 rounded-full bg-rose-600 px-1.5 py-0.5 text-xs text-white">{pendingCount} pending</span>}
           </button>
         ))}
       </div>
 
       {showOnboard && <OnboardPersonModal onClose={() => setShowOnboard(false)} />}
-      {activeTab === "onboarding" && <OnboardingQueue />}
 
-      {activeTab === "directory" && <CifmDirectoryTab onGrantFm={setFmEditing} />}
+      {/* V81 Section 131: the onboarding queue lives at the top of the
+          People Directory tab instead of being a separate tab. */}
+      {activeTab === "directory" && <>
+      <section className="rounded-lg border bg-white p-4">
+        <h2 className="text-lg font-semibold">Onboarding Queue {pendingCount > 0 && <span className="ml-1 rounded-full bg-rose-600 px-2 py-0.5 text-xs font-semibold text-white">{pendingCount} pending</span>}</h2>
+        {pendingCount === 0
+          ? <p className="mt-1 text-sm text-gray-600">No pending onboarding requests. Use the button above to onboard a new person.</p>
+          : <div className="mt-3"><OnboardingQueue /></div>}
+      </section>
+      <CifmDirectoryTab onGrantFm={setFmEditing} />
+      </>}
       {fmEditing && <FmAccessModal person={fmEditing} onClose={() => setFmEditing(null)} />}
 
-      {activeTab === "fm-roles" && <>
-      <SiteAdminCards />
-      <div className="flex gap-2">
-        {([["people", "FM People & Access"], ["trades", "Long Job Main / Deputy by Trade"]] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setFmView(id)} className={`rounded px-3 py-1.5 text-sm ${fmView === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>))}
+      {/* V81 Section 131: one "Roles & Permissions" tab with five flat
+          sub-views replaces the old FM Roles (2 nested sub-views),
+          Capabilities (2 nested sub-views) and Exceptions tabs. */}
+      {activeTab === "roles" && <>
+      <div className="flex flex-wrap gap-2">
+        {ROLES_VIEWS.map((view) => (
+          <button key={view.id} onClick={() => setRolesView(view.id)} className={`rounded px-3 py-1.5 text-sm ${rolesView === view.id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{view.label}</button>))}
       </div>
-      {fmView === "people" && <>
+      {rolesView === "people" && <>
+      <SiteAdminCards />
       <FmStaffTable onEdit={setFmEditing} />
       <details className="rounded-lg border bg-white p-3"><summary className="cursor-pointer text-sm font-semibold">Login accounts &amp; legacy site access for {activeSiteId}</summary>
       <UserAccessMonitor
@@ -186,22 +209,8 @@ export function RBACDashboard() {
         profile={data.userAccessProfiles.find((item) => item.siteId === activeSiteId && (item.personName === editingUser.DisplayName || item.fullName === editingUser.DisplayName || item.username === editingUser.UserId))}
         onClose={() => setEditingUser(null)} />}
       </>}
-      </>}
 
-      {activeTab === "capabilities" && <>
-      <div className="flex gap-2">
-        {([["modules", "Module & Feature Permissions"], ["operations", "Operational Capabilities (Create FJ, Claim WR, Inspections…)"]] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setCapView(id)} className={`rounded px-3 py-1.5 text-sm ${capView === id ? "bg-blue-600 text-white" : "bg-slate-100"}`}>{label}</button>))}
-      </div>
-      {capView === "modules" && <FeaturePermissionMatrix canEdit={canEditMatrices} />}
-      {capView === "operations" && <UserAccessMatrix key={activeSiteId} mode="roles" />}
-      </>}
-
-      {activeTab === "stages" && <LJRoleActionMatrix canEdit={canEditMatrices} />}
-
-      {activeTab === "exceptions" && <PersonPermissionExceptions />}
-
-      {activeTab === "fm-roles" && fmView === "trades" && <>
+      {rolesView === "trades" && <>
       <section className="bg-white border rounded-lg p-4 space-y-3">
         <h2 className="text-lg font-semibold">Trade Managers — {activeSiteId}</h2>
         <p className="text-sm text-gray-600">Main / Deputy manager and notification contacts for each trade. Changes are saved automatically.</p>
@@ -241,6 +250,13 @@ export function RBACDashboard() {
       </section>
       <TradeManagerAssignments />
       </>}
+
+      {rolesView === "modules" && <FeaturePermissionMatrix canEdit={canEditMatrices} />}
+      {rolesView === "operations" && <UserAccessMatrix key={activeSiteId} mode="roles" />}
+      {rolesView === "exceptions" && <PersonPermissionExceptions />}
+      </>}
+
+      {activeTab === "stages" && <LJRoleActionMatrix canEdit={canEditMatrices} />}
 
       {activeTab === "teams" && <StakeholderCatalogSection />}
     </div>

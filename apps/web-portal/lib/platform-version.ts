@@ -281,4 +281,26 @@
 // per record, no styling.
 // MASTER_SPEC Section 129.
 
-export const PLATFORM_VERSION = "V79";
+// V80 (Section 130) Excel export polish: every exported file now has a
+// bold header row and a frozen top row, so the column labels stay visible
+// while scrolling. The xlsx library's community edition cannot write
+// styles or freeze panes (both Pro-only), so the export helper now builds
+// the .xlsx itself with a tiny dependency-free generator (verified with
+// openpyxl: values, bold and freeze all read back correctly). The same
+// three surfaces as V79 benefit automatically: Equipment, the PM/FJ/LJ
+// queues and the Locations tables.
+// MASTER_SPEC Section 130.
+
+// V81 (Section 131) People & Permissions restructure: the page now has
+// four tabs without the old numbering: People Directory (the onboarding
+// queue moved in at the top, with the pending badge, instead of being a
+// separate tab), Roles & Permissions (five flat sub-views: FM People &
+// Access, Trades: Main & Deputy, Feature Permissions, Operational
+// Capabilities, Exceptions; replacing the old three tabs with their
+// nested toggles and retiring the "(Brainstorm)" label), LJ Stage Matrix
+// and Teams & Notices. The legacy login-accounts block stays as the
+// collapsed details block inside FM People & Access. Old ?tab= links keep
+// redirecting to the closest new tab.
+// MASTER_SPEC Section 131.
+
+export const PLATFORM_VERSION = "V81";
