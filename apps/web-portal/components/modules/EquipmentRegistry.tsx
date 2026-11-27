@@ -22,6 +22,7 @@ import { AddEquipmentModal } from "./equipment/AddEquipmentModal";
 import { EquipmentAssociationsPanel, KIND_LABEL, type EquipmentAssociationKind } from "./equipment/EquipmentAssociations";
 import { EquipmentHierarchyExplorer } from "./equipment/EquipmentHierarchyExplorer";
 import { LOCAL_EQUIPMENT_CODE_HINT, localEquipmentCodeIssue } from "@/lib/equipment-filters";
+import { exportRowsToExcel } from "@/lib/export-excel";
 
 const columns = [
   { id: "code", label: "EQ ID", value: (eq: Equipment) => eq.EquipmentCode, render: (eq: Equipment) => <span className="font-mono font-semibold">{eq.EquipmentCode}</span> },
@@ -278,6 +279,12 @@ export function EquipmentRegistry() {
       {filters.toolbar}
       {view !== "flat" && view !== "explorer" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
+      {/* V79 Section 129: export the filtered equipment set to a plain Excel
+          file, one row per asset, all registry columns, flat-table order. */}
+      <button onClick={() => exportRowsToExcel("equipment.xlsx", "Equipment",
+        flatColumns.map(({ label, value }) => ({ label, value })), flat)}
+        title={`Export the ${flat.length} filtered equipment row(s) to a plain Excel file`}
+        className="rounded-lg border bg-white px-3 py-1.5 text-xs">⬇ Excel</button>
     </div>
     <div ref={splitRef} className="flex flex-col gap-4 lg:flex-row" style={{ "--eq-split": `${splitPct}%` } as React.CSSProperties}>
       <div className={`min-w-0 transition-all lg:h-[calc(100vh-14rem)] lg:overflow-auto ${item ? "lg:w-[var(--eq-split)]" : "w-full"}`}>

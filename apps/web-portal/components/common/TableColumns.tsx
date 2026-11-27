@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
+import { exportRowsToExcel } from "@/lib/export-excel";
 
 export type TableColumn<T> = { id: string; label: string; value: (row: T) => string | number | undefined; render?: (row: T) => React.ReactNode; renderFilter?: () => React.ReactNode; wrap?: boolean };
 type Settings = { order: string[]; hidden: string[]; widths?: Record<string, number> };
@@ -107,9 +108,9 @@ export function useTableColumns<T>(key: string, columns: TableColumn<T>[], defau
     </div></details> };
 }
 
-export function OverviewTable<T>({ preferenceKey, columns, rows, rowKey, onRow, rowClassName, groupBy, viewportClassName }: {
+export function OverviewTable<T>({ preferenceKey, columns, rows, rowKey, onRow, rowClassName, groupBy, viewportClassName, exportName }: {
   preferenceKey: string; columns: TableColumn<T>[]; rows: T[]; rowKey: (item: T) => string; onRow?: (item: T) => void; rowClassName?: (item: T) => string;
-  groupBy?: { getKey: (item: T) => string; order: readonly string[] }; viewportClassName?: string;
+  groupBy?: { getKey: (item: T) => string; order: readonly string[] }; viewportClassName?: string; exportName?: string;
 }) {
   const config = useTableColumns(preferenceKey, columns);
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -125,7 +126,13 @@ export function OverviewTable<T>({ preferenceKey, columns, rows, rowKey, onRow, 
   // filter row and every column fit the panel at any width instead of being
   // cut off on the right; dragging a resize handle just shifts the shares.
   const totalWidth = config.visible.reduce((sum, column) => sum + config.width(column.id), 0);
-  return <div className="space-y-2"><div className="flex items-center justify-end gap-2"><span className="text-xs font-normal text-slate-400" aria-live="polite">{filtered.length} shown{filtered.length !== rows.length ? ` of ${rows.length}` : ""}</span>{config.menu}</div><div className={viewportClassName ?? "overflow-auto rounded border"}>
+  // V79 Section 129: optional Excel export of exactly the rows and columns
+  // the user currently sees (hidden columns, the filter row and the sort
+  // are all respected).
+  const exportButton = exportName && <button type="button" title={`Export the ${filtered.length} shown row(s) to a plain Excel file`}
+    onClick={() => exportRowsToExcel(`${exportName}.xlsx`, exportName, config.visible.map(({ label, value }) => ({ label, value })), filtered)}
+    className="rounded border bg-white px-2 py-1 hover:bg-slate-50">⬇ Excel</button>;
+  return <div className="space-y-2"><div className="flex items-center justify-end gap-2">{exportButton}<span className="text-xs font-normal text-slate-400" aria-live="polite">{filtered.length} shown{filtered.length !== rows.length ? ` of ${rows.length}` : ""}</span>{config.menu}</div><div className={viewportClassName ?? "overflow-auto rounded border"}>
     <table className="table-fixed text-left text-xs" style={{ width: "100%" }}><colgroup>{config.visible.map((column) => <col key={column.id} style={{ width: `${(config.width(column.id) / Math.max(1, totalWidth)) * 100}%` }} />)}</colgroup><thead className={viewportClassName ? "sticky top-0 z-20 bg-slate-100" : "bg-slate-100"}><tr>{config.visible.map((column) => <th key={column.id} className="relative p-2" title={column.label}>
       <button className="block max-w-full truncate text-left" onClick={() => config.toggleSort(column.id)}>{column.label} {config.sort?.id === column.id ? config.sort.direction === "asc" ? "▲" : "▼" : ""}</button><ResizeHandle label={column.label} width={config.width(column.id)} onResize={(width) => config.resize(column.id, width)} />
     </th>)}</tr><tr>{config.visible.map((column) => <th key={column.id} className="p-1">{column.renderFilter ? column.renderFilter() : <input aria-label={`Filter ${column.label}`} placeholder="Filter"

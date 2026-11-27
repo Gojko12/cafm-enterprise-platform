@@ -262,13 +262,13 @@ export function LocationsWorkbench() {
       <div className="grid items-start gap-4 lg:grid-cols-2">
         <section className="rounded-lg border bg-white p-3 shadow-sm">
           {tab === "building" && <OverviewTable preferenceKey="locations-buildings" columns={buildingColumns} rows={siteBuildings}
-            rowKey={(item) => item.bl_id} onRow={selectBuilding}
+            rowKey={(item) => item.bl_id} onRow={selectBuilding} exportName="locations-buildings"
             rowClassName={(item) => item.bl_id === selection.buildingKey ? "bg-blue-50" : item.IsActive === false ? "opacity-50" : ""} />}
           {tab === "floor" && <OverviewTable preferenceKey="locations-floors" columns={floorColumns} rows={siteFloors}
-            rowKey={(item) => `${item.bl_id}:${item.LevelName}`} onRow={selectFloor}
+            rowKey={(item) => `${item.bl_id}:${item.LevelName}`} onRow={selectFloor} exportName="locations-floors"
             rowClassName={(item) => `${item.bl_id}:${item.LevelName}` === selection.floorKey ? "bg-blue-50" : item.IsActive === false ? "opacity-50" : ""} />}
           {tab === "room" && <OverviewTable preferenceKey="locations-rooms" columns={roomColumns} rows={siteRooms}
-            rowKey={(item) => `${item.bl_id}:${item.LevelName}:${item.RoomCode}`} onRow={selectRoom}
+            rowKey={(item) => `${item.bl_id}:${item.LevelName}:${item.RoomCode}`} onRow={selectRoom} exportName="locations-rooms"
             rowClassName={(item) => `${item.bl_id}:${item.LevelName}:${item.RoomCode}` === selection.roomKey ? "bg-blue-50" : item.IsActive === false ? "opacity-50" : ""} />}
         </section>
 

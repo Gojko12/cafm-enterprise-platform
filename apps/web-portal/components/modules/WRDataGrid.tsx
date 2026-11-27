@@ -13,6 +13,7 @@ import { DisputeViewFilter } from "@/components/common/DisputeViewFilter";
 import { mapWRDisputes } from "@/lib/disputes";
 import type { DisputeViewMode } from "@/lib/disputes";
 import { useQAActions } from "@/lib/use-qa-actions";
+import { exportRowsToExcel } from "@/lib/export-excel";
 import { WRSignals } from "./WRSignals";
 import { getChecklistProgress, getFollowUpFJsForPM, getParentPM, getUnfavourableStepCount, isPmEligibleForExecutionSignals } from "@/lib/wr-signals";
 import type { SignalTab } from "@/lib/wr-signals";
@@ -144,7 +145,15 @@ export function WRDataGrid({ requests, onOpen, grouped = false, onFilterCount, r
     {config.visible.map(({ id }) => { const key = id as Column; const incompleteCount = key === "signals" && isPmEligibleForExecutionSignals(wr) ? getChecklistProgress(wr, data).incomplete.length : 0; return <td key={key} className="px-2 py-1.5" title={key === "disputes" ? (disputeMap.get(wr.WR_ID) ?? []).map((item) => item.detail).join("\n") : displayValue(wr, key)}><div className={key === "signals" ? "flex flex-wrap gap-1" : "truncate"}>{key === "signals" ? <>{incompleteCount > 0 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">Checklist incomplete · {incompleteCount}</span>}<WRSignals wr={wr} onOpen={onOpen} /></> : key === "percentage" || key === "status" ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-900">{displayValue(wr, key)}</span> : key === "disputes" && value(wr, key) ? <span className="rounded bg-rose-100 px-1 text-rose-900">{displayValue(wr, key)}</span> : displayValue(wr, key) || "—"}</div></td>; })}
     <td className="p-2" title="Open / Edit" onDoubleClick={(event) => event.stopPropagation()}><button className="block max-w-full truncate text-blue-700 underline" onClick={() => onOpen(wr)}>Open / Edit</button></td></tr>;
   return <div className="space-y-2">
-    <div className="flex flex-wrap items-center gap-2"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{signalFilters}<div className="ml-auto">{config.menu}</div></div>
+    <div className="flex flex-wrap items-center gap-2"><DisputeViewFilter value={disputeMode} onChange={setDisputeMode} count={requests.filter((wr) => (disputeMap.get(wr.WR_ID)?.length ?? 0) > 0).length} />{signalFilters}
+      {/* V79 Section 129: export the filtered work requests to a plain Excel
+          file: the visible columns, the applied column filters and the sort
+          are all respected; collapsed LJ groups are not exported. */}
+      <button type="button" title={`Export the ${displayed.length} shown work request(s) to a plain Excel file`}
+        onClick={() => exportRowsToExcel(`work-requests-${requestType}.xlsx`, "Work requests",
+          config.visible.map((column) => ({ label: column.label, value: (wr: BaseWorkRequest) => displayValue(wr, column.id as Column) })), displayed)}
+        className="rounded border bg-white px-2 py-1 hover:bg-slate-50">⬇ Excel</button>
+      <div className="ml-auto">{config.menu}</div></div>
     {error && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-800">{error}</p>}
     {selected.length > 0 && <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded border bg-white p-2 text-xs shadow">
       <strong>{selected.length} selected ({selected.filter((id) => !displayed.some((wr) => wr.WR_ID === id)).length} hidden) · Bulk Actions</strong>

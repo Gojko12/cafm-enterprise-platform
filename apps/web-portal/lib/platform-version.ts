@@ -269,4 +269,16 @@
 // walk the whole structure step by step.
 // MASTER_SPEC Section 128.
 
-export const PLATFORM_VERSION = "V78";
+// V79 (Section 129) export views to Excel: one plain "⬇ Excel" button per
+// list exports exactly what the user currently sees. Equipment Registry:
+// a toolbar button exports the filtered equipment set (all registry
+// columns incl. Serves, flat-table order). Work requests (PM, FJ, LJ
+// queues): a button next to the Columns menu exports the visible
+// columns and the filtered, sorted rows. Locations: each buildings /
+// floors / rooms table gets the same button, respecting hidden columns,
+// the filter row and the sort. Files are plain single-sheet .xlsx built
+// with the already-present xlsx library: header row plus one text row
+// per record, no styling.
+// MASTER_SPEC Section 129.
+
+export const PLATFORM_VERSION = "V79";
