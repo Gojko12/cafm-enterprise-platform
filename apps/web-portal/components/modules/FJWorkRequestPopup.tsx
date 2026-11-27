@@ -1,5 +1,6 @@
 "use client";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
+import { EquipmentAssociationBadges } from "./equipment/EquipmentAssociations";
 
 import React, { useEffect, useState } from "react";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
@@ -187,7 +188,9 @@ export function FJWorkRequestPopup({ workRequest, onClose, onNavigate, onEscalat
           {group("Work Location", <>{field("Room code", workRequest.RoomCode)}{field("Level name", workRequest.LevelName)}{field("bl id", workRequest.bl_id)}{field("Problem location", workRequest.ProblemLocation)}</>)}
           {group("Equipment", <>{field("Equipment code", workRequest.EquipmentCodes.join(", "))}{field("Local equipment code", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.LocalEquipmentCode).filter(Boolean).join(", "))}
             {field("Equipment name", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.EquipmentName).filter(Boolean).join(", "))}
-            {field("Hierarchy Level", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.IsInstallation ? "Installation" : "Subequipment / SubSubEquipment").join(", "))}</>)}
+            {field("Hierarchy Level", workRequest.EquipmentCodes.map((code) => data.equipment.find((item) => item.EquipmentCode === code)?.IsInstallation ? "Installation" : "Subequipment / SubSubEquipment").join(", "))}
+            {/* V76 Section 126: shared links of the request's equipment. */}
+            <EquipmentAssociationBadges siteId={workRequest.SiteId} codes={workRequest.EquipmentCodes} /></>)}
         </div>}
         {tab === "Labor, parts & Completion" && <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Assign Craftperson</h3>

@@ -84,8 +84,9 @@ export function useEquipmentFilters(equipment: Equipment[]) {
     </details>;
 
   // V75 Section 125: the ⚙ Filters dropdown is also exposed as `toggle` so
-  // the flat view can place it next to the "N shown" counter above the
-  // table; the tree and location views keep it in the toolbar row.
+  // the registry can place it right after the view switcher (Equipment
+  // Tree / Location Tree / Flat Table), in every view, instead of letting
+  // it drift to the far end of the toolbar.
   const filtersToggle = <details className="relative text-left text-xs">
       <summary aria-label="Equipment filters"
         className={`cursor-pointer truncate rounded-lg border px-3 py-1.5 font-medium ${activeCount ? "border-blue-700 bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>

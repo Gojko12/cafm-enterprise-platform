@@ -19,6 +19,7 @@ import { LJWorkRequestPopup } from "./LJWorkRequestPopup";
 import { LocateInBimButton } from "@/components/common/LocateInBim";
 import { useEquipmentFilters } from "./equipment/EquipmentFilterPanel";
 import { AddEquipmentModal } from "./equipment/AddEquipmentModal";
+import { EquipmentAssociationsPanel } from "./equipment/EquipmentAssociations";
 import { LOCAL_EQUIPMENT_CODE_HINT, localEquipmentCodeIssue } from "@/lib/equipment-filters";
 
 const columns = [
@@ -168,6 +169,13 @@ export function EquipmentRegistry() {
   // (click a label, click again to reverse) still overrides this.
   const flat = [...equipment].filter(matches).sort((a, b) =>
     (a.LocalEquipmentCode ?? "~~~").localeCompare(b.LocalEquipmentCode ?? "~~~") || (a.EquipmentCode ?? "").localeCompare(b.EquipmentCode ?? ""));
+  // V76 Section 126: the flat table gains a "Serves" column built from the
+  // equipment association side-links, so one scan shows which shared asset
+  // keeps several installations running. Empty when the site has no links.
+  const associations = data.equipmentAssociations?.filter((entry) => entry.siteId === activeSiteId) ?? [];
+  const servedLabel = (code: string) => associations.filter((entry) => entry.fromCode === code)
+    .map((entry) => equipment.find((eq) => eq.EquipmentCode === entry.toCode)?.EquipmentName ?? entry.toCode).join(", ");
+  const flatColumns = [...columns, { id: "serves", label: "Serves", value: (eq: Equipment) => servedLabel(eq.EquipmentCode) || undefined }];
   const locationRows = useMemo(() => {
     const rows: { key: string; depth: number; kind: "building" | "floor" | "room" | "eq"; label: string; count: number; eq?: Equipment; open: boolean }[] = [];
     const groupKeys: string[] = [];
@@ -234,15 +242,15 @@ export function EquipmentRegistry() {
     <div className="flex flex-wrap items-center gap-2">
       <div className="inline-flex overflow-hidden rounded-lg border" role="group" aria-label="Registry view">
         {segment("equipment", "🌳 Equipment Tree")}{segment("location", "🏢 Location Tree")}{segment("flat", "☰ Flat Table")}</div>
-      {view !== "flat" && filters.toggle}
+      {filters.toggle}
       {filters.toolbar}
       {view !== "flat" && <><button onClick={expandAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Expand All</button>
         <button onClick={collapseAll} className="rounded-lg border bg-white px-3 py-1.5 text-xs">Collapse All</button></>}
     </div>
     <div ref={splitRef} className="flex flex-col gap-4 lg:flex-row" style={{ "--eq-split": `${splitPct}%` } as React.CSSProperties}>
       <div className={`min-w-0 transition-all lg:h-[calc(100vh-14rem)] lg:overflow-auto ${item ? "lg:w-[var(--eq-split)]" : "w-full"}`}>
-        {view === "flat" && <OverviewTable preferenceKey="equipment" columns={columns} rows={flat} rowKey={(eq) => eq.EquipmentCode} onRow={(eq) => setSelected(eq.EquipmentCode)}
-          viewportClassName="overflow-auto rounded border lg:max-h-[calc(100vh-14rem)]" infoExtra={filters.toggle}
+        {view === "flat" && <OverviewTable preferenceKey="equipment" columns={flatColumns} rows={flat} rowKey={(eq) => eq.EquipmentCode} onRow={(eq) => setSelected(eq.EquipmentCode)}
+          viewportClassName="overflow-auto rounded border lg:max-h-[calc(100vh-14rem)]"
           rowClassName={(eq) => eq.EquipmentCode === selected ? "bg-blue-100 border-l-4 border-l-blue-600 font-semibold" : ""} />}
         {view === "equipment" && <div className="overflow-auto rounded-lg border bg-white lg:max-h-[calc(100vh-14rem)]"><div className="min-w-[44rem]">{header}
           {tree.rows.length === 0 && <p className="p-4 text-sm text-slate-500">No equipment matches the current filters.</p>}
@@ -449,7 +457,12 @@ function EquipmentDetails({ item, onClose, onSelect }: { item: Equipment; onClos
         onLocationChange={(next) => { setError(""); setLocation(next); }} />}
       <button disabled={!permissions?.canManageEquipment} onClick={save} className="rounded bg-blue-700 px-3 py-1 text-white disabled:opacity-40">Save</button>
     </div>}
-    {tab === "Hierarchy" && <HierarchyCard item={item} equipment={siteEquipment} onSelect={onSelect} />}
+    {/* V76 Section 126: associations (shared assets serving several
+        installations) are managed next to the hierarchy card. */}
+    {tab === "Hierarchy" && <div className="space-y-3">
+      <HierarchyCard item={item} equipment={siteEquipment} onSelect={onSelect} />
+      <EquipmentAssociationsPanel item={item} equipment={siteEquipment} canEdit={!!permissions?.canManageEquipment} />
+    </div>}
     {tab === "SmartPM" && <div className="space-y-2 text-xs">{schedules.length === 0 ? <p className="text-slate-500">No SmartPM schedules cover this equipment.</p> :
       schedules.map((schedule) => <div key={schedule.ScheduleId} className="flex flex-wrap items-center gap-2 rounded-lg border p-2"><span className="font-mono font-semibold">PMS {schedule.ScheduleId}</span>
         <span>{schedule.Title ?? schedule.ChecklistCode}</span><span className="rounded-full bg-slate-100 px-2 py-0.5">{schedule.Frequency}</span>

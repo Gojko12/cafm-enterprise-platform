@@ -43,6 +43,20 @@ export interface LocationRenameLogEntry {
   to: string;
   impact: { label: string; count: number }[];
 }
+/** V76 (Section 126): many-to-many equipment side-links. Some assets serve
+ *  several installations at once; the strict parent-child hierarchy cannot
+ *  express that, so these links live in their own collection (blob kind
+ *  "equipmentAssociations", persisted like fjNotifications). */
+export interface EquipmentAssociation {
+  id: string;
+  siteId: string;
+  fromCode: string;
+  toCode: string;
+  kind: "serves" | "feeds" | "cools" | "backsup";
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+}
 export interface DemoData {
   pmModelVersion?: 60;
   pmMigrationNotes?: string[];
@@ -100,5 +114,7 @@ export interface DemoData {
   auditAssurance?: AuditAssurance;
   /** BIM linkage keyed by `${buildingId}:${ifcGlobalId}` — manual EQ ID assignments made in the 3D viewer. */
   bimElementLinks?: Record<string, BimElementLink>;
+  // V76 (Section 126): equipment side-links (shared assets).
+  equipmentAssociations?: EquipmentAssociation[];
   mobileMutationIds: string[];
 }

@@ -2,6 +2,7 @@ import type React from "react";
 import type { BaseWorkRequest, Equipment, PM_ChecklistStandard } from "@cafm/shared-schema";
 import { formatDateDDMMYYYY } from "@cafm/shared-schema";
 import { WRDetailsEditor } from "@/components/modules/WRDetailsEditor";
+import { EquipmentAssociationBadges } from "../equipment/EquipmentAssociations";
 
 interface Props {
   workRequest: BaseWorkRequest;
@@ -48,6 +49,8 @@ export function PMDetailsPanel({ workRequest, renderGroup, renderField, equipmen
                 {renderField("Equipment name", equipment.map((item) => item.EquipmentName).join(", "))}
                 {renderField("Equipment Standard Description", equipment.map((item) => item.EquipmentStandardDescription).filter(Boolean).join(", "))}
                 {renderField("Equipment standard ID", equipment.map((item) => item.EquipmentStandardId).filter(Boolean).join(", "))}
+                {/* V76 Section 126: shared links of the request's equipment. */}
+                <EquipmentAssociationBadges siteId={workRequest.SiteId} codes={workRequest.EquipmentCodes} />
               </>,
               <div>
                 <dt className="text-xs font-medium text-slate-500">Is installation</dt>

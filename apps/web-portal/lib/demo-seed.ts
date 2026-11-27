@@ -1,6 +1,6 @@
 import { CLASSICAL_TRADES, EquipmentStatusSchema, LocationFreezeSchema, MissionEventSchema, migrateLegacySiteIds, normalizeEquipmentStatus, normalizeSiteId } from "@cafm/shared-schema";
 import type { SiteId, SiteRoleAssignment, SiteRoleAssignmentTrade, LJRole, UserAccess } from "@cafm/shared-schema";
-import type { DemoData } from "./cafm-data";
+import type { DemoData, EquipmentAssociation } from "./cafm-data";
 import { section20Seed } from "./section20-seed";
 import { expandSeededWorkRequests } from "./expanded-seed";
 import { seedNestedPM } from "./nested-pm-seed";
@@ -179,6 +179,21 @@ export function seedData(): DemoData {
       { id: `${site}-leave-3`, siteId: site, craftpersonId: `S${site.slice(-2)}-C3`, absenceType: "Training" as const, startDate: "2026-11-11", endDate: "2026-11-11", isFullDay: false, startTime: "09:00", endTime: "13:00", unavailableHoursPerDay: 4, status: "Approved" as const, notes: "Safety training" },
     ]),
     ...seeded,
+    // V76 (Section 126): demo equipment associations. Side-links between
+    // EXISTING installations only: no new equipment rows, no code changes.
+    equipmentAssociations: sites.flatMap((site) => {
+      const find = (name: string) => seeded.equipment.find((item) => item.SiteId === site && item.IsInstallation && item.EquipmentName === name);
+      const link = (id: string, fromName: string, toName: string, kind: EquipmentAssociation["kind"], note: string): EquipmentAssociation | undefined => {
+        const from = find(fromName); const to = find(toName);
+        return from && to ? { id: `${site}-assoc-${id}`, siteId: site, fromCode: from.EquipmentCode, toCode: to.EquipmentCode, kind, note, createdBy: "Seed", createdAt: `${freezeToday}T08:00:00.000Z` } : undefined;
+      };
+      return [
+        link("1", "Site Installation", "Chiller #1", "serves", "Main chilled water and power distribution."),
+        link("2", "Site Installation", "Diesel Generator #1", "feeds", "Primary standby power feed."),
+        link("3", "Chiller #2", "Chiller #1", "backsup", "Duty/standby rotation."),
+        link("4", "Chiller #1", "Cleanroom AHU #1", "cools", "Cleanroom cooling coil circuit."),
+      ].filter((entry): entry is EquipmentAssociation => entry !== undefined);
+    }),
     auditCampaigns: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditCampaigns),
     auditFindings: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditFindings),
     auditInspections: sites.flatMap((site) => seedAssurance(site, seeded.equipment, seeded.workRequests).auditInspections),

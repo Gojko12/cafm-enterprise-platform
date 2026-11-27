@@ -227,9 +227,21 @@
 // equipment table now defaults to Local Equipment Code order (column
 // renamed from "Local Code"), so every installation sits together with
 // its subequipment and components; header-click sorting still overrides
-// it. (3) The ⚙ Filters dropdown moved next to the "N shown" counter
-// above the flat table, so it is always visible without scrolling right;
-// the tree and location views keep it in the toolbar.
+// it. (3) The ⚙ Filters dropdown moved to sit right after the view switcher
+// (Equipment Tree / Location Tree / Flat Table), before the search box, in
+// every view, so it stays at a fixed easy-to-find spot instead of drifting
+// to the far end of the toolbar.
 // MASTER_SPEC Section 125.
 
-export const PLATFORM_VERSION = "V75";
+// V76 (Section 126) equipment associations: a shared asset can now be
+// linked to several installations without touching the strict
+// parent-child hierarchy. The links live in a new side collection
+// (kind serves/feeds/cools/backsup plus an optional note) that persists
+// like the other blob collections. Managed from a card on the Hierarchy
+// tab of the equipment details; shown as badges in the FJ/PM/LJ work
+// request popups and as a new "Serves" column in the flat table. Demo
+// resets seed four example links per site. Rollback: revert the V76
+// commit and run scripts/supabase-v76-1-associations-rollback.sql.
+// MASTER_SPEC Section 126.
+
+export const PLATFORM_VERSION = "V76";

@@ -1,5 +1,6 @@
 "use client";
 import { FieldUpdateBadges } from "./FieldUpdateBadges";
+import { EquipmentAssociationBadges } from "./equipment/EquipmentAssociations";
 
 import React, { useEffect, useState } from "react";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "@cafm/shared-schema";
@@ -454,7 +455,9 @@ export function LJWorkRequestPopup({ workRequest, onClose, onNavigate, initialTa
             {field("Parent PM WR ID", workRequest.ParentPM_WR_ID ? <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.ParentPM_WR_ID!)}>{workRequest.ParentPM_WR_ID}</button> : "—")}
             {workRequest.OriginatingWR_ID && field("Originating QA WR ID", <button className="text-blue-700 underline" onClick={() => onNavigate(workRequest.OriginatingWR_ID!)}>{workRequest.OriginatingWR_ID}</button>)}
           </>)}
-          {group("Work Location & Equipment", <>{field("bl id", workRequest.bl_id)}{field("Level name", workRequest.LevelName)}{field("Room code", workRequest.RoomCode)}{field("Problem location", workRequest.ProblemLocation)}{field("Equipment", workRequest.EquipmentCodes.join(", "))}</>)}
+          {group("Work Location & Equipment", <>{field("bl id", workRequest.bl_id)}{field("Level name", workRequest.LevelName)}{field("Room code", workRequest.RoomCode)}{field("Problem location", workRequest.ProblemLocation)}{field("Equipment", workRequest.EquipmentCodes.join(", "))}
+            {/* V76 Section 126: shared links of the request's equipment. */}
+            <EquipmentAssociationBadges siteId={workRequest.SiteId} codes={workRequest.EquipmentCodes} /></>)}
           {group("Assigned Trade & ESA Roles", <>{roles.map((key) => <label key={key} className="text-sm">{ROLE_LABEL[key]} ({key})
             <select value={workRequest.AssignedRoles?.[key] ?? ""} onChange={(e) => changeAssignedRole(key, e.target.value)} className="mt-1 block w-full rounded border px-2 py-2">
               <option value="">Unassigned</option>{data.siteRoleAssignments.filter((assignment) =>

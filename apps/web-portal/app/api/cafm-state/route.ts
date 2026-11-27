@@ -239,6 +239,13 @@ const stateSchema = z.object({
   bimElementLinks: z.record(z.string(), z.object({
     equipmentCode: z.string().min(1), buildingId: z.string().min(1), updatedAt: z.string().min(1), updatedBy: z.string().min(1),
   })).optional(),
+  // V76 (Section 126): equipment side-links for shared assets. Must be
+  // declared here or every save with the new collection fails (V59 lesson).
+  equipmentAssociations: z.array(z.object({
+    id: z.string().min(1), siteId: z.string().min(1), fromCode: z.string().min(1), toCode: z.string().min(1),
+    kind: z.enum(["serves", "feeds", "cools", "backsup"]), note: z.string().optional(),
+    createdBy: z.string().min(1), createdAt: z.string().min(1),
+  })).optional(),
 }).strict().transform((state, context) => {
   try { return migrateFeatureMatrix(migrateWorkRequestIdsTo10Digits(migrateWorkRequestTargetKeys(migratePmState(state)))); }
   catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid blueprint family configuration." }); return z.NEVER; }
